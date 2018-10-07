@@ -2,9 +2,9 @@
 all: Evillaugh.wav Wilhelm_Scream.wav
 
 ### https://learn.adafruit.com/circuitpython-made-easy-on-circuit-playground-express/play-file
-### 22050 is maximum - remix is making this mon
+### 22050 is maximum - remix is making this mono
 %.wav: %.ogg
-	sox $< $@ rate 16000 # remix 1,2
+	sox $< -b 8 $@ rate 16000 # remix 1,2
 
 ### From https://en.wikipedia.org/wiki/File:Evillaugh.ogg
 Evillaugh.ogg:
