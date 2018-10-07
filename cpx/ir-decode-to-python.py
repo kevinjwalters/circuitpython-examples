@@ -5,6 +5,8 @@
 
 ### copy this file to CPX as main.py
 
+### MIT License
+
 ### Copyright (c) 2018 Kevin J. Walters
 
 ### Permission is hereby granted, free of charge, to any person obtaining a copy
