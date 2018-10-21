@@ -2,7 +2,7 @@
 ### Read analogue inputs on a Circuit Playground Express (CPX)
 ### Reads A0-A7 inputs and prints them to output
 
-### copy this file to CPX as main.py
+### copy this file to CPX as code.py
 
 ### MIT License
 
@@ -31,6 +31,7 @@ import time
 import board
 from analogio import AnalogIn
 
+### All eight pins on CPX board
 pins = [ AnalogIn(board.A0),
          AnalogIn(board.A1),
          AnalogIn(board.A2),
@@ -44,13 +45,17 @@ numpins = len(pins)
 refvoltage = pins[0].reference_voltage
 adcconvfactor = refvoltage / 65536
 
-def getVoltage(pin):  # helper
+### Convert value from pin.value to voltage
+def getVoltage(pin):
     return pin.value * adcconvfactor
 
 ### 1000 is about 2.4s per loop iteration for 7 pins on a CPX
 ### 370 is about 1s for 8 pins on CPX
 samples = 370
 
+### Print two relative timestamps in seconds plus an unweighted average of
+### many samples for each pin in python tuple style which can be read
+### directly graphed by the Mu editor - values are raw (0-65535)
 while True:
     total = [0] * numpins
     t1 = time.monotonic()
