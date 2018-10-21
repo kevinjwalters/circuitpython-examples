@@ -1,6 +1,6 @@
-### simple-analoguein v1.1
+### simple-analoguein v1.2
 ### Read analogue inputs on a Circuit Playground Express (CPX)
-### Reads A1-A7 inputs and prints them to output
+### Reads A0-A7 inputs and prints them to output
 
 ### copy this file to CPX as main.py
 
@@ -31,7 +31,8 @@ import time
 import board
 from analogio import AnalogIn
 
-pins = [ AnalogIn(board.A1),
+pins = [ AnalogIn(board.A0),
+         AnalogIn(board.A1),
          AnalogIn(board.A2),
          AnalogIn(board.A3),
          AnalogIn(board.A4),
@@ -40,24 +41,22 @@ pins = [ AnalogIn(board.A1),
          AnalogIn(board.A7) ]     
 
 numpins = len(pins)
-         
 refvoltage = pins[0].reference_voltage
 adcconvfactor = refvoltage / 65536
 
 def getVoltage(pin):  # helper
     return pin.value * adcconvfactor
 
-### 1000 is about 2.4s per loop iteration on a CPX
-samples = 1000
+### 1000 is about 2.4s per loop iteration for 7 pins on a CPX
+### 370 is about 1s for 8 pins on CPX
+samples = 370
 
 while True:
-    t1 = time.monotonic()
     total = [0] * numpins
+    t1 = time.monotonic()
     for repeat in range(samples):
         values = [pin.value for pin in pins]
         total = [sum(x) for x in zip(total, values)]
-    avgs = list(map(lambda x: x / samples, total))
     t2 = time.monotonic()
+    avgs = list(map(lambda x: x / samples, total))
     print("({:f},{:f},".format(t1,t2) + ",".join(str(avg) for avg in avgs) + ")")
-    ##print("Analog Voltage: %f" % getVoltage(analogin))
-    ##time.sleep(0.2)
