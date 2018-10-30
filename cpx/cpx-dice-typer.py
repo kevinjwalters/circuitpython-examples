@@ -138,9 +138,9 @@ while True:
     # Display status on NeoPixels
     if rolling:
         # Compute a random number from 1 to 6
-        roll_number = random.randrange(1,7)
+        roll_number = random.randrange(1, 6 + 1)
         # Make some noise and show the dice roll number
-        cpx.start_tone(random.randrange(400,2000))
+        cpx.start_tone(random.randrange(400, 2000))
         show_die(cpx.pixels, roll_number, dice_color)
         time.sleep(0.02)
         cpx.stop_tone()
