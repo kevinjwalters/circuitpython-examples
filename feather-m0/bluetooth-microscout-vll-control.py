@@ -1,4 +1,4 @@
-### bluetooth-microscout-vll-control v0.9
+### bluetooth-microscout-vll-control v1.0
 ### Bluetooth Remote Control for the Micro Scout from Lego(tm) Droid Developer Kit
 ### On an Adafruit Feather M0 Bluetooth LE board
 ### or a CircuitPython compatible board using the Adafruit Bluefruit LE SPI Friend
@@ -40,6 +40,8 @@ from digitalio import DigitalInOut, Direction
 from adafruit_bluefruitspi import BluefruitSPI
 
 ### Setup SPI bus and 3 control pins for Nordic nRF51822 based Raytec MDBT40
+### board.D8 is not defined on the basic CircuitPython hence the strange
+### need to use the adalogger variant
 spi_bus = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
 cs  = DigitalInOut(board.D8)
 irq = DigitalInOut(board.D7)
@@ -48,7 +50,6 @@ rst = DigitalInOut(board.D4)
 ### debug=True triggers bug
 ### see https://github.com/adafruit/Adafruit_CircuitPython_BluefruitSPI/issues/8
 bluefruit = BluefruitSPI(spi_bus, cs, irq, rst, debug=False)
-
 
 boardled = DigitalInOut(board.D6)
 ##boardled = DigitalInOut(board.D13)  ### small onboard red LED
@@ -71,7 +72,6 @@ MS_BEEP = const(4)
 PAUSE = 0.15
 
 ADVERT_NAME = b'BlueMicroScout'
-##ADVERT_NAME = b'BlinkaNeoLamp'
 
 ### Note: incompatibile with ZX Spectrum cursors
 BUTTON_1    = const(1)
@@ -130,15 +130,9 @@ def pause():
     boardled.value = True
     time.sleep(PAUSE)
 
-#led =  ev3.Led(name_pattern=LED_DEVICE)
 boardled.value = False
 
-#btn = ev3.Button()
-
 vllinit()
-#time.sleep(5)
-#print("sending MS_BEEP")
-#send(MS_BEEP)
 
 def init_bluefruit():
     # Initialize the device and perform a factory reset
@@ -176,7 +170,6 @@ def check_connection(n_sec):
 
 ### Note: read_packet looks a bit buggy
 ### see https://github.com/adafruit/Adafruit_CircuitPython_BluefruitSPI/issues/9
-
 
 ### Nabbed off MUNNY code which may have been inspired by library examples directory
 
@@ -219,17 +212,3 @@ while True:
     except RuntimeError as e:
         print(e)  # Print what happened
         continue  # retry!
-
-
-#pause()
-
-#while True:
-#    if btn.left:
-#        send(MS_REV)
-#        pause()
-#    elif btn.right:
-#        send(MS_FWD)
-#        pause()
-#    elif btn.up:
-#        send(MS_BEEP)
-#        pause()
