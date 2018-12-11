@@ -50,7 +50,8 @@ rst = DigitalInOut(board.D4)
 bluefruit = BluefruitSPI(spi_bus, cs, irq, rst, debug=False)
 
 
-boardled = DigitalInOut(board.D13)
+boardled = DigitalInOut(board.D6)
+##boardled = DigitalInOut(board.D13)  ### small onboard red LED
 boardled.direction = Direction.OUTPUT
 
 boardled.value = True
