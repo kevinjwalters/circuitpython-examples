@@ -1,8 +1,8 @@
-### bluetooth-microscout-vll-control v0.5
-### Bluetooth Remote Control for the Microscout from Lego(tm) Droid Developer Kit
+### bluetooth-microscout-vll-control v0.9
+### Bluetooth Remote Control for the Micro Scout from Lego(tm) Droid Developer Kit
 ### On an Adafruit Feather M0 Bluetooth LE board
 ### or a CircuitPython compatible board using the Adafruit Bluefruit LE SPI Friend
-### allows a Microscout block to be controlled
+### allows a Micro Scout block to be controlled
 ### using the Visible Light Link (VLL) protocol sent with D13 LED
 
 ### copy this file to Feather M0 as code.py
@@ -61,7 +61,7 @@ boardled.value = False
 def vllchksum(n):
     return 7-((n+(n>>2)+(n>>4))&7)
 
-### Lego Microscout commands
+### Lego Micro Scout commands
 ### Micropython's const() works only on integers
 MS_FWD  = const(0)
 MS_REV  = const(1)
@@ -70,7 +70,7 @@ MS_BEEP = const(4)
 
 PAUSE = 0.15
 
-ADVERT_NAME = b'BlueMicroscout'
+ADVERT_NAME = b'BlueMicroScout'
 ##ADVERT_NAME = b'BlinkaNeoLamp'
 
 ### Note: incompatibile with ZX Spectrum cursors
