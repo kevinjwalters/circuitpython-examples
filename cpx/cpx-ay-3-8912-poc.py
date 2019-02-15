@@ -1,4 +1,4 @@
-### cpx-ay-3-8912-poc v1.0
+### cpx-ay-3-8912-poc v1.1
 ### CircuitPython (on CPX) proof of concept code for AY-3-8910 sound chip
 ### Wiring
 ### A0 not used (wary of this with possible capacitance issues)
@@ -55,10 +55,13 @@ sr = adafruit_74hc595.ShiftRegister74HC595(spi, srlatchpin)
 ##sr.gpio = 0xff
 ##sr.gpio = 0x00
 
+### TODO - turn this into a library
+### TODO - look into MIDI over USB or over RX pin (I'm using TX!!)
+### TODO - check behaviour/response of A0 to see if it's usable with speaker disabled
+### TODO - look at manual envelope and modulation
 
-### Using A6 for now - be wary of A0 as may have extra capacitance
+### Using A3 for now - be wary of A0 as may have extra capacitance
 twomeg = const(2*1000*1000)
-
 clock2meg = pulseio.PWMOut(board.A3, duty_cycle=2**15, frequency=twomeg)
 
 ### BC2 does not need control, it's wired high
@@ -121,7 +124,7 @@ writePSG(10, 0x08, sr, a1BDIRandBC1, a2BDIRonly)  ### C half vol
 ### A3, A4, A5 for now
 #notes=[int((2e6/(16*x))+0.5) for x in [220,440,880]]
 
-### A4 - B6 in semitones
+### A4 - B5 in semitones
 ### 284 to 75 (how can this do high accurate notes??)
 notes = [int(twomeg / (16 * (440 * math.pow(2,x/12.0)))+0.5) for x in range(24)]
 
@@ -140,5 +143,45 @@ for i in range(10):
         time.sleep(0.25)
 
 ### clear the sixteen registers (R0 to R15)
+for regidx in range(16):
+    writePSG(regidx, 0, sr, a1BDIRandBC1, a2BDIRonly) 
+
+time.sleep(3)   
+
+writePSG(7,  0xfe, sr, a1BDIRandBC1, a2BDIRonly)  ### Tone A enable, rest disable
+writePSG(8,  0x00, sr, a1BDIRandBC1, a2BDIRonly)  ### A silent for now
+
+### Midi notes going beyond the A0-C8 (21-108) range
+### 60 is C4 (middle C)
+### 69 is A4 (440 Hz)
+midinotes = [int(twomeg / (16 * (440 * math.pow(2,x/12.0)))+0.5) for x in range(-69,59)]
+
+bpm = 90
+notegap = 0.05
+barlength = 60 / bpm * 4
+
+### 1977 tune for a 1978 chip
+tune1 = [(69, 10, 0.25),  ### tone,
+         (71, 12, 0.25),  ### up a full tone,
+         (67, 10, 0.25),  ### down a major third,
+         (55, 11, 0.25),  ### now drop an octave,
+         (62, 10, 1.25),  ### up a perfect fifth.
+         ( 0,  0, 0.75)   ### (rest)
+        ]
+
+### Loop currently ignores overheard of code and bus writes with the musical timing
+### Needs a bit of work to get it to the ARP 2500 standard
+for i in range(4):
+    for (noteidx, volume, length) in tune1:
+        writePSG(0, midinotes[noteidx] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(1, midinotes[noteidx] >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(8, volume, sr, a1BDIRandBC1, a2BDIRonly)
+        noteontime = length * barlength - notegap
+        time.sleep(noteontime)
+        writePSG(8, 0, sr, a1BDIRandBC1, a2BDIRonly)
+        time.sleep(notegap)
+
+### clear the sixteen registers
+### registers 0 to 15, original data sheet calls these R0-R7 R10-R15 (no R8/R9!)
 for regidx in range(16):
     writePSG(regidx, 0, sr, a1BDIRandBC1, a2BDIRonly) 
