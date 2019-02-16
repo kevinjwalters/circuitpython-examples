@@ -1,4 +1,4 @@
-### cpx-ay-3-8912-poc v1.1
+### cpx-ay-3-8912-poc v1.2
 ### CircuitPython (on CPX) proof of concept code for AY-3-8910 sound chip
 ### Wiring
 ### A0 not used (wary of this with possible capacitance issues)
@@ -148,13 +148,15 @@ for regidx in range(16):
 
 time.sleep(3)   
 
-writePSG(7,  0xfe, sr, a1BDIRandBC1, a2BDIRonly)  ### Tone A enable, rest disable
+writePSG(7,  0xf8, sr, a1BDIRandBC1, a2BDIRonly)  ### Tone C,B,A enable, rest disable
 writePSG(8,  0x00, sr, a1BDIRandBC1, a2BDIRonly)  ### A silent for now
+writePSG(9,  0x00, sr, a1BDIRandBC1, a2BDIRonly)  ### B silent for now
+writePSG(9,  0x00, sr, a1BDIRandBC1, a2BDIRonly)  ### C silent for now
 
 ### Midi notes going beyond the A0-C8 (21-108) range
 ### 60 is C4 (middle C)
 ### 69 is A4 (440 Hz)
-midinotes = [int(twomeg / (16 * (440 * math.pow(2,x/12.0)))+0.5) for x in range(-69,59)]
+midinotes = [round(twomeg / (16 * (440 * math.pow(2,x / 12.0)))) for x in range(-69,59)]
 
 bpm = 90
 notegap = 0.05
@@ -171,14 +173,24 @@ tune1 = [(69, 10, 0.25),  ### tone,
 
 ### Loop currently ignores overheard of code and bus writes with the musical timing
 ### Needs a bit of work to get it to the ARP 2500 standard
+### B is slightly detuned from A - subtraction is crude/wrong but sounds ok
+### C is up an octave but a little quieter
 for i in range(4):
     for (noteidx, volume, length) in tune1:
         writePSG(0, midinotes[noteidx] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
         writePSG(1, midinotes[noteidx] >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(2, (midinotes[noteidx] - 1) & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(3, (midinotes[noteidx] - 1) >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(4, midinotes[noteidx + 12] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(5, midinotes[noteidx + 12] >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
         writePSG(8, volume, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(9, volume, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(10, round(volume/1.3), sr, a1BDIRandBC1, a2BDIRonly)
         noteontime = length * barlength - notegap
         time.sleep(noteontime)
         writePSG(8, 0, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(9, 0, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(10, 0, sr, a1BDIRandBC1, a2BDIRonly)
         time.sleep(notegap)
 
 ### clear the sixteen registers
