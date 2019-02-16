@@ -151,7 +151,7 @@ time.sleep(3)
 writePSG(7,  0xf8, sr, a1BDIRandBC1, a2BDIRonly)  ### Tone C,B,A enable, rest disable
 writePSG(8,  0x00, sr, a1BDIRandBC1, a2BDIRonly)  ### A silent for now
 writePSG(9,  0x00, sr, a1BDIRandBC1, a2BDIRonly)  ### B silent for now
-writePSG(9,  0x00, sr, a1BDIRandBC1, a2BDIRonly)  ### C silent for now
+writePSG(10,  0x00, sr, a1BDIRandBC1, a2BDIRonly) ### C silent for now
 
 ### Midi notes going beyond the A0-C8 (21-108) range
 ### 60 is C4 (middle C)
