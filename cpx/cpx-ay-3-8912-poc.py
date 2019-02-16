@@ -1,4 +1,4 @@
-### cpx-ay-3-8912-poc v1.2
+### cpx-ay-3-8912-poc v1.3
 ### CircuitPython (on CPX) proof of concept code for AY-3-8910 sound chip
 ### Wiring
 ### A0 not used (wary of this with possible capacitance issues)
@@ -163,37 +163,58 @@ notegap = 0.05
 barlength = 60 / bpm * 4
 
 ### 1977 tune for a 1978 chip
-tune1 = [(69, 10, 0.25),  ### tone,
-         (71, 12, 0.25),  ### up a full tone,
-         (67, 10, 0.25),  ### down a major third,
-         (55, 11, 0.25),  ### now drop an octave,
-         (62, 10, 1.25),  ### up a perfect fifth.
-         ( 0,  0, 0.75)   ### (rest)
+tune1 = [(69, 10, 0.25,   0),  ### tone,
+         (71, 12, 0.25,   0),  ### up a full tone,
+         (67, 10, 0.25,   0),  ### down a major third,
+         (55, 11, 0.25,   0),  ### now drop an octave,
+         (62, 10, 1.25, -12),  ### up a perfect fifth.
+         ( 0,  0, 0.75,   0)   ### (rest, wait for arrival)
         ]
+
+### Envelope generator uses a divide by 256 counter
+EGenable = 0x10
+### temp trebbling
+EGtime = round(0.1 * (twomeg / 256))   ### 100ms rise time
+### Continue, Alternate, Attack, Hold
+EGmode = 0b1101   ### CAAH 
+writePSG(11, EGtime & 0xff, sr, a1BDIRandBC1, a2BDIRonly)  ### EG timer low
+writePSG(12, EGtime >> 8  , sr, a1BDIRandBC1, a2BDIRonly)  ### EG timer high
+writePSG(13, EGmode, sr, a1BDIRandBC1, a2BDIRonly)
 
 ### Loop currently ignores overheard of code and bus writes with the musical timing
 ### Needs a bit of work to get it to the ARP 2500 standard
 ### B is slightly detuned from A - subtraction is crude/wrong but sounds ok
-### C is up an octave but a little quieter
+### C is being used for chords/unison and is a little quieter if not using EG
 for i in range(4):
-    for (noteidx, volume, length) in tune1:
+    for (noteidx, volume, length, subosc) in tune1:
+        ### TODO review low/high order if volume != 0
+        
+        ### Trying this here to see if this is what triggers (starts) envelope
+        if volume > 0:
+            writePSG(13, EGmode, sr, a1BDIRandBC1, a2BDIRonly)
+        
         writePSG(0, midinotes[noteidx] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
         writePSG(1, midinotes[noteidx] >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
         writePSG(2, (midinotes[noteidx] - 1) & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
         writePSG(3, (midinotes[noteidx] - 1) >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
-        writePSG(4, midinotes[noteidx + 12] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
-        writePSG(5, midinotes[noteidx + 12] >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
-        writePSG(8, volume, sr, a1BDIRandBC1, a2BDIRonly)
-        writePSG(9, volume, sr, a1BDIRandBC1, a2BDIRonly)
-        writePSG(10, round(volume/1.3), sr, a1BDIRandBC1, a2BDIRonly)
+        if subosc != 0:
+            writePSG(4, midinotes[noteidx + subosc] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
+            writePSG(5, midinotes[noteidx + subosc] >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
+        ### volume appear to have no effect if EG is used - bit of a shame
+        EGonoff = EGenable if volume > 0 else 0
+        writePSG(8, volume | EGonoff, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(9, volume | EGonoff, sr, a1BDIRandBC1, a2BDIRonly)
+        if subosc != 0:
+            writePSG(10, round(volume/1.3) | EGonoff, sr, a1BDIRandBC1, a2BDIRonly)
         noteontime = length * barlength - notegap
         time.sleep(noteontime)
         writePSG(8, 0, sr, a1BDIRandBC1, a2BDIRonly)
         writePSG(9, 0, sr, a1BDIRandBC1, a2BDIRonly)
-        writePSG(10, 0, sr, a1BDIRandBC1, a2BDIRonly)
+        if subosc != 0:
+            writePSG(10, 0, sr, a1BDIRandBC1, a2BDIRonly)
         time.sleep(notegap)
 
 ### clear the sixteen registers
-### registers 0 to 15, original data sheet calls these R0-R7 R10-R15 (no R8/R9!)
+### registers 0 to 15, original data sheet calls these R0-R7 R10-R15 (no R8/R9, octal!)
 for regidx in range(16):
     writePSG(regidx, 0, sr, a1BDIRandBC1, a2BDIRonly) 
