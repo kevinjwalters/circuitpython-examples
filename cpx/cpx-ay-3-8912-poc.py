@@ -129,7 +129,7 @@ writePSG(10, 0x08, sr, a1BDIRandBC1, a2BDIRonly)  ### C half vol
 notes = [int(twomeg / (16 * (440 * math.pow(2,x/12.0)))+0.5) for x in range(24)]
 
 ### play some major chords
-for i in range(10):
+for i in range(4):
     for noteidx in [0,4,7]:
         writePSG(0, notes[noteidx] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
         writePSG(1, notes[noteidx] >> 8, sr, a1BDIRandBC1, a2BDIRonly)
@@ -185,7 +185,7 @@ writePSG(13, EGmode, sr, a1BDIRandBC1, a2BDIRonly)
 ### Needs a bit of work to get it to the ARP 2500 standard
 ### B is slightly detuned from A - subtraction is crude/wrong but sounds ok
 ### C is being used for chords/unison and is a little quieter if not using EG
-for i in range(4):
+for i in range(2):
     for (noteidx, volume, length, subosc) in tune1:
         ### TODO review low/high order if volume != 0
         
@@ -218,3 +218,69 @@ for i in range(4):
 ### registers 0 to 15, original data sheet calls these R0-R7 R10-R15 (no R8/R9, octal!)
 for regidx in range(16):
     writePSG(regidx, 0, sr, a1BDIRandBC1, a2BDIRonly) 
+
+### Attempt at a manually created simple envelope
+### Needs a bit of work to get it to the ARP 2500 standard
+### B is slightly detuned from A - subtraction is crude/wrong but sounds ok
+### C is being used for chords/unison at slightly lower volume
+for i in range(6):
+    for (noteidx, volume, length, subosc) in tune1:      
+        writePSG(0, midinotes[noteidx] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(1, midinotes[noteidx] >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(2, (midinotes[noteidx] - 1) & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
+        writePSG(3, (midinotes[noteidx] - 1) >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
+        if subosc != 0:
+            writePSG(4, midinotes[noteidx + subosc] & 0xff, sr, a1BDIRandBC1, a2BDIRonly)
+            writePSG(5, midinotes[noteidx + subosc] >> 8,   sr, a1BDIRandBC1, a2BDIRonly)
+ 
+        lastvol = 0
+        start = time.monotonic()
+        relt_topofA   = 0.1
+        ### rates are per second
+        attackrate = volume / 0.1 
+        decayrate  = -3   ### full decay from max in 5 seconds
+        relt_noteoff = length * barlength - relt_topofA - notegap
+        reltime = 0.0
+        ### Attack
+        while reltime <= relt_topofA:
+            reltime = time.monotonic() - start
+            envvol = round(reltime * attackrate)
+            if envvol != lastvol:
+                writePSG(8, envvol, sr, a1BDIRandBC1, a2BDIRonly)
+                writePSG(9, envvol, sr, a1BDIRandBC1, a2BDIRonly)
+                if subosc != 0:
+                    writePSG(10, round(envvol/1.3), sr, a1BDIRandBC1, a2BDIRonly)
+                lastvol = envvol
+
+        ### TODO - compensate for small amount of lost time?
+        ### Decay
+        decaystart = time.monotonic()
+        reltime = 0.0
+        while reltime <= relt_noteoff:
+            reltime = time.monotonic() - decaystart
+            envvol = round(volume + (reltime * decayrate))
+            if envvol != lastvol:
+                writePSG(8, envvol, sr, a1BDIRandBC1, a2BDIRonly)
+                writePSG(9, envvol, sr, a1BDIRandBC1, a2BDIRonly)
+                if subosc != 0:
+                    writePSG(10, round(envvol/1.3), sr, a1BDIRandBC1, a2BDIRonly)
+                lastvol = envvol
+
+        ### Silence
+        if envvol != 0:
+            writePSG(8, 0, sr, a1BDIRandBC1, a2BDIRonly)
+            writePSG(9, 0, sr, a1BDIRandBC1, a2BDIRonly)
+            if subosc != 0:
+                writePSG(10, 0, sr, a1BDIRandBC1, a2BDIRonly)
+        time.sleep(notegap)
+        
+### clear the sixteen registers
+### registers 0 to 15, original data sheet calls these R0-R7 R10-R15 (no R8/R9, octal!)
+for regidx in range(16):
+    writePSG(regidx, 0, sr, a1BDIRandBC1, a2BDIRonly) 
+
+        
+    
+    
+    
+    
