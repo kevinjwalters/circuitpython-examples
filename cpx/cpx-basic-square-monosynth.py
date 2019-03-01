@@ -1,4 +1,4 @@
-### cpx-basic-square-monosynth v1.0
+### cpx-basic-square-monosynth v1.1
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Wiring
 ### A0  EG2 
@@ -59,7 +59,11 @@ osc2   = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_freq
 ### 0 is MIDI channel 1
 midi = adafruit_midi.MIDI(in_channel=0)
 
-veltovol = int(65535 / 127)
+#veltovol = int(65535 / 127)
+### Multiplier for MIDI velocity ^ 0.40
+### 0.5 would be correct for velocity = power
+### but 0.4 sounds more natural - ymmv
+veltovolc040 = 9439
 
 # Commenting out debug as I just got a Memory Error linked with code size :(
 # TODO - look into mpy vs py saving and generation
@@ -68,20 +72,19 @@ lastnote = 0
 
 while True:
     msg = midi.read_in_port()
-    if isinstance(msg, adafruit_midi.NoteOn):
+    if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
 #        if debug:
 #            print("NoteOn", msg.note, msg.vel)
-
-# TODO - handle vel == 0 same as NoteOff with same lastnote logic
         lastnote = msg.note
         basefreq = round(A4refhz * math.pow(2,(lastnote - midinoteA4) / 12.0))
         osc1.frequency = basefreq
         osc2.frequency = basefreq + 1
-        envvol = msg.vel * veltovol
+        envvol = round(math.pow(msg.vel, 0.40) * veltovolc040)
         ### TODO - volume match these
         eg1pwm.duty_cycle = envvol
         eg2dac.value = envvol
-    elif isinstance(msg, adafruit_midi.NoteOff):
+    elif (isinstance(msg, adafruit_midi.NoteOff) or 
+          isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
 #        if debug:
 #            print("NoteOff", msg.note, msg.vel)
         # Our monophonic "synth module" needs to ignore keys that lifted on
