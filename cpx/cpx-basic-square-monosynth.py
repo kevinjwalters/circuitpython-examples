@@ -1,6 +1,7 @@
-### cpx-basic-square-monosynth v1.2
+### cpx-basic-square-monosynth v1.3
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Monophonic velocity sensitive synth with pitch bend and mod wheel
+### and Attack / Release control
 ### Wiring
 ### A0  EG2 
 ### A1  OSC1 
@@ -85,27 +86,55 @@ keyrelease_t = 0.0
 ### TODO - Take out parameters (cc control them?)
 ### Returns an ADSR's velocity as a float which is <= velocity
 ### and if 0.0 indicates end of envelope
-def ADSR(velocity, trigger_t, release_t, current_t):
-    t_attack = current_t - trigger_t
-    if (t_attack < 0.200):
-        velocity_attack = velocity * t_attack / 0.200
+### release_t should be 0.0 until it happens
+### attack is seconds
+### release is seconds
+def ADSR(velocity, trigger_t, release_t, current_t,
+         attack, decay, sustain, release):
+    vol = velocity
+    rel_t = current_t - trigger_t
+    if (rel_t < attack):
+        ### Attack phase
+        vol_attack = vol * rel_t / attack
         ### bit of a fudge to stop attack starting at 0.0
-        if velocity_attack > 1.0:
-            return velocity_attack
+        if vol_attack > 1.0:
+            return vol_attack
         else:
             return 1.0
-    
+
+    ### Decay/Sustain phase
+    if decay != 0.0 and sustain != 1.0:
+        sus_t = rel_t - attack
+        ### Calculate a new vol level
+        if sus_t < decay:
+            vol = vol - sus_t / decay * (1.0 - sustain) * vol
+        else:
+            vol = vol * sustain
+
     if release_t == 0.0:
-        return velocity  ### no decay yet
+        return vol
     else:
-        releasevol = velocity - velocity * ((current_t - release_t) / 2.000)
+        ### Release phase
+        if release == 0.0:
+            return 0.0  ### no release and need to prevent div by zero
+        releasevol = vol - vol * ((current_t - release_t) / release)
         if releasevol > 0.0:
             return releasevol
         else:
             return 0.0
 
+attack  = 0.200
+release = 2.000
+decay = 0.4
+sustain = 0.6  ### 60% level
 
-while True:    
+maxattack = 2.000
+maxrelease = 6.000
+maxsustain = 1.0
+maxdecay = 2.000
+
+
+while True:
     msg = midi.read_in_port()
     if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
 #        if debug:
@@ -144,9 +173,19 @@ while True:
             newdutycycle = round(32768 + msg.value * 24000 / 127)
             osc1.duty_cycle = newdutycycle
             osc2.duty_cycle = newdutycycle
-
+        elif msg.control == 73:  # attack - TODO MOVE THIS TO adafruit_midi
+            attack = maxattack * msg.value / 127
+        elif msg.control == 72:  # release - TODO MOVE THIS TO adafruit_midi
+            release = maxrelease * msg.value / 127
+        elif msg.control == 5:   # portamento level borrowed for decay for now
+            decay = maxdecay * msg.value / 127
+        elif msg.control == 84:  # what is this? using for sustain level
+            sustain = maxsustain * msg.value / 127
+            
     if keyvelocity > 0:
-        ADSRvel = ADSR(keyvelocity, keytrigger_t, keyrelease_t, time.monotonic())
+        ADSRvel = ADSR(keyvelocity,
+                       keytrigger_t, keyrelease_t, time.monotonic(),
+                       attack, decay, sustain, release)
         envampl = round(math.pow(ADSRvel, velcurve) * veltovolc040)
         ### TODO - volume match these
         eg1pwm.duty_cycle = envampl
