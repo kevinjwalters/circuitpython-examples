@@ -1,4 +1,4 @@
-### cpx-basic-square-monosynth v1.0
+### cpx-basic-square-monosynth v1.1
 ### CircuitPython (on CPX) synth module using internal speaker
 ### Monophonic synth with some velocity sensitivity and a few
 ### different waveforms
@@ -40,6 +40,10 @@ import digitalio
 import audioio
 import board
 
+import neopixel
+ 
+
+
 import adafruit_midi
 
 ### TODO - add control over this
@@ -50,12 +54,49 @@ speaker_enable.value = True
 
 dac = audioio.AudioOut(board.SPEAKER)
 
-A4refhz = 440
-midinoteA4 = 69
+### TO RESEARCH - is const more memory efficient?
+A4refhz = const(440)
+midinoteA4 = const(69)
+midinoteC4 = const(60)
 basesamplerate = 48000  ### this makes A4 is 109.0909 samples
 
 wavename = "square"
 wavenames = ["square", "sawtooth", "supersaw", "sine", "sineoct2", "sinefifth", "majorchord"]
+
+
+### brightness 1.0 saves memory by removing need for a second buffer
+### 10 is number of NeoPixels on 
+numpixels = const(10)
+pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
+black = (0, 0, 0)
+pixels.fill(black)
+
+### Turn NeoPixel on to represent a note using RGB x 10 
+### to represent 30 notes
+### Doesn't do anything with pitch bend
+def noteled(pixels, note, velocity):
+    note30 = ( note - midinoteC4 ) % (3 * numpixels)
+    pos = note30 % numpixels
+    if velocity == 0:
+        colour = black
+    else:
+        ### max brightness will be 32    
+        colour = round(velocity / 127 * 30 + 2) << ((2 - note30 // numpixels) * 8)
+    pixels[pos] = colour
+
+### white pulsing for whatever patch we just selected
+flashbrightness = 20
+def flashpatch(pixels, patchnum):
+    pos = patchnum % numpixels
+    t1 = time.monotonic()
+    oldcolour = pixels[pos]
+    while time.monotonic() - t1 < 0.25:
+        for i in range(0, flashbrightness, 2):
+            pixels[pos] = (i, i, i)
+        for i in range(flashbrightness, 0, -2):
+            pixels[pos] = (i, i, i)
+    pixels[pos] = oldcolour
+        
 
 ### TODO - improve commenting
 
@@ -150,10 +191,13 @@ pitchbendvalue = 8192  # mid point - no bend
 
 debug = False
 
+
+lastnote = None
 modwheel = 0
 
 waves = []
 makewaves(waves, wavename, basesamplerate)
+
 
 while True:
     msg = midi.read_in_port()
@@ -169,15 +213,13 @@ while True:
         ### Select the sine wave with volume for the note velocity
         ### 11.3 is a touch bigger than the square root of 127
         wavevol = int(math.sqrt(msg.vel) / 11.3 * len(waves))
-        print(msg.note, notefreq, notesamplerate, ":", msg.vel, wavevol, len(waves))
+        ##print(msg.note, notefreq, notesamplerate, ":", msg.vel, wavevol, len(waves))
         wave = waves[wavevol]
 
         wave.sample_rate = round(notesamplerate)  ### integer only
         dac.play(wave, loop=True)
 
-        keyvelocity = msg.vel
-        keytrigger_t = time.monotonic()
-        keyrelease_t = 0.0
+        noteled(pixels, msg.note, msg.vel)
 
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
           isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
@@ -187,7 +229,9 @@ while True:
         # overlapping presses
         if msg.note == lastnote:
             dac.stop()
-            
+                
+        noteled(pixels, msg.note, 0)
+        
 #    elif msg is not None:
 #        if debug:
 #            print("Something else:", msg)
@@ -201,6 +245,8 @@ while True:
 
         ### TODO - BUG - this must only play if already playing   
         notesamplerate = basesamplerate * notefreq / A4refhz 
+        ### TODO - review whether there's an advantage to not assigning here
+        ### if value would be the same as previously set value
         wave.sample_rate = round(notesamplerate)  ### integer only
         dac.play(wave, loop=True)
         
@@ -214,7 +260,9 @@ while True:
 
         elif msg.control == 74:  # filter cutoff - borrowing to switch voices
             print("filter", msg.value)
-            newwave = wavenames[msg.value // 10 % len(wavenames)]
+            waveidx = msg.value // 5 % len(wavenames)
+            newwave = wavenames[waveidx]
+            flashpatch(pixels, waveidx)
             if newwave != wavename:
                 print("changing from", wavename, "to", newwave)
                 wavename = newwave
