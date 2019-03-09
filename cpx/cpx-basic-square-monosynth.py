@@ -1,9 +1,9 @@
-### cpx-basic-square-monosynth v1.4
+### cpx-basic-square-monosynth v1.5
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Monophonic velocity sensitive synth with pitch bend and mod wheel
 ### and Attack / Release control
 ### Wiring
-### A0  ...?
+### A0  ANA1
 ### A1  OSC1 
 ### A2  EG1 
 ### A3  EG2
@@ -41,12 +41,15 @@
 
 import time
 import math
+import random
+import array
 
 import board
 import analogio
 import pulseio
 #from adafruit_midi import NoteOn, NoteOff
 import adafruit_midi
+import audioio
 
 A4refhz = 440
 midinoteA4 = 69
@@ -67,7 +70,7 @@ def twomegfixedpwm(pin):
             break
         except Exception as e:
             ### A guess that timing could be a factor
-            time.sleep(attempt / 200)
+            time.sleep(attempt / 234)
     return pwm
 
 ### Attempt at a workaround for the unpredictable current behaviour of PWMOut()
@@ -90,14 +93,15 @@ if eg1pwm is None or eg2pwm is None:
     eg1pwm = twomegfixedpwm(board.A2)
 
 if eg1pwm is None or eg2pwm is None:
-    print("Shared couter PWM failure II - just retry until it works")
+    print("Shared couter PWM failure II - soft/hard reset suggested")
 else:
     print("High frequency shared counter PWM initialised ok")
     
 osc1 = pulseio.PWMOut(board.A1, duty_cycle=2**15, frequency=440, variable_frequency=True)
 osc2 = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_frequency=True)
 
-dac = analogio.AnalogOut(board.A0)
+#dac = analogio.AnalogOut(board.A0)
+dac = audioio.AudioOut(board.A0)
 
 ### 0 is MIDI channel 1
 midi = adafruit_midi.MIDI(in_channel=0)
@@ -172,6 +176,24 @@ maxrelease = 6.000
 maxsustain = 1.0
 maxdecay = 2.000
 
+### TODO - experimental
+### a short burst of fading noise designed to play at 8000 at start of play
+### These eventually spits a memory error with 1000
+dacmidpoint = 32768
+samplerate = 8000
+sampleraw = array.array("h", [0] * 600)
+for i in range(1,len(sampleraw) - 1):
+    sampleraw[i] = round(random.randint(-20000,20000 + 1) *
+                         (len(sampleraw) - (abs(i - len(sampleraw) // 2) * 2)) /
+                         len(sampleraw))
+sampleraw[0]    = dacmidpoint
+sampleraw[len(sampleraw) - 1] = dacmidpoint
+sample = audioio.RawSample(sampleraw, sample_rate=samplerate)
+del sampleraw
+
+triggertransient = False
+
+print("Ready to play")
 
 while True:
     msg = midi.read_in_port()
@@ -187,6 +209,7 @@ while True:
         keyvelocity = msg.vel
         keytrigger_t = time.monotonic()
         keyrelease_t = 0.0
+        triggertransient = True
 
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
           isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
@@ -228,5 +251,8 @@ while True:
         envampl = round(math.pow(ADSRvel, velcurve) * veltovolc040)
         eg1pwm.duty_cycle = envampl
         eg2pwm.duty_cycle = envampl
+        if triggertransient:
+            dac.play(sample)
+            triggertransient = False
         if ADSRvel == 0.0:            
             keyvelocity = 0  ### end of note playing
