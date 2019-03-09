@@ -1,4 +1,4 @@
-### cpx-basic-square-monosynth v1.1
+### cpx-basic-square-monosynth v1.2
 ### CircuitPython (on CPX) synth module using internal speaker
 ### Monophonic synth with some velocity sensitivity and a few
 ### different waveforms
@@ -168,7 +168,7 @@ def makewaves(waves, type, samplerate):
                 waveraw[i] = round((math.sin(math.pi * 2 * i / cyclelength) +
                                     math.sin(math.pi * 2 * i / cyclelength * 5/4) +
                                     math.sin(math.pi * 2 * i / cyclelength * 6/4)
-                                   ) * vol / 3)
+                                   ) * vol / 2.5)
         else:
             return ValueError("Unknown type")
 
