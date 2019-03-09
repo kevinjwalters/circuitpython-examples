@@ -58,10 +58,12 @@ dac = audioio.AudioOut(board.SPEAKER)
 A4refhz = const(440)
 midinoteA4 = const(69)
 midinoteC4 = const(60)
-basesamplerate = 48000  ### this makes A4 is 109.0909 samples
+basesamplerate = 42240  ### this makes A4 exactly 96 samples
 
 wavename = "square"
-wavenames = ["square", "sawtooth", "supersaw", "sine", "sineoct2", "sinefifth", "majorchord"]
+wavenames = ["square", 
+             "sawtooth", "supersaw", "supersupersaw", 
+             "sine", "sineoct2", "sinefifth", "sinemajorchord"]
 
 
 ### brightness 1.0 saves memory by removing need for a second buffer
@@ -104,6 +106,9 @@ def flashpatch(pixels, patchnum):
 ### https://forums.adafruit.com/viewtopic.php?f=60&t=148191
 
 ### All just intonation
+### TODO - consider putting in some 32768 values on square and sawtooths
+###        to make them finish on midpoint and remove any under
+###        the covers slewing 
 def makewaves(waves, type, samplerate):
     cyclelength = round(samplerate // A4refhz)
     length = cyclelength  ### a default which some waves will change
@@ -133,7 +138,6 @@ def makewaves(waves, type, samplerate):
                 waveraw[i] = round((i / (length - 1) - 0.5) * 2 * vol)
         elif type == "supersaw":
             waveraw = array.array("h", [0] * length)
-            ### TODO add two 5ths
             halflength    = length // 2
             quarterlength = length // 4
             for i in range(length):
@@ -142,6 +146,28 @@ def makewaves(waves, type, samplerate):
                                      i % halflength / (halflength - 1) - 0.5 +
                                      i % quarterlength / (quarterlength - 1) - 0.5)
                                    ) * 2 / 3 * vol)
+        elif type == "supersupersaw":
+            cycles = 2
+            length = cycles * cyclelength
+            waveraw = array.array("h", [0] * length)
+            ### TODO add two 5ths
+            twothirdsclen = 2 * cyclelength // 3
+            halfclen    = cyclelength // 2
+            thirdclen   = cyclelength // 3
+            quarterclen = cyclelength // 4
+            sixthclen   = cyclelength // 6
+            eighthlen   = cyclelength // 8
+            for i in range(length):
+                ### TODO replace this with a gen function similar to sine
+                waveraw[i] = round((
+                                    2/8 * (i                 / (cyclelength - 1) - 0.5) +
+                                    1/8 * (i % twothirdsclen / (twothirdsclen - 1) - 0.5) +
+                                    1/8 * (i % halfclen      / (halfclen - 1) - 0.5) +
+                                    1/8 * (i % thirdclen     / (thirdclen - 1) - 0.5) +
+                                    1/8 * (i % quarterclen   / (quarterclen - 1) - 0.5) + 
+                                    1/8 * (i % sixthclen     / (sixthclen - 1) - 0.5) +
+                                    1/8 * (i % eighthlen     / (eighthlen - 1) - 0.5)
+                                   ) * 2 * vol)
         elif type == "sine":
             waveraw = array.array("h", [0] * length)
             for i in range(length):
@@ -160,7 +186,7 @@ def makewaves(waves, type, samplerate):
                 waveraw[i] = round((math.sin(math.pi * 2 * i / cyclelength) +
                                     math.sin(math.pi * 2 * i / cyclelength * 3/2)
                                    ) * vol / 2)
-        elif type == "majorchord":
+        elif type == "sinemajorchord":
             cycles = 4
             length = cycles * cyclelength
             waveraw = array.array("h", [0] * length)
