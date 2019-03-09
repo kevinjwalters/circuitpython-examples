@@ -1,11 +1,12 @@
-### cpx-basic-square-monosynth v1.3
+### cpx-basic-square-monosynth v1.4
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Monophonic velocity sensitive synth with pitch bend and mod wheel
 ### and Attack / Release control
 ### Wiring
-### A0  EG2 
+### A0  ...?
 ### A1  OSC1 
-### A3  EG1
+### A2  EG1 
+### A3  EG2
 ### A6  OSC2 
 ### GND and 3V3 to power external board
 
@@ -51,14 +52,52 @@ A4refhz = 440
 midinoteA4 = 69
 
 ### Setup oscillators which are variable frequency square waves
-### And envelopes, one of which is a DAC and the other is a pwm output
+### And envelopes which are high frequency pwm outputs
 ### Capacitors on the external board smooth envelope pwm output
 ### and limit rate of change and smooth envelope voltage
-eg1pwm = pulseio.PWMOut(board.A3, duty_cycle=0, frequency=2*1000*1000, variable_frequency=False)
-osc1 = pulseio.PWMOut(board.A1, duty_cycle=2**15, frequency=440, variable_frequency=True)
+eg1pwm = None
+eg2pwm = None
 
-eg2dac = analogio.AnalogOut(board.A0)
-osc2   = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_frequency=True)
+def twomegfixedpwm(pin):
+    pwm = None
+    for attempt in range(40):
+        try:
+            pwm = pulseio.PWMOut(pin, duty_cycle=0,
+                                 frequency=2*1000*1000, variable_frequency=False)
+            break
+        except Exception as e:
+            ### A guess that timing could be a factor
+            time.sleep(attempt / 200)
+    return pwm
+
+### Attempt at a workaround for the unpredictable current behaviour of PWMOut()
+### with under-the-covers shared counters
+### https://forums.adafruit.com/viewtopic.php?f=60&t=148017
+### https://github.com/adafruit/circuitpython/issues/1626
+eg1pwm = twomegfixedpwm(board.A2)
+eg2pwm = twomegfixedpwm(board.A3)
+
+### If anything failed, clean up then try in reverse order as workaround for #1626
+if eg1pwm is None or eg2pwm is None:
+    print("Shared couter PWM failure I - trying in reverse order")
+    if eg1pwm is not None:
+        eg1pwm.deinit()
+        eg1pwm = None
+    if eg2pwm is not None:
+        eg2pwm.deinit()
+        eg2pwm = None
+    eg2pwm = twomegfixedpwm(board.A3)
+    eg1pwm = twomegfixedpwm(board.A2)
+
+if eg1pwm is None or eg2pwm is None:
+    print("Shared couter PWM failure II - just retry until it works")
+else:
+    print("High frequency shared counter PWM initialised ok")
+    
+osc1 = pulseio.PWMOut(board.A1, duty_cycle=2**15, frequency=440, variable_frequency=True)
+osc2 = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_frequency=True)
+
+dac = analogio.AnalogOut(board.A0)
 
 ### 0 is MIDI channel 1
 midi = adafruit_midi.MIDI(in_channel=0)
@@ -187,8 +226,7 @@ while True:
                        keytrigger_t, keyrelease_t, time.monotonic(),
                        attack, decay, sustain, release)
         envampl = round(math.pow(ADSRvel, velcurve) * veltovolc040)
-        ### TODO - volume match these
         eg1pwm.duty_cycle = envampl
-        eg2dac.value = envampl
+        eg2pwm.duty_cycle = envampl
         if ADSRvel == 0.0:            
             keyvelocity = 0  ### end of note playing
