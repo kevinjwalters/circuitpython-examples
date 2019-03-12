@@ -127,7 +127,7 @@ pitchbendvalue = 8192  # mid point - no bend
 
 # Commenting out debug as I just got a Memory Error linked with code size :(
 # TODO - look into mpy vs py saving and generation
-#debug = True
+debug = True
 
 ### The next oscillator / vca to use to 
 nextoscvca = 0
@@ -196,12 +196,13 @@ while True:
         
         ### Set everything bar the VCA (element 1) which will be set RSN
         ### at end of if statement
-        oscvcas[nextoscvca, 0].frequency = basefreq
-        oscvcas[nextoscvca, 2] = msg.note
-        oscvcas[nextoscvca, 3] = msg.vel
-        oscvcas[nextoscvca, 4] = time.monotonic()
-        oscvcas[nextoscvca, 5] = 0.0
-        nextoscvca = ( nextoscvca + 1 ) % len(nextoscvca)
+        ### TODO - work out what should be done if note pressed is already playing
+        oscvcas[nextoscvca][0].frequency = basefreq
+        oscvcas[nextoscvca][2] = msg.note
+        oscvcas[nextoscvca][3] = msg.vel
+        oscvcas[nextoscvca][4] = time.monotonic()
+        oscvcas[nextoscvca][5] = 0.0
+        nextoscvca = ( nextoscvca + 1 ) % len(oscvcas)
         
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
           isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
