@@ -58,7 +58,7 @@ midinoteA4 = 69
 ### and limit rate of change and smooth envelope voltage
 oscvcas = []
 
-def twomegfixedpwm(pin):
+def HFfixedpwm(pin):
     pwm = None
     for attempt in range(40):
         try:
@@ -74,8 +74,8 @@ def twomegfixedpwm(pin):
 ### with under-the-covers shared counters
 ### https://forums.adafruit.com/viewtopic.php?f=60&t=148017
 ### https://github.com/adafruit/circuitpython/issues/1626
-vca1pwm = twomegfixedpwm(board.A2)
-vca2pwm = twomegfixedpwm(board.A3)
+vca1pwm = HFfixedpwm(board.A2)
+vca2pwm = HFfixedpwm(board.A3)
 
 ### If anything failed, clean up then try in reverse order as workaround for #1626
 if vca1pwm is None or vca2pwm is None:
@@ -86,8 +86,8 @@ if vca1pwm is None or vca2pwm is None:
     if vca2pwm is not None:
         vca2pwm.deinit()
         vca2pwm = None
-    vca2pwm = twomegfixedpwm(board.A3)
-    vca1pwm = twomegfixedpwm(board.A2)
+    vca2pwm = HFfixedpwm(board.A3)
+    vca1pwm = HFfixedpwm(board.A2)
 
 if vca1pwm is None or vca2pwm is None:
     print("Shared couter PWM failure II - soft/hard reset suggested")
@@ -282,6 +282,7 @@ while True:
                            voice[4], voice[5], now,
                            attack, decay, sustain, release)
             envampl = round(math.pow(ADSRvel, velcurve) * veltovolc040)
+            ### TODO BUG - somewhere as this breached 0 - 65535 during S/B
             voice[1].duty_cycle = envampl
             if ADSRvel == 0.0:            
                 voice[3] = 0  ### end of note playing
