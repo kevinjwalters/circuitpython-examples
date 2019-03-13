@@ -1,13 +1,13 @@
-### cpx-basic-square-duosynth v0.6
+### cpx-basic-square-duosynth v0.7
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Duophonic velocity sensitive synth with pitch bend and mod wheel
 ### and ADSR control
 ### Wiring
-### A0  ANA1
-### A1  OSC1 
-### A2  vca1 
-### A3  vca2
-### A6  OSC2 
+### A0  Ana0
+### A1  Osc1 
+### A2  VCS1 
+### A3  VCA2
+### A6  Osc2 
 ### GND and 3V3 to power external board
 
 ### Tested with CPX and CircuitPython 4.0.0 beta3 
@@ -133,6 +133,7 @@ debug = True
 nextoscvca = 0
 
 ### TODO - ponder how this should handle release during the attack
+###        particularly as this can give artificial release for release=0
 ### TODO - Take out parameters (cc control them?)
 ### Returns an ADSR's velocity as a float which is <= velocity
 ### and if 0.0 indicates end of envelope
@@ -173,6 +174,19 @@ def ADSR(velocity, trigger_t, release_t, current_t,
         else:
             return 0.0
 
+### Return an LFO value between 0.0 and 1.0
+def LFO(start_t, now_t, rate, shape):
+    ### phase will be 0.0 at start to 1.0 at end
+    wavelengths = (now_t - start_t) * rate
+    phase = wavelengths - int(wavelengths)
+    if shape == "triangle":
+        value = 1.0 - abs(0.5 - phase)
+    else:
+        value = ValueError("Unsupported LFO wave shape")
+
+    return value            
+
+### Initial ADSR values
 attack  = 0.200
 release = 2.000
 decay = 0.4
@@ -182,6 +196,14 @@ maxattack = 2.000
 maxrelease = 6.000
 maxsustain = 1.0
 maxdecay = 2.000
+
+### Start with 1 free running LFO
+lfomin = 0.125
+lfomax = 16
+lfovalue = 0
+lforate = 1  ### in Hz
+lfostart_t = time.monotonic()
+lfoshape = "triangle"
 
 print("Ready to play")
 
@@ -197,6 +219,8 @@ while True:
         ### Set everything bar the VCA (element 1) which will be set RSN
         ### at end of if statement
         ### TODO - work out what should be done if note pressed is already playing
+        ### TODO - BUG hold C4 and tap at something else and this will 
+        ###        eventually cancel out C4 playing
         oscvcas[nextoscvca][0].frequency = basefreq
         oscvcas[nextoscvca][2] = msg.note
         oscvcas[nextoscvca][3] = msg.vel
@@ -236,18 +260,27 @@ while True:
             decay = maxdecay * msg.value / 127
         elif msg.control == 84:  # what is this? using for sustain level
             sustain = maxsustain * msg.value / 127
+        elif msg.control == 91:  # LFO rate
+            pass  ### TODO
+        elif msg.control == 93:  # LFO depth
+            pass  ### TODO
+
     elif msg is not None:
         if debug:
             print("Something else:", msg)
-            
+
     ### Create envelopes for any active voices
+    now = time.monotonic()
+    lfovalue = LFO(lfostart_t, now, lforate, lfoshape)
     for voice in oscvcas:
         ### TODO - finish converting code below for duophonic    
-        if voice[3] > 0:
+        if voice[3] > 0:   ### velocity is used as indicator for active voice
             ADSRvel = ADSR(voice[3],
-                           voice[4], voice[5], time.monotonic(),
+                           voice[4], voice[5], now,
                            attack, decay, sustain, release)
             envampl = round(math.pow(ADSRvel, velcurve) * veltovolc040)
             voice[1].duty_cycle = envampl
             if ADSRvel == 0.0:            
                 voice[3] = 0  ### end of note playing
+            else:
+                voice[0].duty_cycle = 32768 + 5000 + round(20000 * lfovalue)
