@@ -198,8 +198,9 @@ maxsustain = 1.0
 maxdecay = 2.000
 
 ### Start with 1 free running LFO
-lfomin = 0.125
+lfomin = 1/32
 lfomax = 16
+lfopow2range = math.log(lfomax / lfomin) / math.log(2)
 lfovalue = 0
 lforate = 1  ### in Hz
 lfostart_t = time.monotonic()
@@ -261,7 +262,9 @@ while True:
         elif msg.control == 84:  # what is this? using for sustain level
             sustain = maxsustain * msg.value / 127
         elif msg.control == 91:  # LFO rate
-            pass  ### TODO
+            ### Changing this while playing a note often sounds unpleasant
+            ### phase matching for old and new rates would solve this
+            lforate = lfomin * math.pow(2, lfopow2range * msg.value / 127)
         elif msg.control == 93:  # LFO depth
             pass  ### TODO
 
