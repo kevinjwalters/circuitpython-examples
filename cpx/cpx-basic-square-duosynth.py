@@ -1,4 +1,4 @@
-### cpx-basic-square-duosynth v0.7
+### cpx-basic-square-duosynth v0.8
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Duophonic velocity sensitive synth with pitch bend and mod wheel
 ### and ADSR control
@@ -180,7 +180,7 @@ def LFO(start_t, now_t, rate, shape):
     wavelengths = (now_t - start_t) * rate
     phase = wavelengths - int(wavelengths)
     if shape == "triangle":
-        value = 1.0 - abs(0.5 - phase)
+        value = 1.0 - 2 * abs(0.5 - phase)
     else:
         value = ValueError("Unsupported LFO wave shape")
 
@@ -272,8 +272,8 @@ while True:
     ### Create envelopes for any active voices
     now = time.monotonic()
     lfovalue = LFO(lfostart_t, now, lforate, lfoshape)
-    for voice in oscvcas:
-        ### TODO - finish converting code below for duophonic    
+    for voiceidx in range(len(oscvcas)):
+        voice = oscvcas[voiceidx]    
         if voice[3] > 0:   ### velocity is used as indicator for active voice
             ADSRvel = ADSR(voice[3],
                            voice[4], voice[5], now,
@@ -283,4 +283,8 @@ while True:
             if ADSRvel == 0.0:            
                 voice[3] = 0  ### end of note playing
             else:
-                voice[0].duty_cycle = 32768 + 5000 + round(20000 * lfovalue)
+                ### Modulate duty_cycle with LFO
+                offset = 4096 + round(24576 * lfovalue)
+                if voiceidx % 2 == 0:
+                    offset = -offset
+                voice[0].duty_cycle = 32768 + offset
