@@ -215,19 +215,36 @@ while True:
 #            print("NoteOn", msg.note, msg.vel)
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
+        ### TODO BUG - S/B also triggered Invalid PWM frequency (0??)
         basefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
         
+        ### Voice assignment - check each starting at nextoscvca
+        ### if a note is still playing due to release time then re-use that
+        ### if a voice is free use that
+        ### otherwise use next
+        
+        ### TODO - still buggy hold C, tap D, tap E and all notes will go off
+        oscvcatouse = None
+        voiceidx = nextoscvca
+        for i in range(len(oscvcas)):
+            if oscvcas[voiceidx][3] != 0 and oscvcas[voiceidx][2] == msg.note:
+                oscvcatouse = voiceidx
+                break
+            if oscvcas[voiceidx][3] == 0:
+                oscvcatouse = voiceidx
+                break
+            voiceidx = ( voiceidx + 1 ) % len(oscvcas)
+        if oscvcatouse is None:
+            oscvcatouse = nextoscvca
+            nextoscvca = ( nextoscvca + 1 ) % len(oscvcas)
+
         ### Set everything bar the VCA (element 1) which will be set RSN
-        ### at end of if statement
-        ### TODO - work out what should be done if note pressed is already playing
-        ### TODO - BUG hold C4 and tap at something else and this will 
-        ###        eventually cancel out C4 playing
-        oscvcas[nextoscvca][0].frequency = basefreq
-        oscvcas[nextoscvca][2] = msg.note
-        oscvcas[nextoscvca][3] = msg.vel
-        oscvcas[nextoscvca][4] = time.monotonic()
-        oscvcas[nextoscvca][5] = 0.0
-        nextoscvca = ( nextoscvca + 1 ) % len(oscvcas)
+        ### at end of if statement         
+        oscvcas[oscvcatouse][0].frequency = basefreq
+        oscvcas[oscvcatouse][2] = msg.note
+        oscvcas[oscvcatouse][3] = msg.vel
+        oscvcas[oscvcatouse][4] = time.monotonic()
+        oscvcas[oscvcatouse][5] = 0.0
         
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
           isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
