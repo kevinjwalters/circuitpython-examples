@@ -1,4 +1,4 @@
-### cpx-basic-square-duosynth v0.8
+### cpx-basic-square-duosynth v0.9
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Duophonic velocity sensitive synth with pitch bend and mod wheel
 ### and ADSR control
@@ -44,13 +44,35 @@ import random
 import array
 
 import board
-import analogio
+##import analogio
 import pulseio
+import neopixel
 import adafruit_midi
 ##import audioio
 
 A4refhz = 440
+midinoteC4 = 60
 midinoteA4 = 69
+
+### brightness 1.0 saves memory by removing need for a second buffer
+### 10 is number of NeoPixels on
+numpixels = const(10)
+pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
+black = (0, 0, 0)
+pixels.fill(black)
+
+### Turn NeoPixel on to represent a note using RGB x 10
+### to represent 30 notes
+### Doesn't do anything with pitch bend
+def noteled(pixels, note, velocity):
+    note30 = ( note - midinoteC4 ) % (3 * numpixels)
+    pos = note30 % numpixels
+    if velocity == 0:
+        colour = black
+    else:
+        ### max brightness will be 32
+        colour = round(velocity / 127 * 30 + 2) << ((2 - note30 // numpixels) * 8)
+    pixels[pos] = colour
 
 ### Setup oscillators which are variable frequency square waves
 ### And envelopes which are high frequency pwm outputs
@@ -251,7 +273,7 @@ while True:
 #            print("NoteOn", msg.note, msg.vel)
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
-        ### TODO BUG - S/B also triggered Invalid PWM frequency (0??)
+        ### TODO BUG - S/B also triggered Invalid PWM frequency (0?? extreme pitch bending??)
         basefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
 
         (oscvcatouse, next) = assignvoice(oscvcas, nextoscvca)
@@ -265,6 +287,8 @@ while True:
         oscvcas[oscvcatouse][3] = msg.vel
         oscvcas[oscvcatouse][4] = time.monotonic()
         oscvcas[oscvcatouse][5] = 0.0
+        
+        noteled(pixels, msg.note, msg.vel)
 
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
           isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
@@ -276,6 +300,8 @@ while True:
             if msg.note == voice[2]:
                 voice[5] = time.monotonic()  ### Insert key release time
 
+        noteled(pixels, msg.note, 0)
+        
     elif isinstance(msg, adafruit_midi.PitchBendChange):
         pitchbendvalue = msg.value   ### 0 to 16383
         ### TODO - undo cut and paste here
