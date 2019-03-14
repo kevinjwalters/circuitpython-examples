@@ -129,6 +129,42 @@ pitchbendvalue = 8192  # mid point - no bend
 # TODO - look into mpy vs py saving and generation
 debug = True
 
+### Voice assignment
+### returns index of voice to use and either None or
+### the next index if next voice has been advanced
+### check each starting at nextoscvca
+### if same note is playing then re-use that (i.e. in release phase)
+### if a voice is free use that
+### if nothing then rescan looking for a voice in release phase
+### otherwise use next one
+def assignvoice(oscvcas, nextoscvca):
+    oscvcatouse = None
+    next = None
+    
+    voiceidx = nextoscvca
+    for i in range(len(oscvcas)):
+        if oscvcas[voiceidx][3] != 0 and oscvcas[voiceidx][2] == msg.note:
+            oscvcatouse = voiceidx
+            break
+        if oscvcas[voiceidx][3] == 0:  ### velocity 0 voice not in use
+            oscvcatouse = voiceidx
+            break
+        voiceidx = ( voiceidx + 1 ) % len(oscvcas)
+
+    if oscvcatouse is None:
+        voiceidx = nextoscvca
+        for i in range(len(oscvcas)):
+            if oscvcas[voiceidx][5] != 0.0:  ### key released
+                oscvcatouse = voiceidx
+                break
+            voiceidx = ( voiceidx + 1 ) % len(oscvcas)
+                
+    if oscvcatouse is None:
+        oscvcatouse = nextoscvca
+        next = ( nextoscvca + 1 ) % len(oscvcas)  ### advance next
+    
+    return (oscvcatouse, next)
+
 ### The next oscillator / vca to use to 
 nextoscvca = 0
 
@@ -198,11 +234,11 @@ maxsustain = 1.0
 maxdecay = 2.000
 
 ### Start with 1 free running LFO
-lfomin = 1/32
-lfomax = 16
+lfomin = 1/32   ### Hz
+lfomax = 16     ### Hz
 lfopow2range = math.log(lfomax / lfomin) / math.log(2)
-lfovalue = 0
-lforate = 1  ### in Hz
+lfovalue = 0.0  ### Initial value
+lforate = 1     ### Initial rate in Hz
 lfostart_t = time.monotonic()
 lfoshape = "triangle"
 
@@ -217,35 +253,19 @@ while True:
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         ### TODO BUG - S/B also triggered Invalid PWM frequency (0??)
         basefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
-        
-        ### Voice assignment - check each starting at nextoscvca
-        ### if a note is still playing due to release time then re-use that
-        ### if a voice is free use that
-        ### otherwise use next
-        
-        ### TODO - still buggy hold C, tap D, tap E and all notes will go off
-        oscvcatouse = None
-        voiceidx = nextoscvca
-        for i in range(len(oscvcas)):
-            if oscvcas[voiceidx][3] != 0 and oscvcas[voiceidx][2] == msg.note:
-                oscvcatouse = voiceidx
-                break
-            if oscvcas[voiceidx][3] == 0:
-                oscvcatouse = voiceidx
-                break
-            voiceidx = ( voiceidx + 1 ) % len(oscvcas)
-        if oscvcatouse is None:
-            oscvcatouse = nextoscvca
-            nextoscvca = ( nextoscvca + 1 ) % len(oscvcas)
+
+        (oscvcatouse, next) = assignvoice(oscvcas, nextoscvca)
+        if next is not None:
+            nextoscvca = next  ### Advance voice selection as required
 
         ### Set everything bar the VCA (element 1) which will be set RSN
-        ### at end of if statement         
+        ### at end of if statement
         oscvcas[oscvcatouse][0].frequency = basefreq
         oscvcas[oscvcatouse][2] = msg.note
         oscvcas[oscvcatouse][3] = msg.vel
         oscvcas[oscvcatouse][4] = time.monotonic()
         oscvcas[oscvcatouse][5] = 0.0
-        
+
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
           isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
 #        if debug:
