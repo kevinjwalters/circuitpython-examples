@@ -88,8 +88,7 @@ def HFfixedpwm(pin):
                                  frequency=2*1000*1000, variable_frequency=False)
             break
         except Exception as e:
-            ### A guess that timing could be a factor
-            time.sleep(attempt / 234)
+            time.sleep(0.01)   ### time isn't a factor, its memory contents
     return pwm
 
 ### Attempt at a workaround for the unpredictable current behaviour of PWMOut()
@@ -127,9 +126,9 @@ osc2 = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_freque
 ### but the memory efficiency of a nested list is attractive
 ### [Oscillator PWMOut, VCA PWMOut, midi note number,
 ### velocity (0 indicates voice not active),
-### key trigger time, key release time]
-oscvcas.append([osc1, vca1pwm, 0, 0, 0.0, 0.0])
-oscvcas.append([osc2, vca2pwm, 0, 0, 0.0, 0.0])
+### key trigger time, key release time, volume at release]
+oscvcas.append([osc1, vca1pwm, 0, 0, 0.0, 0.0, 0.0])
+oscvcas.append([osc2, vca2pwm, 0, 0, 0.0, 0.0, 0.0])
 
 ### Not in use
 #dac = analogio.AnalogOut(board.A0)
@@ -194,47 +193,51 @@ def assignvoice(oscvcas, nextoscvca):
 ### The next oscillator / vca to use to 
 nextoscvca = 0
 
-### TODO - ponder how this should handle release during the attack
-###        particularly as this can give artificial release for release=0
-### TODO - Take out parameters (cc control them?)
-### Returns an ADSR's velocity as a float which is <= velocity
-### and if 0.0 indicates end of envelope
-### release_t should be 0.0 until it happens
+### Returns volume as a float based on simple ADSR envelope
+### this will be <= velocity and 0.0 if at end of envelope
+### release_t should be 0.0 until key is released
 ### attack is seconds
+### decay is seconds
+### sustain is fraction of velocity, e.g. 0.6 is 60%
 ### release is seconds
+### vol_release is the volume when key was released
 def ADSR(velocity, trigger_t, release_t, current_t,
-         attack, decay, sustain, release):
+         attack, decay, sustain, release,
+         vol_release):
     vol = velocity
     rel_t = current_t - trigger_t
-    if (rel_t < attack):
-        ### Attack phase
-        vol_attack = vol * rel_t / attack
-        ### bit of a fudge to stop attack starting at 0.0
-        if vol_attack > 1.0:
-            return vol_attack
-        else:
-            return 1.0
-
-    ### Decay/Sustain phase
-    if decay != 0.0 and sustain != 1.0:
-        sus_t = rel_t - attack
-        ### Calculate a new vol level
-        if sus_t < decay:
-            vol = vol - sus_t / decay * (1.0 - sustain) * vol
-        else:
-            vol = vol * sustain
 
     if release_t == 0.0:
+        if (rel_t < attack):
+            ### Attack phase
+            vol_attack = vol * rel_t / attack
+            ### bit of a fudge to stop attack starting at 0.0 as this return
+            ### value is used to signify end of envelope
+            if vol_attack > 1.0:
+                return vol_attack
+            else:
+                return 1.0
+
+        ### Decay/Sustain phase
+        if decay != 0.0 and sustain != 1.0:
+            sus_t = rel_t - attack
+            ### Calculate a new vol level
+            if sus_t < decay:
+                vol = vol - sus_t / decay * (1.0 - sustain) * vol
+            else:
+                vol = vol * sustain
+        
         return vol
     else:
         ### Release phase
         if release == 0.0:
             return 0.0  ### no release and need to prevent div by zero
-        releasevol = vol - vol * ((current_t - release_t) / release)
-        if releasevol > 0.0:
-            return releasevol
+        vol = vol_release - vol_release * ((current_t - release_t) / release)
+        if vol > 0.0:
+            return vol
         else:
-            return 0.0
+            return 0.0   ### end of release/note
+
 
 ### Return an LFO value between 0.0 and 1.0
 def LFO(start_t, now_t, rate, shape):
@@ -297,6 +300,7 @@ while True:
         oscvcas[oscvcatouse][3] = msg.vel
         oscvcas[oscvcatouse][4] = time.monotonic()
         oscvcas[oscvcatouse][5] = 0.0
+        oscvcas[oscvcatouse][6] = 0.0
         
         noteled(pixels, msg.note, msg.vel)
 
@@ -308,8 +312,15 @@ while True:
         # 0/1/2 notes that are currently playing
         for voice in oscvcas:
             if msg.note == voice[2]:
-                voice[5] = time.monotonic()  ### Insert key release time
-
+                ### Insert calculated volume and then
+                ### insert release time               
+                now_t = time.monotonic()
+                voice[6] = ADSR(voice[3],
+                                voice[4], voice[5], now_t,
+                                attack, decay, sustain, release,
+                                voice[6])
+                voice[5] = now_t
+                
         noteled(pixels, msg.note, 0)
         
     elif isinstance(msg, adafruit_midi.PitchBendChange):
@@ -346,18 +357,19 @@ while True:
             print("Something else:", msg)
 
     ### Create envelopes for any active voices
-    now = time.monotonic()
-    lfovalue = LFO(lfostart_t, now, lforate, lfoshape)
+    now_t = time.monotonic()
+    lfovalue = LFO(lfostart_t, now_t, lforate, lfoshape)
     for voiceidx in range(len(oscvcas)):
         voice = oscvcas[voiceidx]    
         if voice[3] > 0:   ### velocity is used as indicator for active voice
-            ADSRvel = ADSR(voice[3],
-                           voice[4], voice[5], now,
-                           attack, decay, sustain, release)
-            envampl = round(math.pow(ADSRvel, velcurve) * veltovolc040)
+            ADSRvol = ADSR(voice[3],
+                           voice[4], voice[5], now_t,
+                           attack, decay, sustain, release,
+                           voice[6])
+            envampl = round(math.pow(ADSRvol, velcurve) * veltovolc040)
             ### TODO BUG - somewhere as this breached 0 - 65535 during S/B
             voice[1].duty_cycle = envampl
-            if ADSRvel == 0.0:            
+            if ADSRvol == 0.0:            
                 voice[3] = 0  ### end of note playing
             else:
                 ### Modulate duty_cycle with LFO
