@@ -115,6 +115,10 @@ if vca1pwm is None or vca2pwm is None:
     print("Shared couter PWM failure II - soft/hard reset suggested")
 else:
     print("High frequency shared counter PWM initialised ok")
+
+### TODO A6 looks a bit clicky when duty_cycle is modified maybe swap
+### pins if another one is clean for osc2
+### https://github.com/adafruit/circuitpython/issues/1644
     
 osc1 = pulseio.PWMOut(board.A1, duty_cycle=2**15, frequency=440, variable_frequency=True)
 osc2 = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_frequency=True)
@@ -245,10 +249,10 @@ def LFO(start_t, now_t, rate, shape):
     return value            
 
 ### Initial ADSR values
-attack  = 0.200
-release = 2.000
-decay = 0.4
-sustain = 0.6  ### 60% level
+attack  = 0.050
+release = 0.500
+decay = 0.1
+sustain = 0.8  ### 80% level
 
 maxattack = 2.000
 maxrelease = 6.000
@@ -266,6 +270,9 @@ lfoshape = "triangle"
 
 print("Ready to play")
 
+### TODO - time.monotonic() loses decimal places as the number gets large
+###      - problematic for long running code
+
 while True:
     msg = midi.read_in_port()
     if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
@@ -274,8 +281,11 @@ while True:
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         ### TODO BUG - S/B also triggered Invalid PWM frequency (0?? extreme pitch bending??)
+        ### if remote + time is sent then basefreq can equal some value in the millions
         basefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
 
+        ##print(msg.note, msg.vel, basefreq)
+        
         (oscvcatouse, next) = assignvoice(oscvcas, nextoscvca)
         if next is not None:
             nextoscvca = next  ### Advance voice selection as required
