@@ -360,8 +360,7 @@ while True:
     ### Create envelopes for any active voices
     now_t = time.monotonic()
     lfovalue = LFO(lfostart_t, now_t, lforate, lfoshape)
-    for voiceidx in range(len(oscvcas)):
-        voice = oscvcas[voiceidx]    
+    for voiceidx, voice in enumerate(oscvcas):
         if voice[3] > 0:   ### velocity is used as indicator for active voice
             ADSRvol = ADSR(voice[3],
                            voice[4], voice[5], now_t,
@@ -373,8 +372,9 @@ while True:
             if ADSRvol == 0.0:            
                 voice[3] = 0  ### end of note playing
             else:
-                ### Modulate duty_cycle with LFO
+                ### Modulate duty_cycle of oscillator with LFO
                 offset = 4096 + round(24576 * lfovalue)
                 if voiceidx % 2 == 0:
                     offset = -offset
                 voice[0].duty_cycle = 32768 + offset
+                
