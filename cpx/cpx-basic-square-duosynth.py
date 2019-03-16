@@ -1,4 +1,4 @@
-### cpx-basic-square-duosynth v0.9
+### cpx-basic-square-duosynth v1.0
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Duophonic velocity sensitive synth with pitch bend and mod wheel
 ### and ADSR control
@@ -64,6 +64,7 @@ pixels.fill(black)
 ### Turn NeoPixel on to represent a note using RGB x 10
 ### to represent 30 notes
 ### Doesn't do anything with pitch bend
+### TODO BUG - does not deal with dyads which light same led in red then green, etc
 def noteled(pixels, note, velocity):
     note30 = ( note - midinoteC4 ) % (3 * numpixels)
     pos = note30 % numpixels
@@ -247,7 +248,7 @@ def LFO(start_t, now_t, rate, shape):
     if shape == "triangle":
         value = 1.0 - 2 * abs(0.5 - phase)
     else:
-        value = ValueError("Unsupported LFO wave shape")
+        raise ValueError("Unsupported LFO wave shape")
 
     return value            
 
