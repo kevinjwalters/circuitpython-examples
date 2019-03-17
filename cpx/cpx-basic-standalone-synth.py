@@ -226,7 +226,7 @@ makewaves(waves, wavename, basesamplerate)
 
 
 while True:
-    msg = midi.read_in_port()
+    (msg, channel) = midi.read_in_port()
     if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
 #        if debug:
 #            print("NoteOn", msg.note, msg.vel)
