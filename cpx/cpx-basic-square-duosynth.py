@@ -268,16 +268,16 @@ print("Ready to play")
 
 while True:
     (msg, channel) = midi.read_in_port()  ### channels are protocol number
-    if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
+    if isinstance(msg, adafruit_midi.NoteOn) and msg.velocity != 0:
         if debug:
-            print("NoteOn", msg.note, msg.vel)
+            print("NoteOn", msg.note, msg.velocity)
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         ### TODO BUG - S/B also triggered Invalid PWM frequency (0?? extreme pitch bending??)
         ### if remote + time is sent then basefreq can equal some value in the millions
         frequency = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
 
-        ##print(msg.note, msg.vel, basefreq)
+        ##print(msg.note, msg.velocity, basefreq)
         
         (oscvcatouse, next) = assignvoice(oscvcas, nextoscvca)
         if next is not None:
@@ -288,17 +288,17 @@ while True:
         oscvcas[oscvcatouse][0].frequency = frequency
         oscvcas[oscvcatouse][2] = channel
         oscvcas[oscvcatouse][3] = msg.note
-        oscvcas[oscvcatouse][4] = msg.vel
+        oscvcas[oscvcatouse][4] = msg.velocity
         oscvcas[oscvcatouse][5] = time.monotonic()
         oscvcas[oscvcatouse][6] = 0.0
         oscvcas[oscvcatouse][7] = 0.0
         
-        noteled(pixels, msg.note, msg.vel)
+        noteled(pixels, msg.note, msg.velocity)
 
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
-          isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
+          isinstance(msg, adafruit_midi.NoteOn) and msg.velocity == 0):
 #        if debug:
-#            print("NoteOff", msg.note, msg.vel)
+#            print("NoteOff", msg.note, msg.velocity)
         ### Our duophonic "synth module" needs to ignore keys that were pressed before the
         ### 0/1/2 notes that are currently playing
         ### TODO - currently disregards channel number - review this

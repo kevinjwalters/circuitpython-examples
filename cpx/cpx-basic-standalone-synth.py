@@ -1,4 +1,4 @@
-### cpx-basic-square-monosynth v1.2
+### cpx-basic-square-monosynth v1.3
 ### CircuitPython (on CPX) synth module using internal speaker
 ### Monophonic synth with some velocity sensitivity and a few
 ### different waveforms
@@ -227,9 +227,9 @@ makewaves(waves, wavename, basesamplerate)
 
 while True:
     (msg, channel) = midi.read_in_port()
-    if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
+    if isinstance(msg, adafruit_midi.NoteOn) and msg.velocity != 0:
 #        if debug:
-#            print("NoteOn", msg.note, msg.vel)
+#            print("NoteOn", msg.note, msg.velocity)
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         notefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
@@ -238,19 +238,19 @@ while True:
         
         ### Select the sine wave with volume for the note velocity
         ### 11.3 is a touch bigger than the square root of 127
-        wavevol = int(math.sqrt(msg.vel) / 11.3 * len(waves))
-        ##print(msg.note, notefreq, notesamplerate, ":", msg.vel, wavevol, len(waves))
+        wavevol = int(math.sqrt(msg.velocity) / 11.3 * len(waves))
+        ##print(msg.note, notefreq, notesamplerate, ":", msg.velocity, wavevol, len(waves))
         wave = waves[wavevol]
 
         wave.sample_rate = round(notesamplerate)  ### integer only
         dac.play(wave, loop=True)
 
-        noteled(pixels, msg.note, msg.vel)
+        noteled(pixels, msg.note, msg.velocity)
 
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
-          isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
+          isinstance(msg, adafruit_midi.NoteOn) and msg.velocity == 0):
 #        if debug:
-#            print("NoteOff", msg.note, msg.vel)
+#            print("NoteOff", msg.note, msg.velocity)
         # Our monophonic "synth module" needs to ignore keys that lifted on
         # overlapping presses
         if msg.note == lastnote:
@@ -262,7 +262,7 @@ while True:
 #        if debug:
 #            print("Something else:", msg)
     elif isinstance(msg, adafruit_midi.PitchBendChange):
-        pitchbendvalue = msg.value   ### 0 to 16383
+        pitchbendvalue = msg.pitch_bend   ### 0 to 16383
         ### TODO - undo cut and paste here
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         notefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))

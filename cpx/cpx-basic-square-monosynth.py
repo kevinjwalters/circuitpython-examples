@@ -1,4 +1,4 @@
-### cpx-basic-square-monosynth v1.5
+### cpx-basic-square-monosynth v1.6
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Monophonic velocity sensitive synth with pitch bend and mod wheel
 ### and Attack / Release control
@@ -197,24 +197,24 @@ print("Ready to play")
 
 while True:
     (msg, channel) = midi.read_in_port()
-    if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
+    if isinstance(msg, adafruit_midi.NoteOn) and msg.velocity != 0:
 #        if debug:
-#            print("NoteOn", msg.note, msg.vel)
+#            print("NoteOn", msg.note, msg.velocity)
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         basefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
         osc1.frequency = basefreq
         osc2.frequency = basefreq + 1
 
-        keyvelocity = msg.vel
+        keyvelocity = msg.velocity
         keytrigger_t = time.monotonic()
         keyrelease_t = 0.0
         triggertransient = True
 
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
-          isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
+          isinstance(msg, adafruit_midi.NoteOn) and msg.velocity == 0):
 #        if debug:
-#            print("NoteOff", msg.note, msg.vel)
+#            print("NoteOff", msg.note, msg.velocity)
         # Our monophonic "synth module" needs to ignore keys that lifted on
         # overlapping presses
         if msg.note == lastnote:
@@ -223,7 +223,7 @@ while True:
 #        if debug:
 #            print("Something else:", msg)
     elif isinstance(msg, adafruit_midi.PitchBendChange):
-        pitchbendvalue = msg.value   ### 0 to 16383
+        pitchbendvalue = msg.pitch_bend   ### 0 to 16383
         ### TODO - undo cut and paste here
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         basefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
