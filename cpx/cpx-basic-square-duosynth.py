@@ -1,4 +1,4 @@
-### cpx-basic-square-duosynth v1.0
+### cpx-basic-square-duosynth v1.2
 ### CircuitPython (on CPX) two oscillator synth module (needs some external hardware)
 ### Duophonic velocity sensitive synth with pitch bend and mod wheel
 ### and ADSR control
@@ -114,19 +114,19 @@ osc2 = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_freque
 
 ### A dict or class would be a cleaner/safer representation
 ### but the memory efficiency of a nested list is attractive
-### [Oscillator PWMOut, VCA PWMOut, midi note number,
+### [Oscillator PWMOut, VCA PWMOut, 
+### midi channel number (0-15), note number,
 ### velocity (0 indicates voice not active),
 ### key trigger time, key release time, volume at release]
-oscvcas.append([osc1, vca1pwm, 0, 0, 0.0, 0.0, 0.0])
-oscvcas.append([osc2, vca2pwm, 0, 0, 0.0, 0.0, 0.0])
+oscvcas.append([osc1, vca1pwm, -1, 0, 0, 0.0, 0.0, 0.0])
+oscvcas.append([osc2, vca2pwm, -1, 0, 0, 0.0, 0.0, 0.0])
 
 ### Not in use
 #dac = analogio.AnalogOut(board.A0)
 
-### 0 is MIDI channel 1 - 
-### TODO ensure you have actually implemented this in library
-### and work out how to handle reading multiple channels as may want to do that
-midi = adafruit_midi.MIDI(in_channel=0)
+### 0 is MIDI channel 1
+### This is listening on channels 1 and 2
+midi = adafruit_midi.MIDI(in_channel=(0,1), debug=True)
 
 #veltovol = int(65535 / 127)
 ### Multiplier for MIDI velocity ^ 0.40
@@ -136,7 +136,7 @@ velcurve = 0.40
 veltovolc040 = 9439
 
 # pitchbendrange in semitones - often 2 or 12
-pitchrange = 12
+pitchrange = 2
 pitchbendmultiplier = pitchrange / 8192
 pitchbendvalue = 8192  # mid point - no bend
 
@@ -158,10 +158,10 @@ def assignvoice(oscvcas, nextoscvca):
     
     voiceidx = nextoscvca
     for i in range(len(oscvcas)):
-        if oscvcas[voiceidx][3] != 0 and oscvcas[voiceidx][2] == msg.note:
+        if oscvcas[voiceidx][4] != 0 and oscvcas[voiceidx][3] == msg.note:
             oscvcatouse = voiceidx
             break
-        if oscvcas[voiceidx][3] == 0:  ### velocity 0 voice not in use
+        if oscvcas[voiceidx][4] == 0:  ### velocity 0 voice not in use
             oscvcatouse = voiceidx
             break
         voiceidx = ( voiceidx + 1 ) % len(oscvcas)
@@ -169,7 +169,7 @@ def assignvoice(oscvcas, nextoscvca):
     if oscvcatouse is None:
         voiceidx = nextoscvca
         for i in range(len(oscvcas)):
-            if oscvcas[voiceidx][5] != 0.0:  ### key released
+            if oscvcas[voiceidx][6] != 0.0:  ### key released
                 oscvcatouse = voiceidx
                 break
             voiceidx = ( voiceidx + 1 ) % len(oscvcas)
@@ -267,16 +267,15 @@ print("Ready to play")
 ###      - problematic for long running code
 
 while True:
-    (msg, channel) = midi.read_in_port()
-    print("C", channel)
+    (msg, channel) = midi.read_in_port()  ### channels are protocol number
     if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
-#        if debug:
-#            print("NoteOn", msg.note, msg.vel)
+        if debug:
+            print("NoteOn", msg.note, msg.vel)
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         ### TODO BUG - S/B also triggered Invalid PWM frequency (0?? extreme pitch bending??)
         ### if remote + time is sent then basefreq can equal some value in the millions
-        basefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
+        frequency = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
 
         ##print(msg.note, msg.vel, basefreq)
         
@@ -286,12 +285,13 @@ while True:
 
         ### Set everything bar the VCA (element 1) which will be set RSN
         ### at end of if statement
-        oscvcas[oscvcatouse][0].frequency = basefreq
-        oscvcas[oscvcatouse][2] = msg.note
-        oscvcas[oscvcatouse][3] = msg.vel
-        oscvcas[oscvcatouse][4] = time.monotonic()
-        oscvcas[oscvcatouse][5] = 0.0
+        oscvcas[oscvcatouse][0].frequency = frequency
+        oscvcas[oscvcatouse][2] = channel
+        oscvcas[oscvcatouse][3] = msg.note
+        oscvcas[oscvcatouse][4] = msg.vel
+        oscvcas[oscvcatouse][5] = time.monotonic()
         oscvcas[oscvcatouse][6] = 0.0
+        oscvcas[oscvcatouse][7] = 0.0
         
         noteled(pixels, msg.note, msg.vel)
 
@@ -299,32 +299,37 @@ while True:
           isinstance(msg, adafruit_midi.NoteOn) and msg.vel == 0):
 #        if debug:
 #            print("NoteOff", msg.note, msg.vel)
-        # Our duophonic "synth module" needs to ignore keys that were pressed before the
-        # 0/1/2 notes that are currently playing
+        ### Our duophonic "synth module" needs to ignore keys that were pressed before the
+        ### 0/1/2 notes that are currently playing
+        ### TODO - currently disregards channel number - review this
         for voice in oscvcas:
-            if msg.note == voice[2]:
+            if msg.note == voice[3]:
                 ### Insert calculated volume and then
                 ### insert release time               
                 now_t = time.monotonic()
-                voice[6] = ADSR(voice[3],
-                                voice[4], voice[5], now_t,
+                voice[7] = ADSR(voice[4],
+                                voice[5], voice[6], now_t,
                                 attack, decay, sustain, release,
-                                voice[6])
-                voice[5] = now_t
+                                voice[7])
+                voice[6] = now_t
                 
         noteled(pixels, msg.note, 0)
         
     elif isinstance(msg, adafruit_midi.PitchBendChange):
-        pitchbendvalue = msg.value   ### 0 to 16383
+        pitchbendvalue = msg.pitch_bend   ### 0 to 16383
         ### TODO - undo cut and paste here
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
-        ### TODO - research whether pitch bend affects all notes playing
-        ##basefreq = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
-        ##osc1.frequency = basefreq
-        ##osc2.frequency = basefreq + 1
+        for voice in oscvcas:
+            ### Check velocity which indicates active voice and 
+            ### look for channel match
+            if voice[3] > 0 and voice[2] == channel:
+                frequency = round(A4refhz * math.pow(2, (voice[3] - midinoteA4 + pitchbend) / 12.0))
+                voice[0].frequency = frequency
+                
     elif isinstance(msg, adafruit_midi.ControlChange):
         if msg.control == 1:  # modulation wheel - TODO MOVE THIS TO adafruit_midi
             ### msg.value is 0 (none) to 127 (max)
+            ### TODO - since LFO addition mod wheel needs to do something else
             newdutycycle = round(32768 + msg.value * 24000 / 127)
             osc1.duty_cycle = newdutycycle
             osc2.duty_cycle = newdutycycle
@@ -351,20 +356,19 @@ while True:
     now_t = time.monotonic()
     lfovalue = LFO(lfostart_t, now_t, lforate, lfoshape)
     for voiceidx, voice in enumerate(oscvcas):
-        if voice[3] > 0:   ### velocity is used as indicator for active voice
-            ADSRvol = ADSR(voice[3],
-                           voice[4], voice[5], now_t,
+        if voice[4] > 0:   ### velocity is used as indicator for active voice
+            ADSRvol = ADSR(voice[4],
+                           voice[5], voice[6], now_t,
                            attack, decay, sustain, release,
-                           voice[6])
+                           voice[7])
             envampl = round(math.pow(ADSRvol, velcurve) * veltovolc040)
             ### TODO BUG - somewhere as this breached 0 - 65535 during S/B
             voice[1].duty_cycle = envampl
             if ADSRvol == 0.0:            
-                voice[3] = 0  ### end of note playing
+                voice[4] = 0  ### end of note playing
             else:
                 ### Modulate duty_cycle of oscillator with LFO
                 offset = 4096 + round(24576 * lfovalue)
                 if voiceidx % 2 == 0:
                     offset = -offset
                 voice[0].duty_cycle = 32768 + offset
-                
