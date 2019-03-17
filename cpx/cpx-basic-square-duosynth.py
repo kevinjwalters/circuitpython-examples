@@ -83,7 +83,7 @@ oscvcas = []
 
 def HFfixedpwm(pin):
     pwm = None
-    for attempt in range(40):
+    for attempt in range(3):
         try:
             pwm = pulseio.PWMOut(pin, duty_cycle=0,
                                  frequency=2*1000*1000, variable_frequency=False)
@@ -101,18 +101,7 @@ vca2pwm = HFfixedpwm(board.A3)
 
 ### If anything failed, clean up then try in reverse order as workaround for #1626
 if vca1pwm is None or vca2pwm is None:
-    print("Shared couter PWM failure I - trying in reverse order")
-    if vca1pwm is not None:
-        vca1pwm.deinit()
-        vca1pwm = None
-    if vca2pwm is not None:
-        vca2pwm.deinit()
-        vca2pwm = None
-    vca2pwm = HFfixedpwm(board.A3)
-    vca1pwm = HFfixedpwm(board.A2)
-
-if vca1pwm is None or vca2pwm is None:
-    print("Shared couter PWM failure II - soft/hard reset suggested")
+    print("Shared couter PWM failure - soft/hard reset suggested or use 4.0.0 beta 4 or later")
 else:
     print("High frequency shared counter PWM initialised ok")
 
@@ -278,7 +267,8 @@ print("Ready to play")
 ###      - problematic for long running code
 
 while True:
-    msg = midi.read_in_port()
+    (msg, channel) = midi.read_in_port()
+    print("C", channel)
     if isinstance(msg, adafruit_midi.NoteOn) and msg.vel != 0:
 #        if debug:
 #            print("NoteOn", msg.note, msg.vel)
