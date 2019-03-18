@@ -124,9 +124,15 @@ oscvcas.append([osc2, vca2pwm, -1, 0, 0, 0.0, 0.0, 0.0])
 ### Not in use
 #dac = analogio.AnalogOut(board.A0)
 
+### TODO implement volume per channel based on midi cc 7 
+
 ### 0 is MIDI channel 1
 ### This is listening on channels 1 and 2
-midi = adafruit_midi.MIDI(in_channel=(0,1), debug=True)
+### Testing with bigger in_bug_size as MIDI file driven
+### pitch bends may be overwhelming buffering causing byte loss
+### 600 helps a bit but obviously audible issue with processing
+### slowing down on bursty pitch bends
+midi = adafruit_midi.MIDI(in_channel=(0,1), debug=False, in_buf_size=30)
 
 #veltovol = int(65535 / 127)
 ### Multiplier for MIDI velocity ^ 0.40
@@ -142,7 +148,7 @@ pitchbendvalue = 8192  # mid point - no bend
 
 # Commenting out debug as I just got a Memory Error linked with code size :(
 # TODO - look into mpy vs py saving and generation
-debug = True
+debug = False
 
 ### Voice assignment
 ### returns index of voice to use and either None or
@@ -297,8 +303,8 @@ while True:
 
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
           isinstance(msg, adafruit_midi.NoteOn) and msg.velocity == 0):
-#        if debug:
-#            print("NoteOff", msg.note, msg.velocity)
+        if debug:
+            print("NoteOff", msg.note, msg.velocity)
         ### Our duophonic "synth module" needs to ignore keys that were pressed before the
         ### 0/1/2 notes that are currently playing
         ### TODO - currently disregards channel number - review this
