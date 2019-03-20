@@ -1,4 +1,4 @@
-### cpx-threeosc-synth v0.7
+### cpx-threeosc-synth v0.8
 ### CircuitPython (on CPX) three oscillator synth module (needs some external hardware)
 ### Midi channels 1 and 2 combined are a duophonic velocity sensitive synth
 ### with ADSR envelopes, pitch bend and mod wheel
@@ -46,43 +46,56 @@ import random
 import array
 
 import board
-##import analogio
+import analogio
 import pulseio
 import neopixel
 import adafruit_midi
-##import audioio
+import audioio
+
+import gc
+
+gc.collect()
+print(gc.mem_free())
+
+from waveforms import make_waveforms, waveform_names
+
+gc.collect()
+print(gc.mem_free())
 
 A4refhz = 440
 midinoteC4 = 60
 midinoteA4 = 69
+#basesamplerate = 42240  ### this makes A4 exactly 96 samples
+basesamplerate = 10560  ### this makes A4 exactly 24 samples
 
 ### brightness 1.0 saves memory by removing need for a second buffer
 ### 10 is number of NeoPixels on
 numpixels = const(10)
-pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
+#pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
 black = (0, 0, 0)
-pixels.fill(black)
+#pixels.fill(black)
+pixels = []
 
 ### Turn NeoPixel on to represent a note using RGB x 10
 ### to represent 30 notes
 ### Doesn't do anything with pitch bend
 def noteled(pixels, note, velocity):
     note30 = ( note - midinoteC4 ) % (3 * numpixels)
-    pos = note30 % numpixels
-    r, g, b = pixels[pos]
-    if velocity == 0:
-        brightness = 0
-    else:
-        ### max brightness will be 32
-        brightness = round(velocity / 127 * 30 + 2)
-    ### Pick R/G/B based on range within the 30 notes
-    if note30 < 10:
-        r = brightness
-    elif note30 < 20:
-        g = brightness
-    else: 
-        b = brightness
-    pixels[pos] = (r, g, b)
+    # pos = note30 % numpixels
+    # r, g, b = pixels[pos]
+    # if velocity == 0:
+        # brightness = 0
+    # else:
+        # ### max brightness will be 32
+        # brightness = round(velocity / 127 * 30 + 2)
+    # ### Pick R/G/B based on range within the 30 notes
+    # if note30 < 10:
+        # r = brightness
+    # elif note30 < 20:
+        # g = brightness
+    # else: 
+        # b = brightness
+    # pixels[pos] = (r, g, b)
 
 ### Setup oscillators which are variable frequency square waves
 ### And envelopes which are high frequency pwm outputs
@@ -92,23 +105,17 @@ oscvcas = []
 
 ### TODO - might be interesting to drop this to lower frequencies
 ### for the tremolo effect
-def HFfixedpwm(pin):
-    pwm = None
-    for attempt in range(3):
-        try:
-            pwm = pulseio.PWMOut(pin, duty_cycle=0,
-                                 frequency=2*1000*1000, variable_frequency=False)
-            break
-        except Exception as e:
-            time.sleep(0.01)   ### time isn't a factor, its memory contents
-    return pwm
 
 ### Attempt at a workaround for the unpredictable current behaviour of PWMOut()
 ### with under-the-covers shared counters
 ### https://forums.adafruit.com/viewtopic.php?f=60&t=148017
 ### https://github.com/adafruit/circuitpython/issues/1626
-vca1pwm = HFfixedpwm(board.A2)
-vca2pwm = HFfixedpwm(board.A3)
+vca1pwm = pulseio.PWMOut(board.A2, duty_cycle=0,
+                         frequency=2*1000*1000, variable_frequency=False)
+vca2pwm = pulseio.PWMOut(board.A3, duty_cycle=0,
+                         frequency=2*1000*1000, variable_frequency=False)
+### TODO - might be interesting to drop this to lower frequencies
+### for the tremolo effect                           
 
 ### If anything failed, clean up then try in reverse order as workaround for #1626
 if vca1pwm is None or vca2pwm is None:
@@ -132,8 +139,8 @@ osc2 = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_freque
 oscvcas.append([osc1, vca1pwm, -1, 0, 0, 0.0, 0.0, 0.0])
 oscvcas.append([osc2, vca2pwm, -1, 0, 0, 0.0, 0.0, 0.0])
 
-### Not in use
-#dac = analogio.AnalogOut(board.A0)
+### BACK!
+audio_out_a0 = audioio.AudioOut(board.SPEAKER)
 
 ### 0 is MIDI channel 1
 ### This is listening on channels 1 and 2
@@ -266,6 +273,18 @@ def LFO(start_t, now_t, rate, shape):
 
     return value            
 
+
+wavenames = waveform_names()
+wavename = wavenames[1]  ### TODO - "grep" sawtooth
+
+waves = []
+make_waveforms(waves, wavename, basesamplerate)             
+
+### The voice for extrachannel - a non ADSR wave played with AudioOut
+### object to A0
+### TODO - move more stuff into here
+extravoice = [audio_out_a0, 0]
+
 ### Initial ADSR values
 attack  = 0.050
 release = 0.500
@@ -286,6 +305,9 @@ lforate = 1     ### Initial rate in Hz
 lfostart_t = time.monotonic()
 lfoshape = "triangle"
 
+gc.collect()
+print(gc.mem_free())
+
 print("Ready to play")
 
 ### TODO - time.monotonic() loses decimal places as the number gets large
@@ -295,7 +317,7 @@ while True:
     (msg, channel) = midi.read_in_port()  ### channels are protocol number
     if isinstance(msg, adafruit_midi.NoteOn) and msg.velocity != 0:
         if debug:
-            print("NoteOn", msg.note, msg.velocity)
+            print("NoteOn", channel + 1, msg.note, msg.velocity)
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         ### TODO BUG - S/B also triggered Invalid PWM frequency (0?? extreme pitch bending??)
@@ -304,42 +326,61 @@ while True:
 
         ##print(msg.note, msg.velocity, basefreq)
         
-        (oscvcatouse, next) = assignvoice(oscvcas, nextoscvca)
-        if next is not None:
-            nextoscvca = next  ### Advance voice selection as required
+        if channel in duochannels:
+            (oscvcatouse, next) = assignvoice(oscvcas, nextoscvca)
+            if next is not None:
+                nextoscvca = next  ### Advance voice selection as required
 
-        ### Set everything bar the VCA (element 1) which will be set RSN
-        ### at end of if statement
-        oscvcas[oscvcatouse][0].frequency = frequency
-        oscvcas[oscvcatouse][2] = channel
-        oscvcas[oscvcatouse][3] = msg.note
-        oscvcas[oscvcatouse][4] = msg.velocity
-        oscvcas[oscvcatouse][5] = time.monotonic()
-        oscvcas[oscvcatouse][6] = 0.0
-        oscvcas[oscvcatouse][7] = 0.0
-        
+            ### Set everything bar the VCA (element 1) which will be set RSN
+            ### at end of if statement
+            oscvcas[oscvcatouse][0].frequency = frequency
+            oscvcas[oscvcatouse][2] = channel
+            oscvcas[oscvcatouse][3] = msg.note
+            oscvcas[oscvcatouse][4] = msg.velocity
+            oscvcas[oscvcatouse][5] = time.monotonic()
+            oscvcas[oscvcatouse][6] = 0.0
+            oscvcas[oscvcatouse][7] = 0.0
+        elif channel in extrachannel:
+            notesamplerate = basesamplerate * frequency / A4refhz 
+
+            ### Select the sine wave with volume for the note velocity
+            ### 11.3 is a touch bigger than the square root of 127
+            wavevol = int(math.sqrt(msg.velocity) / 11.3 * len(waves))
+            ##print(msg.note, notefreq, notesamplerate, ":", msg.velocity, wavevol, len(waves))
+            wave = waves[wavevol]
+            wave.sample_rate = round(notesamplerate)  ### integer only
+            extravoice[0].play(wave, loop=True)
+            extravoice[1] = msg.note
+        else:
+            print("Unexpected channel", channel)
+
         noteled(pixels, msg.note, msg.velocity)
 
     elif (isinstance(msg, adafruit_midi.NoteOff) or 
           isinstance(msg, adafruit_midi.NoteOn) and msg.velocity == 0):
         if debug:
-            print("NoteOff", msg.note, msg.velocity)
+            print("NoteOff", channel + 1, msg.note, msg.velocity)
         ### Our duophonic "synth module" needs to ignore keys that were pressed before the
         ### 0/1/2 notes that are currently playing
         ### TODO - currently disregards channel number - review this
-        for voice in oscvcas:
-            if msg.note == voice[3]:
-                ### Insert calculated volume and then
-                ### insert release time               
-                now_t = time.monotonic()
-                voice[7] = ADSR(voice[4],
-                                voice[5], voice[6], now_t,
-                                attack, decay, sustain, release,
-                                voice[7])
-                voice[6] = now_t
-                
-        noteled(pixels, msg.note, 0)
         
+        if channel in duochannels:
+            for voice in oscvcas:
+                if msg.note == voice[3]:
+                    ### Insert calculated volume and then
+                    ### insert release time               
+                    now_t = time.monotonic()
+                    voice[7] = ADSR(voice[4],
+                                    voice[5], voice[6], now_t,
+                                    attack, decay, sustain, release,
+                                    voice[7])
+                    voice[6] = now_t
+        elif channel in extrachannel:
+            if msg.note == extravoice[1]:
+                extravoice[0].stop()
+
+        noteled(pixels, msg.note, 0)
+
     elif isinstance(msg, adafruit_midi.PitchBendChange):
         pitchbendvalue = msg.pitch_bend   ### 0 to 16383
         ### TODO - undo cut and paste here
@@ -380,7 +421,7 @@ while True:
 
     elif msg is not None:
         if debug:
-            print("Something else:", msg)
+            print("Something else:", channel + 1, msg)
 
     ### Create envelopes for any active voices
     now_t = time.monotonic()
