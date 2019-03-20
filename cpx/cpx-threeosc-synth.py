@@ -57,7 +57,8 @@ import gc
 gc.collect()
 print(gc.mem_free())
 
-from waveforms import make_waveforms, waveform_names
+#from waveforms import make_waveforms, waveform_names
+from synthfunctions import make_waveforms, waveform_names, ADSR, LFO
 
 gc.collect()
 print(gc.mem_free())
@@ -66,36 +67,37 @@ A4refhz = 440
 midinoteC4 = 60
 midinoteA4 = 69
 #basesamplerate = 42240  ### this makes A4 exactly 96 samples
-basesamplerate = 10560  ### this makes A4 exactly 24 samples
+#basesamplerate = 10560  ### this makes A4 exactly 24 samples
+basesamplerate = 5280  ### this makes A4 exactly 12 samples
 
 ### brightness 1.0 saves memory by removing need for a second buffer
 ### 10 is number of NeoPixels on
 numpixels = const(10)
-#pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
-black = (0, 0, 0)
-#pixels.fill(black)
-pixels = []
+### brightness of 1.0 prevents an extra array from being created
+pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
+pixels.fill(0x000000)
+#pixels = []
 
 ### Turn NeoPixel on to represent a note using RGB x 10
 ### to represent 30 notes
 ### Doesn't do anything with pitch bend
 def noteled(pixels, note, velocity):
     note30 = ( note - midinoteC4 ) % (3 * numpixels)
-    # pos = note30 % numpixels
-    # r, g, b = pixels[pos]
-    # if velocity == 0:
-        # brightness = 0
-    # else:
-        # ### max brightness will be 32
-        # brightness = round(velocity / 127 * 30 + 2)
-    # ### Pick R/G/B based on range within the 30 notes
-    # if note30 < 10:
-        # r = brightness
-    # elif note30 < 20:
-        # g = brightness
-    # else: 
-        # b = brightness
-    # pixels[pos] = (r, g, b)
+    pos = note30 % numpixels
+    r, g, b = pixels[pos]
+    if velocity == 0:
+        brightness = 0
+    else:
+        ### max brightness will be 32
+        brightness = round(velocity / 127 * 30 + 2)
+    ### Pick R/G/B based on range within the 30 notes
+    if note30 < 10:
+        r = brightness
+    elif note30 < 20:
+        g = brightness
+    else: 
+        b = brightness
+    pixels[pos] = (r, g, b)
 
 ### Setup oscillators which are variable frequency square waves
 ### And envelopes which are high frequency pwm outputs
@@ -215,63 +217,6 @@ def assignvoice(oscvcas, nextoscvca):
 ### The next oscillator / vca to use to 
 nextoscvca = 0
 
-### Returns volume as a float based on simple ADSR envelope
-### this will be <= velocity and 0.0 if at end of envelope
-### release_t should be 0.0 until key is released
-### attack is seconds
-### decay is seconds
-### sustain is fraction of velocity, e.g. 0.6 is 60%
-### release is seconds
-### vol_release is the volume when key was released
-def ADSR(velocity, trigger_t, release_t, current_t,
-         attack, decay, sustain, release,
-         vol_release):
-    vol = velocity
-    rel_t = current_t - trigger_t
-
-    if release_t == 0.0:
-        if (rel_t < attack):
-            ### Attack phase
-            vol_attack = vol * rel_t / attack
-            ### bit of a fudge to stop attack starting at 0.0 as this return
-            ### value is used to signify end of envelope
-            if vol_attack > 1.0:
-                return vol_attack
-            else:
-                return 1.0
-
-        ### Decay/Sustain phase
-        if decay != 0.0 and sustain != 1.0:
-            sus_t = rel_t - attack
-            ### Calculate a new vol level
-            if sus_t < decay:
-                vol = vol - sus_t / decay * (1.0 - sustain) * vol
-            else:
-                vol = vol * sustain
-        
-        return vol
-    else:
-        ### Release phase
-        if release == 0.0:
-            return 0.0  ### no release and need to prevent div by zero
-        vol = vol_release - vol_release * ((current_t - release_t) / release)
-        if vol > 0.0:
-            return vol
-        else:
-            return 0.0   ### end of release/note
-
-
-### Return an LFO value between 0.0 and 1.0
-def LFO(start_t, now_t, rate, shape):
-    ### phase will be 0.0 at start to 1.0 at end
-    wavelengths = (now_t - start_t) * rate
-    phase = wavelengths - int(wavelengths)
-    if shape == "triangle":
-        value = 1.0 - 2 * abs(0.5 - phase)
-    else:
-        raise ValueError("Unsupported LFO wave shape")
-
-    return value            
 
 
 wavenames = waveform_names()
@@ -396,9 +341,8 @@ while True:
         if msg.control == 1:  # modulation wheel - TODO MOVE THIS TO adafruit_midi
             ### msg.value is 0 (none) to 127 (max)
             ### TODO - since LFO addition mod wheel needs to do something else
-            newdutycycle = round(32768 + msg.value * 24000 / 127)
-            osc1.duty_cycle = newdutycycle
-            osc2.duty_cycle = newdutycycle
+            ### could do some AM with LFO?
+
         elif msg.control == 73:  # attack - TODO MOVE THIS TO adafruit_midi
             attack = maxattack * msg.value / 127
         elif msg.control == 72:  # release - TODO MOVE THIS TO adafruit_midi
