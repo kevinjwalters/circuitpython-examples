@@ -1,4 +1,4 @@
-### cpx-threeosc-synth v0.8
+### cpx-threeosc-synth v0.9
 ### CircuitPython (on CPX) three oscillator synth module (needs some external hardware)
 ### Midi channels 1 and 2 combined are a duophonic velocity sensitive synth
 ### with ADSR envelopes, pitch bend and mod wheel
@@ -40,6 +40,7 @@
 ### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ### SOFTWARE.
 
+
 import time
 import math
 import random
@@ -49,6 +50,7 @@ import board
 import analogio
 import pulseio
 import neopixel
+
 import adafruit_midi
 import audioio
 
@@ -141,8 +143,8 @@ osc2 = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_freque
 oscvcas.append([osc1, vca1pwm, -1, 0, 0, 0.0, 0.0, 0.0])
 oscvcas.append([osc2, vca2pwm, -1, 0, 0, 0.0, 0.0, 0.0])
 
-### BACK!
-audio_out_a0 = audioio.AudioOut(board.SPEAKER)
+### Audio output via DAC on A0
+audio_out_a0 = audioio.AudioOut(board.A0)
 
 ### 0 is MIDI channel 1
 ### This is listening on channels 1 and 2
@@ -342,7 +344,8 @@ while True:
             ### msg.value is 0 (none) to 127 (max)
             ### TODO - since LFO addition mod wheel needs to do something else
             ### could do some AM with LFO?
-
+            pass
+            
         elif msg.control == 73:  # attack - TODO MOVE THIS TO adafruit_midi
             attack = maxattack * msg.value / 127
         elif msg.control == 72:  # release - TODO MOVE THIS TO adafruit_midi
