@@ -1,4 +1,4 @@
-### cpx-threeosc-synth v0.9
+### cpx-threeosc-synth v1.0
 ### CircuitPython (on CPX) three oscillator synth module (needs some external hardware)
 ### Midi channels 1 and 2 combined are a duophonic velocity sensitive synth
 ### with ADSR envelopes, pitch bend and mod wheel
@@ -51,7 +51,23 @@ import analogio
 import pulseio
 import neopixel
 
-import adafruit_midi
+import adafruit_midi  
+
+from adafruit_midi.note_on           import NoteOn
+from adafruit_midi.note_off          import NoteOff
+from adafruit_midi.control_change    import ControlChange
+from adafruit_midi.pitch_bend_change import PitchBendChange
+from adafruit_midi.channel_pressure  import ChannelPressure
+
+### MIDI messages (events) not in use
+### for testing to see how much memory is consumed
+### Need to sacrifice all of these!
+#from adafruit_midi.timing_clock      import TimingClock
+#from adafruit_midi.system_exclusive  import SystemExclusive
+#from adafruit_midi.polyphonic_key_pressure import PolyphonicKeyPressure
+#from adafruit_midi.program_change    import ProgramChange
+
+
 import audioio
 
 import gc
@@ -77,8 +93,7 @@ basesamplerate = 5280  ### this makes A4 exactly 12 samples
 numpixels = const(10)
 ### brightness of 1.0 prevents an extra array from being created
 pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
-pixels.fill(0x000000)
-#pixels = []
+
 
 ### Turn NeoPixel on to represent a note using RGB x 10
 ### to represent 30 notes
@@ -105,7 +120,6 @@ def noteled(pixels, note, velocity):
 ### And envelopes which are high frequency pwm outputs
 ### Capacitors on the external board smooth envelope pwm output
 ### and limit rate of change and smooth envelope voltage
-oscvcas = []
 
 ### TODO - might be interesting to drop this to lower frequencies
 ### for the tremolo effect
@@ -140,6 +154,7 @@ osc2 = pulseio.PWMOut(board.A6, duty_cycle=2**15, frequency=441, variable_freque
 ### midi channel number (0-15), note number,
 ### velocity (0 indicates voice not active),
 ### key trigger time, key release time, volume at release]
+oscvcas = []
 oscvcas.append([osc1, vca1pwm, -1, 0, 0, 0.0, 0.0, 0.0])
 oscvcas.append([osc2, vca2pwm, -1, 0, 0, 0.0, 0.0, 0.0])
 
@@ -191,7 +206,7 @@ debug = False
 def assignvoice(oscvcas, nextoscvca):
     oscvcatouse = None
     next = None
-    
+
     voiceidx = nextoscvca
     for i in range(len(oscvcas)):
         if oscvcas[voiceidx][4] != 0 and oscvcas[voiceidx][3] == msg.note:
@@ -209,21 +224,18 @@ def assignvoice(oscvcas, nextoscvca):
                 oscvcatouse = voiceidx
                 break
             voiceidx = ( voiceidx + 1 ) % len(oscvcas)
-                
+
     if oscvcatouse is None:
         oscvcatouse = nextoscvca
         next = ( nextoscvca + 1 ) % len(oscvcas)  ### advance next
-    
+
     return (oscvcatouse, next)
 
 ### The next oscillator / vca to use to 
 nextoscvca = 0
 
-
-
 wavenames = waveform_names()
-wavename = wavenames[1]  ### TODO - "grep" sawtooth
-
+wavename = wavenames[1]  ### TODO - "grep" sawtooth or replace these with consts
 waves = []
 make_waveforms(waves, wavename, basesamplerate)             
 
@@ -262,7 +274,7 @@ print("Ready to play")
 
 while True:
     (msg, channel) = midi.read_in_port()  ### channels are protocol number
-    if isinstance(msg, adafruit_midi.NoteOn) and msg.velocity != 0:
+    if isinstance(msg, NoteOn) and msg.velocity != 0:
         if debug:
             print("NoteOn", channel + 1, msg.note, msg.velocity)
         lastnote = msg.note
@@ -272,7 +284,7 @@ while True:
         frequency = round(A4refhz * math.pow(2, (lastnote - midinoteA4 + pitchbend) / 12.0))
 
         ##print(msg.note, msg.velocity, basefreq)
-        
+
         if channel in duochannels:
             (oscvcatouse, next) = assignvoice(oscvcas, nextoscvca)
             if next is not None:
@@ -303,14 +315,14 @@ while True:
 
         noteled(pixels, msg.note, msg.velocity)
 
-    elif (isinstance(msg, adafruit_midi.NoteOff) or 
-          isinstance(msg, adafruit_midi.NoteOn) and msg.velocity == 0):
+    elif (isinstance(msg, NoteOff) or 
+          isinstance(msg, NoteOn) and msg.velocity == 0):
         if debug:
             print("NoteOff", channel + 1, msg.note, msg.velocity)
         ### Our duophonic "synth module" needs to ignore keys that were pressed before the
         ### 0/1/2 notes that are currently playing
         ### TODO - currently disregards channel number - review this
-        
+
         if channel in duochannels:
             for voice in oscvcas:
                 if msg.note == voice[3]:
@@ -328,7 +340,7 @@ while True:
 
         noteled(pixels, msg.note, 0)
 
-    elif isinstance(msg, adafruit_midi.PitchBendChange):
+    elif isinstance(msg, PitchBendChange):
         pitchbendvalue = msg.pitch_bend   ### 0 to 16383
         ### TODO - undo cut and paste here
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
@@ -338,8 +350,8 @@ while True:
             if voice[3] > 0 and voice[2] == channel:
                 frequency = round(A4refhz * math.pow(2, (voice[3] - midinoteA4 + pitchbend) / 12.0))
                 voice[0].frequency = frequency
-                
-    elif isinstance(msg, adafruit_midi.ControlChange):
+
+    elif isinstance(msg, ControlChange):
         if msg.control == 1:  # modulation wheel - TODO MOVE THIS TO adafruit_midi
             ### msg.value is 0 (none) to 127 (max)
             ### TODO - since LFO addition mod wheel needs to do something else
