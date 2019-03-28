@@ -414,7 +414,7 @@ while True:
                 voice[4] = 0  ### end of note playing
             else:
                 ### Modulate duty_cycle of oscillator with LFO from 56.25% to 93.75%
-                offset = 4096 + round(24576 * lfovalue * max(lfodcdepth, aftertouch))
+                offset = 4096 + round(24576 * max(aftertouch, lfovalue * lfodcdepth))
                 if voiceidx % 2 == 0:
                     offset = -offset  ### or 43.75% to 6.25%
                 voice[0].duty_cycle = 32768 + offset
