@@ -48,6 +48,7 @@ import random
 import array
 
 import board
+import digitalio
 import analogio
 import pulseio
 import neopixel
@@ -270,6 +271,8 @@ lfoamdepth = 0.0  ### off
 lforate = 1     ### Initial rate in Hz
 lfostart_t = time.monotonic()
 lfoshape = "triangle"
+boardled = digitalio.DigitalInOut(board.D13)
+boardled.direction = digitalio.Direction.OUTPUT
 
 aftertouch = 0.0
 
@@ -415,3 +418,5 @@ while True:
                 if voiceidx % 2 == 0:
                     offset = -offset  ### or 43.75% to 6.25%
                 voice[0].duty_cycle = 32768 + offset
+    ### Show LFO rate on D13 LED    
+    boardled.value = lfovalue > 0.85
