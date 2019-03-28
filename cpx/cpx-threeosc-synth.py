@@ -1,8 +1,9 @@
 ### cpx-threeosc-synth v1.0
 ### CircuitPython (on CPX) three oscillator synth module (needs some external hardware)
 ### Midi channels 1 and 2 combined are a duophonic velocity sensitive synth
-### with ADSR envelopes, pitch bend and mod wheel
-### Midi 3 is a simple wave table synth with no velocity
+### with ADSR envelopes, pitch bend and LFO for amplitude and duty cycle
+### controlled by mod wheel, aftertouch and various CC
+### Midi 3 is a simple coarse triangle synth with no velocity
 ###
 ### Wiring
 ### A0  Ana0
@@ -238,11 +239,15 @@ wavenames = waveform_names()
 wavename = wavenames[1]  ### TODO - "grep" sawtooth or replace these with consts
 waves = []
 make_waveforms(waves, wavename, basesamplerate)             
+silenceat0 = audioio.RawSample(array.array("H",[0]))
 
 ### The voice for extrachannel - a non ADSR wave played with AudioOut
 ### object to A0
 ### TODO - move more stuff into here
 extravoice = [audio_out_a0, 0]
+### Set the output to 0 (0V) rather than its normal midpoint 32768 (1.65V)
+### to allow for the imperfectections in the external mixer
+audio_out_a0.play(silenceat0)
 
 ### Initial ADSR values
 attack  = 0.050
@@ -260,9 +265,13 @@ lfomin = 1/32   ### Hz
 lfomax = 16     ### Hz
 lfopow2range = math.log(lfomax / lfomin) / math.log(2)
 lfovalue = 0.0  ### Initial value
+lfodcdepth = 0.0  ### off
+lfoamdepth = 0.0  ### off
 lforate = 1     ### Initial rate in Hz
 lfostart_t = time.monotonic()
 lfoshape = "triangle"
+
+aftertouch = 0.0
 
 gc.collect()
 print(gc.mem_free())
@@ -336,8 +345,9 @@ while True:
                     voice[6] = now_t
         elif channel in extrachannel:
             if msg.note == extravoice[1]:
-                extravoice[0].stop()
-
+                ### Avoid use of stop() as this would go to 32768 midpoint
+                ## extravoice[0].stop()
+                extravoice[0].play(silenceat0, loop=True)
         noteled(pixels, msg.note, 0)
 
     elif isinstance(msg, PitchBendChange):
@@ -351,12 +361,13 @@ while True:
                 frequency = round(A4refhz * math.pow(2, (voice[3] - midinoteA4 + pitchbend) / 12.0))
                 voice[0].frequency = frequency
 
+    elif isinstance(msg, ChannelPressure):
+        aftertouch = msg.pressure / 127.0
+                
     elif isinstance(msg, ControlChange):
         if msg.control == 1:  # modulation wheel - TODO MOVE THIS TO adafruit_midi
             ### msg.value is 0 (none) to 127 (max)
-            ### TODO - since LFO addition mod wheel needs to do something else
-            ### could do some AM with LFO?
-            pass
+            lfodcdepth = msg.value / 127.0
             
         elif msg.control == 73:  # attack - TODO MOVE THIS TO adafruit_midi
             attack = maxattack * msg.value / 127
@@ -371,7 +382,7 @@ while True:
             ### phase matching for old and new rates would solve this
             lforate = lfomin * math.pow(2, lfopow2range * msg.value / 127)
         elif msg.control == 93:  # LFO depth
-            pass  ### cpx-basic-square-duosynth
+            lfoamdepth = msg.value / 127.0
         elif msg.control == 7:   # LFO depth
             if channel in duochannels:
                 volduo = msg.value
@@ -393,14 +404,14 @@ while True:
                            voice[7])
             ### magic number in 1/math.sqrt(127)
             envampl = round(math.pow(ADSRvol, velcurve) * veltovolc040 *
-                            math.sqrt(volduo) * 0.088735651)
+                            math.sqrt(volduo * (1.0 - lfoamdepth * lfovalue)) * 0.088735651)
             ### TODO BUG - somewhere as this breached 0 - 65535 during S/B
             voice[1].duty_cycle = envampl
             if ADSRvol == 0.0:            
                 voice[4] = 0  ### end of note playing
             else:
                 ### Modulate duty_cycle of oscillator with LFO from 56.25% to 93.75%
-                offset = 4096 + round(24576 * lfovalue)
+                offset = 4096 + round(24576 * lfovalue * max(lfodcdepth, aftertouch))
                 if voiceidx % 2 == 0:
                     offset = -offset  ### or 43.75% to 6.25%
                 voice[0].duty_cycle = 32768 + offset
