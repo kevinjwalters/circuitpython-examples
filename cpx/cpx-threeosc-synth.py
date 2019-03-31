@@ -87,8 +87,9 @@ A4refhz = 440
 midinoteC4 = 60
 midinoteA4 = 69
 #basesamplerate = 42240  ### this makes A4 exactly 96 samples
+basesamplerate = 21120  ### this makes A4 exactly 48 samples
 #basesamplerate = 10560  ### this makes A4 exactly 24 samples
-basesamplerate = 5280  ### this makes A4 exactly 12 samples
+#basesamplerate = 5280  ### this makes A4 exactly 12 samples
 
 ### brightness 1.0 saves memory by removing need for a second buffer
 ### 10 is number of NeoPixels on
@@ -237,7 +238,7 @@ def assignvoice(oscvcas, nextoscvca):
 nextoscvca = 0
 
 wavenames = waveform_names()
-wavename = wavenames[1]  ### TODO - "grep" sawtooth or replace these with consts
+wavename = wavenames[1]  ### TODO - "grep" sawtooth or replace these with enum
 waves = []
 make_waveforms(waves, wavename, basesamplerate)             
 silenceat0 = audioio.RawSample(array.array("H",[0]))
@@ -406,11 +407,12 @@ while True:
                            attack, decay, sustain, release,
                            voice[7])
             ### magic number in 1/math.sqrt(127)
-            envampl = round(math.pow(ADSRvol, velcurve) * veltovolc040 *
-                            math.sqrt(volduo * (1.0 - lfoamdepth * lfovalue)) * 0.088735651)
-            ### TODO BUG - somewhere as this breached 0 - 65535 during S/B
+            envampl = round(math.pow(ADSRvol, velcurve) * veltovolc040
+                            * math.sqrt(volduo * (1.0 - lfoamdepth * lfovalue))
+                            * 0.088735651)
+            ### TODO BUG - somewhere as this breached 0 - 65535 during S/B (try multiple restarts at bar 1)
             voice[1].duty_cycle = envampl
-            if ADSRvol == 0.0:            
+            if ADSRvol == 0.0:
                 voice[4] = 0  ### end of note playing
             else:
                 ### Modulate duty_cycle of oscillator with LFO from 56.25% to 93.75%
@@ -418,5 +420,5 @@ while True:
                 if voiceidx % 2 == 0:
                     offset = -offset  ### or 43.75% to 6.25%
                 voice[0].duty_cycle = 32768 + offset
-    ### Show LFO rate on D13 LED    
+    ### Show LFO rate on D13 LED
     boardled.value = lfovalue > 0.85
