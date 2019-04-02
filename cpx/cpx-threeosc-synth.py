@@ -1,4 +1,4 @@
-### cpx-threeosc-synth v1.0
+### cpx-threeosc-synth v1.1
 ### CircuitPython (on CPX) three oscillator synth module (needs some external hardware)
 ### Midi channels 1 and 2 combined are a duophonic velocity sensitive synth
 ### with ADSR envelopes, pitch bend and LFO for amplitude and duty cycle
@@ -87,9 +87,9 @@ A4refhz = 440
 midinoteC4 = 60
 midinoteA4 = 69
 #basesamplerate = 42240  ### this makes A4 exactly 96 samples
-basesamplerate = 21120  ### this makes A4 exactly 48 samples
+#basesamplerate = 21120  ### this makes A4 exactly 48 samples
 #basesamplerate = 10560  ### this makes A4 exactly 24 samples
-#basesamplerate = 5280  ### this makes A4 exactly 12 samples
+basesamplerate = 5280  ### this makes A4 exactly 12 samples
 
 ### brightness 1.0 saves memory by removing need for a second buffer
 ### 10 is number of NeoPixels on
@@ -286,7 +286,7 @@ print("Ready to play")
 ###      - problematic for long running code
 
 while True:
-    (msg, channel) = midi.read_in_port()  ### channels are protocol number
+    (msg, channel) = midi.receive()  ### channels are protocol number
     if isinstance(msg, NoteOn) and msg.velocity != 0:
         if debug:
             print("NoteOn", channel + 1, msg.note, msg.velocity)
