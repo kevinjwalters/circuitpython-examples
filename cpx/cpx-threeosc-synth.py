@@ -1,4 +1,4 @@
-### cpx-threeosc-synth v1.1
+### cpx-threeosc-synth v1.2
 ### CircuitPython (on CPX) three oscillator synth module (needs some external hardware)
 ### Midi channels 1 and 2 combined are a duophonic velocity sensitive synth
 ### with ADSR envelopes, pitch bend and LFO for amplitude and duty cycle
@@ -55,11 +55,11 @@ import neopixel
 
 import adafruit_midi  
 
-from adafruit_midi.note_on           import NoteOn
-from adafruit_midi.note_off          import NoteOff
-from adafruit_midi.control_change    import ControlChange
-from adafruit_midi.pitch_bend_change import PitchBendChange
-from adafruit_midi.channel_pressure  import ChannelPressure
+from adafruit_midi.note_on          import NoteOn
+from adafruit_midi.note_off         import NoteOff
+from adafruit_midi.control_change   import ControlChange
+from adafruit_midi.pitch_bend       import PitchBend
+from adafruit_midi.channel_pressure import ChannelPressure
 
 ### MIDI messages (events) not in use
 ### for testing to see how much memory is consumed
@@ -354,7 +354,7 @@ while True:
                 extravoice[0].play(silenceat0, loop=True)
         noteled(pixels, msg.note, 0)
 
-    elif isinstance(msg, PitchBendChange):
+    elif isinstance(msg, PitchBend):
         pitchbendvalue = msg.pitch_bend   ### 0 to 16383
         ### TODO - undo cut and paste here
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
