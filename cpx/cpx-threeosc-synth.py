@@ -1,4 +1,4 @@
-### cpx-threeosc-synth v1.2
+### cpx-threeosc-synth v1.3
 ### CircuitPython (on CPX) three oscillator synth module (needs some external hardware)
 ### Midi channels 1 and 2 combined are a duophonic velocity sensitive synth
 ### with ADSR envelopes, pitch bend and LFO for amplitude and duty cycle
@@ -59,7 +59,9 @@ from adafruit_midi.note_on          import NoteOn
 from adafruit_midi.note_off         import NoteOff
 from adafruit_midi.control_change   import ControlChange
 from adafruit_midi.pitch_bend       import PitchBend
-from adafruit_midi.channel_pressure import ChannelPressure
+
+# PR #9 review changes consumed more memory and cannot now import ChannelPressure
+#from adafruit_midi.channel_pressure import ChannelPressure
 
 ### MIDI messages (events) not in use
 ### for testing to see how much memory is consumed
@@ -286,10 +288,10 @@ print("Ready to play")
 ###      - problematic for long running code
 
 while True:
-    (msg, channel) = midi.receive()  ### channels are protocol number
+    msg = midi.receive()  ### channels are protocol number
     if isinstance(msg, NoteOn) and msg.velocity != 0:
         if debug:
-            print("NoteOn", channel + 1, msg.note, msg.velocity)
+            print("NoteOn", msg.channel + 1, msg.note, msg.velocity)
         lastnote = msg.note
         pitchbend = (pitchbendvalue - 8192) * pitchbendmultiplier
         ### TODO BUG - S/B also triggered Invalid PWM frequency (0?? extreme pitch bending??)
@@ -298,7 +300,7 @@ while True:
 
         ##print(msg.note, msg.velocity, basefreq)
 
-        if channel in duochannels:
+        if msg.channel in duochannels:
             (oscvcatouse, next) = assignvoice(oscvcas, nextoscvca)
             if next is not None:
                 nextoscvca = next  ### Advance voice selection as required
@@ -306,13 +308,13 @@ while True:
             ### Set everything bar the VCA (element 1) which will be set RSN
             ### at end of if statement
             oscvcas[oscvcatouse][0].frequency = frequency
-            oscvcas[oscvcatouse][2] = channel
+            oscvcas[oscvcatouse][2] = msg.channel
             oscvcas[oscvcatouse][3] = msg.note
             oscvcas[oscvcatouse][4] = msg.velocity
             oscvcas[oscvcatouse][5] = time.monotonic()
             oscvcas[oscvcatouse][6] = 0.0
             oscvcas[oscvcatouse][7] = 0.0
-        elif channel in extrachannel:
+        elif msg.channel in extrachannel:
             notesamplerate = basesamplerate * frequency / A4refhz 
 
             ### Select the sine wave with volume for the note velocity
@@ -324,19 +326,19 @@ while True:
             extravoice[0].play(wave, loop=True)
             extravoice[1] = msg.note
         else:
-            print("Unexpected channel", channel)
+            print("Unexpected msg.channel", msg.channel)
 
         noteled(pixels, msg.note, msg.velocity)
 
     elif (isinstance(msg, NoteOff) or 
           isinstance(msg, NoteOn) and msg.velocity == 0):
         if debug:
-            print("NoteOff", channel + 1, msg.note, msg.velocity)
+            print("NoteOff", msg.channel + 1, msg.note, msg.velocity)
         ### Our duophonic "synth module" needs to ignore keys that were pressed before the
         ### 0/1/2 notes that are currently playing
         ### TODO - currently disregards channel number - review this
 
-        if channel in duochannels:
+        if msg.channel in duochannels:
             for voice in oscvcas:
                 if msg.note == voice[3]:
                     ### Insert calculated volume and then
@@ -347,7 +349,7 @@ while True:
                                     attack, decay, sustain, release,
                                     voice[7])
                     voice[6] = now_t
-        elif channel in extrachannel:
+        elif msg.channel in extrachannel:
             if msg.note == extravoice[1]:
                 ### Avoid use of stop() as this would go to 32768 midpoint
                 ## extravoice[0].stop()
@@ -361,12 +363,12 @@ while True:
         for voice in oscvcas:
             ### Check velocity which indicates active voice and 
             ### look for channel match
-            if voice[3] > 0 and voice[2] == channel:
+            if voice[3] > 0 and voice[2] == msg.channel:
                 frequency = round(A4refhz * math.pow(2, (voice[3] - midinoteA4 + pitchbend) / 12.0))
                 voice[0].frequency = frequency
 
-    elif isinstance(msg, ChannelPressure):
-        aftertouch = msg.pressure / 127.0
+#    elif isinstance(msg, ChannelPressure):
+#        aftertouch = msg.pressure / 127.0
                 
     elif isinstance(msg, ControlChange):
         if msg.control == 1:  # modulation wheel - TODO MOVE THIS TO adafruit_midi
@@ -388,14 +390,14 @@ while True:
         elif msg.control == 93:  # LFO depth
             lfoamdepth = msg.value / 127.0
         elif msg.control == 7:   # LFO depth
-            if channel in duochannels:
+            if msg.channel in duochannels:
                 volduo = msg.value
-            elif channel in extrachannel:
+            elif msg.channel in extrachannel:
                 volextra = msg.value
 
     elif msg is not None:
         if debug:
-            print("Something else:", channel + 1, msg)
+            print("Something else:", msg.channel + 1, msg)
 
     ### Create envelopes for any active voices
     now_t = time.monotonic()
