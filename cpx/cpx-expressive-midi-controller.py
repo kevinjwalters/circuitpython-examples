@@ -52,12 +52,14 @@ from adafruit_midi.note_off         import NoteOff
 from adafruit_midi.control_change   import ControlChange
 from adafruit_midi.pitch_bend       import PitchBend
 
+midinoteC4 = 60
 
 # 0x19 is the i2c address of the onboard accelerometer
 acc_i2c = busio.I2C(board.ACCELEROMETER_SCL, board.ACCELEROMETER_SDA)
 acc_int1 = digitalio.DigitalInOut(board.ACCELEROMETER_INTERRUPT)
 acc = adafruit_lis3dh.LIS3DH_I2C(acc_i2c, address=0x19, int1=acc_int1)
-acc.range = adafruit_lis3dh.RANGE_8_G
+acc.range = adafruit_lis3dh.RANGE_2_G
+acc.data_rate = adafruit_lis3dh.DATARATE_10_HZ
 
 # TODO - look at what can be done to average/filter/denoise the accelerometer
 # set/drop its sample rate?
@@ -85,7 +87,7 @@ def noteLED(pixels, note, velocity):
         r = brightness
     elif note30 < 20:
         g = brightness
-    else: 
+    else:
         b = brightness
     pixels[pos] = (r, g, b)
 
@@ -101,11 +103,11 @@ pads = [ board.A4,
          board.A7,
          board.A1,
          board.A2,
-         board.A3]                          
+         board.A3]
 
 touchpads = [touchio.TouchIn(pad) for pad in pads]
-del pads  ### done with that         
-                      
+del pads  ### done with that
+
 pitch_bend_value = 8192  # mid point - no bend
 debug = True
 mod_wheel = 0
@@ -120,9 +122,9 @@ buttonright.switch_to_input(pull=digitalio.Pull.DOWN)
 majorscale = [0, 2, 4, 5, 7, 9, 11]
 chromatic = [0, 1, 2, 3, 4 , 5, 6 ]
 chromatic_p7 = [7, 8, 9, 10, 11, 12, 13]  # could use this for two together
-basenote = 60  ### C4 middle C
+base_note = midinoteC4  # C4 middle C
 
-midinotes = [semitone + basenote for semitone in majorscale]
+midinotes = [semitone + base_note for semitone in majorscale]
 keydown = [False] * 7
 
 velocity = 127
@@ -130,17 +132,31 @@ minoct = -3
 maxoct = +3
 octave = 0
 
+### 1/10 = 10 Hz - review data_rate setting if this is changed
 acc_read_t = time.monotonic()
-acc_read_period = 1/10  ### 10 Hz
+acc_read_period = 1/10
 
-# TODO - this needs to deal with negative acc_g
-def scale_acc(acc_g, min_g, range_g, value_range):
-    adj_g = acc_g - min_g
-    if acc_g <= 0:
+# Convert an accelerometer reading
+# from min_msm2 to min_msm2+range to an int from 0 to value_range
+# or return 0 or value_range outside those values
+# the conversion is applied "symmetrically" to negative numbers
+def scale_acc(acc_msm2, min_msm2, range_msm2, value_range):
+    if acc_msm2 >= 0.0:
+        sign_a_m = 1
+        magn_acc_msm2 = acc_msm2
+    else:
+        sign_a_m = -1
+        magn_acc_msm2 = abs(acc_msm2)
+
+    adj_msm2 = magn_acc_msm2 - min_msm2
+
+    # deal with out of bounds values else do scaling
+    if adj_msm2 <= 0:
         return 0
-    if adj_g > range_g:
-        return value_range
-    return round(adj_g / range_g * value_range)
+    elif adj_msm2 > range_msm2:
+        return sign_a_m * value_range
+    else:
+        return sign_a_m * round(adj_msm2 / range_msm2 * value_range)
 
 ### Scan each pad and look for changes by comparing
 ### with keystate stored in keydown boolean list
@@ -155,29 +171,31 @@ while True:
                 print(keydown[idx], note)
             if (keydown[idx]):
                 midi.send(NoteOn(note, velocity))
+                noteLED(pixels, note, velocity)
             else:
                 midi.send(NoteOff(note, velocity))
+                noteLED(pixels, note, 0)
 
     # Perform rate limited checks on the accelerometer
     now_t = time.monotonic()
     if now_t - acc_read_t > acc_read_period:
         acc_read_t = time.monotonic()
         ax, ay, az = acc.acceleration
-        
-        new_mod_wheel = abs(scale_acc(ay, 1.0, 4.0, 127))
+
+        new_mod_wheel = abs(scale_acc(ay, 1.3, 4.0, 127))
         if abs(new_mod_wheel - mod_wheel) > 5 or (new_mod_wheel == 0 and mod_wheel != 0):
             if debug:
                 print("Modulation", new_mod_wheel)
             midi.send(ControlChange(cc_mod, new_mod_wheel))
             mod_wheel = new_mod_wheel
-            
-        new_pitch_bend_value = 8192 - scale_acc(ax, 1.0, 4.0, 8191)
+
+        new_pitch_bend_value = 8192 - scale_acc(ax, 1.3, 4.0, 8191)
         if abs(new_pitch_bend_value - pitch_bend_value) > 250 or (new_pitch_bend_value == 8192 and pitch_bend_value != 8192):
             if debug:
                 print("Pitch Bend", new_pitch_bend_value)
             midi.send(PitchBend(new_pitch_bend_value))
             pitch_bend_value = new_pitch_bend_value
-        
+
     ### change these - left octave, right scale?
     if buttonleft.value and octave > minoct:
         ### TODO - clear any notes
