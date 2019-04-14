@@ -1,6 +1,9 @@
-### cpx-expressive-midi-controller v0.6
+### cpx-expressive-midi-controller v1.0
 ### CircuitPython (on CPX) MIDI controller using the seven touch pads
 ### and accelerometer for modulation (cc1) and pitch bend
+### Left button adjusts octave (switch left) or semitone (switch right)
+### Right button adjusts scale, major or chromatic
+### Switch right also disables pitch bend and modulation
 
 ### Tested with CPX and CircuitPython and 4.0.0-beta.5
 
@@ -30,8 +33,6 @@
 ### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ### SOFTWARE.
 
-
-import array
 import time
 import math
 
@@ -39,20 +40,22 @@ import digitalio
 import touchio
 import busio
 import board
-
 import usb_midi
 import neopixel
+
 import adafruit_lis3dh
 import adafruit_midi
-
-from adafruit_midi.midi_message     import note_parser
 
 from adafruit_midi.note_on          import NoteOn
 from adafruit_midi.note_off         import NoteOff
 from adafruit_midi.control_change   import ControlChange
 from adafruit_midi.pitch_bend       import PitchBend
 
-midinoteC4 = 60
+debug = True
+
+# MIDI defines middle C as 60 and modulation wheel is cc 1 by convention
+midi_note_C4 = 60
+midi_cc_modwheel = const(1)
 
 # 0x19 is the i2c address of the onboard accelerometer
 acc_i2c = busio.I2C(board.ACCELEROMETER_SCL, board.ACCELEROMETER_SDA)
@@ -61,20 +64,15 @@ acc = adafruit_lis3dh.LIS3DH_I2C(acc_i2c, address=0x19, int1=acc_int1)
 acc.range = adafruit_lis3dh.RANGE_2_G
 acc.data_rate = adafruit_lis3dh.DATARATE_10_HZ
 
-# TODO - look at what can be done to average/filter/denoise the accelerometer
-# set/drop its sample rate?
-
-### brightness 1.0 saves memory by removing need for a second buffer
-### 10 is number of NeoPixels on
+# brightness 1.0 saves memory by removing need for a second buffer
+# 10 is number of NeoPixels on CPX
 numpixels = const(10)
-### brightness of 1.0 prevents an extra array from being created
 pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
 
-### Turn NeoPixel on to represent a note using RGB x 10
-### to represent 30 notes
-### Doesn't do anything with pitch bend
+# Turn NeoPixel on to represent a note using RGB x 10
+# to represent 30 notes - doesn't do anything with pitch bend
 def noteLED(pixels, note, velocity):
-    note30 = ( note - midinoteC4 ) % (3 * numpixels)
+    note30 = ( note - midi_note_C4 ) % (3 * numpixels)
     pos = note30 % numpixels
     r, g, b = pixels[pos]
     if velocity == 0:
@@ -91,12 +89,11 @@ def noteLED(pixels, note, velocity):
         b = brightness
     pixels[pos] = (r, g, b)
 
-cc_mod = 1  # Standard control change for modulation wheel
 midi_channel = 1
 midi = adafruit_midi.MIDI(midi_out=usb_midi.ports[1],
                           out_channel=midi_channel-1)
 
-### CPX order of touchio capable pads (i.e. not A0)
+# CPX counter-clockwise order of touch capable pads (i.e. not A0)
 pads = [ board.A4,
          board.A5,
          board.A6,
@@ -105,41 +102,59 @@ pads = [ board.A4,
          board.A2,
          board.A3]
 
+# The touch pads calibrate themselves as they are created, just once here
 touchpads = [touchio.TouchIn(pad) for pad in pads]
-del pads  ### done with that
+del pads  # done with that
 
-pitch_bend_value = 8192  # mid point - no bend
-debug = True
+pb_midpoint = 8192
+pitch_bend_value = pb_midpoint  # mid point - no bend
+min_pb_change = 250
+
 mod_wheel = 0
+min_mod_change = 5
 
+# button A is on left (usb at top
+button_left = digitalio.DigitalInOut(board.BUTTON_A)
+button_left.switch_to_input(pull=digitalio.Pull.DOWN)
+button_right = digitalio.DigitalInOut(board.BUTTON_B)
+button_right.switch_to_input(pull=digitalio.Pull.DOWN)
+switch_left = digitalio.DigitalInOut(board.SLIDE_SWITCH)
+switch_left.switch_to_input(pull=digitalio.Pull.UP)
 
-### A is on left (usb at top)
-buttonleft = digitalio.DigitalInOut(board.BUTTON_A)
-buttonleft.switch_to_input(pull=digitalio.Pull.DOWN)
-buttonright = digitalio.DigitalInOut(board.BUTTON_B)
-buttonright.switch_to_input(pull=digitalio.Pull.DOWN)
+# some example scales in semitones
+scale_st = { "major": [0, 2, 4, 5, 7, 9, 11],
+             "chromatic": [0, 1, 2, 3, 4 , 5, 6 ]
+           }
+scales = ["major", "chromatic"]
+scale_idx = 0
+base_note = midi_note_C4  # C4 middle C
 
-majorscale = [0, 2, 4, 5, 7, 9, 11]
-chromatic = [0, 1, 2, 3, 4 , 5, 6 ]
-chromatic_p7 = [7, 8, 9, 10, 11, 12, 13]  # could use this for two together
-base_note = midinoteC4  # C4 middle C
+def make_scale(scale_name):
+    return [semitone_offset + base_note
+            for semitone_offset in scale_st[scale_name]]
 
-midinotes = [semitone + base_note for semitone in majorscale]
+midi_notes = make_scale(scales[scale_idx])
 keydown = [False] * 7
 
 velocity = 127
-minoct = -3
-maxoct = +3
+min_octave = -3
+max_octave = +3
 octave = 0
+min_semitone = -11
+max_semitone = +11
+semitone = 0
 
-### 1/10 = 10 Hz - review data_rate setting if this is changed
+# 1/10 = 10 Hz - review data_rate setting if this is changed
 acc_read_t = time.monotonic()
 acc_read_period = 1/10
+# For accelerometer do nothing between 0 and 1.3 (ms-2)
+acc_nullzone = 1.3
+acc_range = 4.0
 
 # Convert an accelerometer reading
 # from min_msm2 to min_msm2+range to an int from 0 to value_range
 # or return 0 or value_range outside those values
-# the conversion is applied "symmetrically" to negative numbers
+# The conversion is applied "symmetrically" to negative numbers
 def scale_acc(acc_msm2, min_msm2, range_msm2, value_range):
     if acc_msm2 >= 0.0:
         sign_a_m = 1
@@ -150,23 +165,25 @@ def scale_acc(acc_msm2, min_msm2, range_msm2, value_range):
 
     adj_msm2 = magn_acc_msm2 - min_msm2
 
-    # deal with out of bounds values else do scaling
+    # deal with out of bounds values else scale value
     if adj_msm2 <= 0:
         return 0
-    elif adj_msm2 > range_msm2:
+    elif adj_msm2 >= range_msm2:
         return sign_a_m * value_range
     else:
         return sign_a_m * round(adj_msm2 / range_msm2 * value_range)
 
-### Scan each pad and look for changes by comparing
-### with keystate stored in keydown boolean list
-### and send note on/off messages accordingly
-### The two buttons are used to shift octave
+# Scan each pad and look for changes by comparing
+# with keystate stored in keydown boolean list
+# and send note on/off messages accordingly
+# Send pitch bend and mod wheel cc based on tilt from accelerometer
+# Change octave and semitone based on buttons
 while True:
     for idx in range(len(touchpads)):
         if touchpads[idx].value != keydown[idx]:
             keydown[idx] = touchpads[idx].value
-            note = midinotes[idx] + octave * 12
+            # 12 semitones in an octave
+            note = midi_notes[idx] + octave * 12 + semitone
             if debug:
                 print(keydown[idx], note)
             if (keydown[idx]):
@@ -177,34 +194,54 @@ while True:
                 noteLED(pixels, note, 0)
 
     # Perform rate limited checks on the accelerometer
+    # if switch is to left
     now_t = time.monotonic()
-    if now_t - acc_read_t > acc_read_period:
+    if switch_left.value and now_t - acc_read_t > acc_read_period:
         acc_read_t = time.monotonic()
         ax, ay, az = acc.acceleration
 
-        new_mod_wheel = abs(scale_acc(ay, 1.3, 4.0, 127))
-        if abs(new_mod_wheel - mod_wheel) > 5 or (new_mod_wheel == 0 and mod_wheel != 0):
+        # scale from 0 to 127 (maximum cc 7bit value)
+        new_mod_wheel = abs(scale_acc(ay, acc_nullzone, acc_range, 127))
+        if (abs(new_mod_wheel - mod_wheel) > min_mod_change
+            or (new_mod_wheel == 0 and mod_wheel != 0)):
             if debug:
                 print("Modulation", new_mod_wheel)
-            midi.send(ControlChange(cc_mod, new_mod_wheel))
+            midi.send(ControlChange(midi_cc_modwheel, new_mod_wheel))
             mod_wheel = new_mod_wheel
 
-        new_pitch_bend_value = 8192 - scale_acc(ax, 1.3, 4.0, 8191)
-        if abs(new_pitch_bend_value - pitch_bend_value) > 250 or (new_pitch_bend_value == 8192 and pitch_bend_value != 8192):
+        # scale from 0 to +/- 8191 (almost maximum signed 14bit values)
+        new_pitch_bend_value = (pb_midpoint
+                                - scale_acc(ax, acc_nullzone, acc_range,
+                                            pb_midpoint - 1))
+        if (abs(new_pitch_bend_value - pitch_bend_value) > min_pb_change
+            or (new_pitch_bend_value == pb_midpoint
+                and pitch_bend_value != pb_midpoint)):
             if debug:
                 print("Pitch Bend", new_pitch_bend_value)
             midi.send(PitchBend(new_pitch_bend_value))
             pitch_bend_value = new_pitch_bend_value
 
-    ### change these - left octave, right scale?
-    if buttonleft.value and octave > minoct:
-        ### TODO - clear any notes
-        octave -= 1
-        while buttonleft.value:
-            pass   ### wait for button up
-    if buttonright.value and octave < maxoct:
-        ### TODO - clear any notes
-        octave += 1
-        while buttonright.value:
-            pass   ### wait for button up
-    ### TODO - add code for switch arp mode?
+    # left button increase octave / semitones shift based on switch
+    # does not currently clear playing notes (buglet)
+    if button_left.value:
+        if switch_left.value:
+            octave += 1
+            if octave > max_octave:
+                octave = min_octave
+        else:
+            semitone += 1
+            if semitone > max_semitone:
+                semitone = min_semitone
+
+        while button_left.value:
+            pass  # wait for button up
+
+    # right button cycles through scales
+    if button_right.value:
+        scale_idx += 1
+        if scale_idx >= len(scales):
+            scale_idx = 0
+        midi_notes = make_scale(scales[scale_idx])
+
+        while button_right.value:
+            pass  # wait for button up
