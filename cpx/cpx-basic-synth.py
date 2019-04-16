@@ -1,4 +1,4 @@
-### cpx-basic-synth v1.0
+### cpx-basic-synth v1.1
 ### CircuitPython (on CPX) synth module using internal speaker
 ### Velocity sensitive monophonic synth
 ### with crude amplitude modulation (cc1) and choppy pitch bend
@@ -59,33 +59,44 @@ speaker_enable.value = speaker_on
 
 dac = audioio.AudioOut(board.SPEAKER)
 
-# 440Hz is the standard frequency for A4, A above middle C
+# 440Hz is the standard frequency for A4 (A above middle C)
 # MIDI defines middle C as 60 and modulation wheel is cc 1 by convention
 A4refhz = const(440)
 midi_note_C4 = note_parser("C4")
 midi_note_A4 = note_parser("A4")
 midi_cc_modwheel = const(1)
 
-sample_len = 96
+# A length of 12 will make the sawtooth rather steppy
+sample_len = 12
 base_sample_rate = A4refhz * sample_len
 max_sample_rate = 350000  # a CPX / M0 DAC limitation
 
-# make a mostly square wave between +/- each value in volumes
-def waveform_square(length, waves, volumes):
+# A sawtooth function like math.sin(angle)
+# 0 returns 1.0, pi returns 0.0, 2*pi returns -1.0
+def sawtooth(angle):
+    return 1.0 - angle % (2 * math.pi) / ( 2 * math.pi ) * 2
+
+# make a sawtooth wave between +/- each value in volumes
+# phase shifted so it starts and ends near 0
+def waveform_sawtooth(length, waves, volumes):
     for vol in volumes:
-        waveraw = array.array("h", [-vol] * (length // 2 - 1)
-                                   + [0]
-                                   +  [vol] * (length - length // 2 - 1)
-                                   + [0])
+        waveraw = array.array("h",
+                              [round(vol * sawtooth((idx + 0.5) / length
+                                                    * 2 * math.pi
+                                                    + math.pi))
+                               for idx in list(range(length))])
         waves.append((audioio.RawSample(waveraw), waveraw))
 
 # Make some square waves of different volumes
 # volumes generated with
-# [round(math.sqrt(x)/(10-1)*32767*(10-1)/math.sqrt(10-1)) for x in range(1, 10)]
+# [round(math.sqrt(x)/15*32767*15/math.sqrt(15)) for x in range(1, 15 + 1)]
+# square root is for mapping velocity to power rather than signal amplitude
 waveform_by_vol = []
-waveform_square(sample_len,
-                waveform_by_vol,
-                [10922, 15447, 18918, 21845, 24423, 26754, 28898, 30893, 32767])
+waveform_sawtooth(sample_len,
+                  waveform_by_vol,
+                  [8460, 11965, 14654, 16921, 18918,
+                   20724, 22384, 23930, 25381, 26754,
+                   28060, 29308, 30504, 31656, 32767])
 
 # brightness 1.0 saves memory by removing need for a second buffer
 # 10 is number of NeoPixels on CPX
