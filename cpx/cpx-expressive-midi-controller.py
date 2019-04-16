@@ -1,4 +1,4 @@
-### cpx-expressive-midi-controller v1.0
+### cpx-expressive-midi-controller v1.1
 ### CircuitPython (on CPX) MIDI controller using the seven touch pads
 ### and accelerometer for modulation (cc1) and pitch bend
 ### Left button adjusts octave (switch left) or semitone (switch right)
@@ -47,11 +47,8 @@ import adafruit_lis3dh
 import adafruit_midi
 
 from adafruit_midi.note_on          import NoteOn
-from adafruit_midi.note_off         import NoteOff
 from adafruit_midi.control_change   import ControlChange
 from adafruit_midi.pitch_bend       import PitchBend
-
-debug = True
 
 # MIDI defines middle C as 60 and modulation wheel is cc 1 by convention
 midi_note_C4 = 60
@@ -89,6 +86,21 @@ def noteLED(pixels, note, velocity):
         b = brightness
     pixels[pos] = (r, g, b)
 
+# white pulse used to indicate octave changes
+flashbrightness = 20
+def flashLED(pixels, position):
+    pos = position % numpixels
+    t1 = time.monotonic()
+    oldcolour = pixels[pos]
+    while time.monotonic() - t1 < 0.25:
+        for i in range(0, flashbrightness, 2):
+            pixels[pos] = (i, i, i)
+        for i in range(flashbrightness, 0, -2):
+            pixels[pos] = (i, i, i)
+    pixels[pos] = oldcolour
+    
+    
+    
 midi_channel = 1
 midi = adafruit_midi.MIDI(midi_out=usb_midi.ports[1],
                           out_channel=midi_channel-1)
@@ -184,13 +196,11 @@ while True:
             keydown[idx] = touchpads[idx].value
             # 12 semitones in an octave
             note = midi_notes[idx] + octave * 12 + semitone
-            if debug:
-                print(keydown[idx], note)
             if (keydown[idx]):
                 midi.send(NoteOn(note, velocity))
                 noteLED(pixels, note, velocity)
             else:
-                midi.send(NoteOff(note, velocity))
+                midi.send(NoteOn(note, 0))  # Using note on 0 for off
                 noteLED(pixels, note, 0)
 
     # Perform rate limited checks on the accelerometer
@@ -204,8 +214,6 @@ while True:
         new_mod_wheel = abs(scale_acc(ay, acc_nullzone, acc_range, 127))
         if (abs(new_mod_wheel - mod_wheel) > min_mod_change
             or (new_mod_wheel == 0 and mod_wheel != 0)):
-            if debug:
-                print("Modulation", new_mod_wheel)
             midi.send(ControlChange(midi_cc_modwheel, new_mod_wheel))
             mod_wheel = new_mod_wheel
 
@@ -216,8 +224,6 @@ while True:
         if (abs(new_pitch_bend_value - pitch_bend_value) > min_pb_change
             or (new_pitch_bend_value == pb_midpoint
                 and pitch_bend_value != pb_midpoint)):
-            if debug:
-                print("Pitch Bend", new_pitch_bend_value)
             midi.send(PitchBend(new_pitch_bend_value))
             pitch_bend_value = new_pitch_bend_value
 
@@ -228,10 +234,13 @@ while True:
             octave += 1
             if octave > max_octave:
                 octave = min_octave
+            flashLED(pixels, octave)
         else:
             semitone += 1
             if semitone > max_semitone:
                 semitone = min_semitone
+            # semitone range is more than number of pixels!
+            flashLED(pixels, semitone)
 
         while button_left.value:
             pass  # wait for button up
@@ -241,6 +250,7 @@ while True:
         scale_idx += 1
         if scale_idx >= len(scales):
             scale_idx = 0
+        flashLED(pixels, scale_idx)
         midi_notes = make_scale(scales[scale_idx])
 
         while button_right.value:
