@@ -1,4 +1,4 @@
-### cpx-basic-synth v1.1
+### cpx-basic-synth v1.2
 ### CircuitPython (on CPX) synth module using internal speaker
 ### Velocity sensitive monophonic synth
 ### with crude amplitude modulation (cc1) and choppy pitch bend
@@ -37,7 +37,6 @@ import math
 
 import digitalio
 import audioio
-import busio
 import board
 import usb_midi
 import neopixel
@@ -74,7 +73,7 @@ max_sample_rate = 350000  # a CPX / M0 DAC limitation
 # A sawtooth function like math.sin(angle)
 # 0 returns 1.0, pi returns 0.0, 2*pi returns -1.0
 def sawtooth(angle):
-    return 1.0 - angle % (2 * math.pi) / ( 2 * math.pi ) * 2
+    return 1.0 - angle % (2 * math.pi) / (2 * math.pi) * 2
 
 # make a sawtooth wave between +/- each value in volumes
 # phase shifted so it starts and ends near 0
@@ -105,10 +104,10 @@ pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
 
 # Turn NeoPixel on to represent a note using RGB x 10
 # to represent 30 notes - doesn't do anything with pitch bend
-def noteLED(pixels, note, velocity):
-    note30 = ( note - midi_note_C4 ) % (3 * numpixels)
+def noteLED(pix, note, velocity):
+    note30 = (note - midi_note_C4) % (3 * numpixels)
     pos = note30 % numpixels
-    r, g, b = pixels[pos]
+    r, g, b = pix[pos]
     if velocity == 0:
         brightness = 0
     else:
@@ -121,7 +120,7 @@ def noteLED(pixels, note, velocity):
         g = brightness
     else:
         b = brightness
-    pixels[pos] = (r, g, b)
+    pix[pos] = (r, g, b)
 
 # Calculate the note frequency from the midi_note with pitch bend
 # of pb_st (float) semitones
@@ -139,7 +138,7 @@ pb_midpoint = 8192
 pitch_bend_multiplier = 2 / pb_midpoint
 pitch_bend_value = pb_midpoint  # mid point - no bend
 
-wave = None
+wave = []  # current or last wave played
 last_note = None
 
 # Amplitude modulation frequency in Hz
@@ -204,7 +203,7 @@ while True:
         # amplitude modulation. Empirically the divisor needs to greater
         # than 127 as can't hear much when speaker is off more than half
         # 220 works reasonably well
-        new_speaker_on = ( t1 - int(t1) ) > (mod_wheel / 220)
+        new_speaker_on = (t1 - int(t1)) > (mod_wheel / 220)
     else:
         new_speaker_on = True
 

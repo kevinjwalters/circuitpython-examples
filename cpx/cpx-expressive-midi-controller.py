@@ -1,4 +1,4 @@
-### cpx-expressive-midi-controller v1.1
+### cpx-expressive-midi-controller v1.2
 ### CircuitPython (on CPX) MIDI controller using the seven touch pads
 ### and accelerometer for modulation (cc1) and pitch bend
 ### Left button adjusts octave (switch left) or semitone (switch right)
@@ -34,7 +34,6 @@
 ### SOFTWARE.
 
 import time
-import math
 
 import digitalio
 import touchio
@@ -68,51 +67,49 @@ pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
 
 # Turn NeoPixel on to represent a note using RGB x 10
 # to represent 30 notes - doesn't do anything with pitch bend
-def noteLED(pixels, note, velocity):
-    note30 = ( note - midi_note_C4 ) % (3 * numpixels)
+def noteLED(pix, note, velocity):
+    note30 = (note - midi_note_C4) % (3 * numpixels)
     pos = note30 % numpixels
-    r, g, b = pixels[pos]
+    r, g, b = pix[pos]
     if velocity == 0:
         brightness = 0
     else:
-        ### max brightness will be 32
+        # max brightness will be 32
         brightness = round(velocity / 127 * 30 + 2)
-    ### Pick R/G/B based on range within the 30 notes
+    # Pick R/G/B based on range within the 30 notes
     if note30 < 10:
         r = brightness
     elif note30 < 20:
         g = brightness
     else:
         b = brightness
-    pixels[pos] = (r, g, b)
+    pix[pos] = (r, g, b)
 
 # white pulse used to indicate octave changes
 flashbrightness = 20
-def flashLED(pixels, position):
+def flashLED(pix, position):
     pos = position % numpixels
     t1 = time.monotonic()
-    oldcolour = pixels[pos]
+    oldcolour = pix[pos]
     while time.monotonic() - t1 < 0.25:
         for i in range(0, flashbrightness, 2):
-            pixels[pos] = (i, i, i)
+            pix[pos] = (i, i, i)
         for i in range(flashbrightness, 0, -2):
-            pixels[pos] = (i, i, i)
-    pixels[pos] = oldcolour
-    
-    
-    
+            pix[pos] = (i, i, i)
+    pix[pos] = oldcolour
+
 midi_channel = 1
 midi = adafruit_midi.MIDI(midi_out=usb_midi.ports[1],
                           out_channel=midi_channel-1)
 
 # CPX counter-clockwise order of touch capable pads (i.e. not A0)
-pads = [ board.A4,
-         board.A5,
-         board.A6,
-         board.A7,
-         board.A1,
-         board.A2,
-         board.A3]
+pads = [board.A4,
+        board.A5,
+        board.A6,
+        board.A7,
+        board.A1,
+        board.A2,
+        board.A3]
 
 # The touch pads calibrate themselves as they are created, just once here
 touchpads = [touchio.TouchIn(pad) for pad in pads]
@@ -134,9 +131,8 @@ switch_left = digitalio.DigitalInOut(board.SLIDE_SWITCH)
 switch_left.switch_to_input(pull=digitalio.Pull.UP)
 
 # some example scales in semitones
-scale_st = { "major": [0, 2, 4, 5, 7, 9, 11],
-             "chromatic": [0, 1, 2, 3, 4 , 5, 6 ]
-           }
+scale_st = {"major": [0, 2, 4, 5, 7, 9, 11],
+            "chromatic": [0, 1, 2, 3, 4, 5, 6]}
 scales = ["major", "chromatic"]
 scale_idx = 0
 base_note = midi_note_C4  # C4 middle C
@@ -191,12 +187,12 @@ def scale_acc(acc_msm2, min_msm2, range_msm2, value_range):
 # Send pitch bend and mod wheel cc based on tilt from accelerometer
 # Change octave and semitone based on buttons
 while True:
-    for idx in range(len(touchpads)):
-        if touchpads[idx].value != keydown[idx]:
-            keydown[idx] = touchpads[idx].value
+    for idx, touchpad in enumerate(touchpads):
+        if touchpad.value != keydown[idx]:
+            keydown[idx] = touchpad.value
             # 12 semitones in an octave
             note = midi_notes[idx] + octave * 12 + semitone
-            if (keydown[idx]):
+            if keydown[idx]:
                 midi.send(NoteOn(note, velocity))
                 noteLED(pixels, note, velocity)
             else:
@@ -213,7 +209,7 @@ while True:
         # scale from 0 to 127 (maximum cc 7bit value)
         new_mod_wheel = abs(scale_acc(ay, acc_nullzone, acc_range, 127))
         if (abs(new_mod_wheel - mod_wheel) > min_mod_change
-            or (new_mod_wheel == 0 and mod_wheel != 0)):
+                or (new_mod_wheel == 0 and mod_wheel != 0)):
             midi.send(ControlChange(midi_cc_modwheel, new_mod_wheel))
             mod_wheel = new_mod_wheel
 
@@ -222,8 +218,8 @@ while True:
                                 - scale_acc(ax, acc_nullzone, acc_range,
                                             pb_midpoint - 1))
         if (abs(new_pitch_bend_value - pitch_bend_value) > min_pb_change
-            or (new_pitch_bend_value == pb_midpoint
-                and pitch_bend_value != pb_midpoint)):
+                or (new_pitch_bend_value == pb_midpoint
+                    and pitch_bend_value != pb_midpoint)):
             midi.send(PitchBend(new_pitch_bend_value))
             pitch_bend_value = new_pitch_bend_value
 
