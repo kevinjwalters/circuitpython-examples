@@ -104,16 +104,16 @@ pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
 
 # Turn NeoPixel on to represent a note using RGB x 10
 # to represent 30 notes - doesn't do anything with pitch bend
-def noteLED(pix, note, velocity):
-    note30 = (note - midi_note_C4) % (3 * numpixels)
+def noteLED(pix, pnote, pvel):
+    note30 = (pnote - midi_note_C4) % (3 * numpixels)
     pos = note30 % numpixels
     r, g, b = pix[pos]
-    if velocity == 0:
+    if pvel == 0:
         brightness = 0
     else:
-        ### max brightness will be 32
-        brightness = round(velocity / 127 * 30 + 2)
-    ### Pick R/G/B based on range within the 30 notes
+        # max brightness will be 32
+        brightness = round(pvel / 127 * 30 + 2)
+    # Pick R/G/B based on range within the 30 notes
     if note30 < 10:
         r = brightness
     elif note30 < 20:
