@@ -88,14 +88,14 @@ def waveform_sawtooth(length, waves, volumes):
         waves.append((audioio.RawSample(waveraw), waveraw))
 
 # Make some square waves of different volumes volumes, generated with
-# [round(math.sqrt(x)/10*32767*15/math.sqrt(10)) for x in range(1, 10 + 1)]
+# n=10;[round(math.sqrt(x)/n*32767*n/math.sqrt(n)) for x in range(1, n+1)]
 # square root is for mapping velocity to power rather than signal amplitude
 # 15 uses enough memory to make the code occasionally throw MemoryError :(
 waveform_by_vol = []
 waveform_sawtooth(sample_len,
                   waveform_by_vol,
-                  [15543, 21981, 26921, 31086, 34755,
-                   38072, 41122, 43962, 46628, 49150])
+                  [10362, 14654, 17947, 20724, 23170,
+                   25381, 27415, 29308, 31086, 32767])
 
 # brightness 1.0 saves memory by removing need for a second buffer
 # 10 is number of NeoPixels on CPX
