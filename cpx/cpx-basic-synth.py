@@ -1,9 +1,9 @@
-### cpx-basic-synth v1.2
+### cpx-basic-synth v1.3
 ### CircuitPython (on CPX) synth module using internal speaker
 ### Velocity sensitive monophonic synth
 ### with crude amplitude modulation (cc1) and choppy pitch bend
 
-### Tested with CPX and CircuitPython and 4.0.0-beta.5
+### Tested with CPX and CircuitPython and 4.0.0-beta.7
 
 ### Needs recent adafruit_midi module
 
@@ -64,6 +64,7 @@ A4refhz = const(440)
 midi_note_C4 = note_parser("C4")
 midi_note_A4 = note_parser("A4")
 midi_cc_modwheel = const(1)
+twopi = 2 * math.pi
 
 # A length of 12 will make the sawtooth rather steppy
 sample_len = 12
@@ -73,7 +74,7 @@ max_sample_rate = 350000  # a CPX / M0 DAC limitation
 # A sawtooth function like math.sin(angle)
 # 0 returns 1.0, pi returns 0.0, 2*pi returns -1.0
 def sawtooth(angle):
-    return 1.0 - angle % (2 * math.pi) / (2 * math.pi) * 2
+    return 1.0 - angle % twopi / twopi * 2
 
 # make a sawtooth wave between +/- each value in volumes
 # phase shifted so it starts and ends near 0
@@ -81,21 +82,20 @@ def waveform_sawtooth(length, waves, volumes):
     for vol in volumes:
         waveraw = array.array("h",
                               [round(vol * sawtooth((idx + 0.5) / length
-                                                    * 2 * math.pi
+                                                    * twopi
                                                     + math.pi))
                                for idx in list(range(length))])
         waves.append((audioio.RawSample(waveraw), waveraw))
 
-# Make some square waves of different volumes
-# volumes generated with
-# [round(math.sqrt(x)/15*32767*15/math.sqrt(15)) for x in range(1, 15 + 1)]
+# Make some square waves of different volumes volumes, generated with
+# [round(math.sqrt(x)/10*32767*15/math.sqrt(10)) for x in range(1, 10 + 1)]
 # square root is for mapping velocity to power rather than signal amplitude
+# 15 uses enough memory to make the code occasionally throw MemoryError :(
 waveform_by_vol = []
 waveform_sawtooth(sample_len,
                   waveform_by_vol,
-                  [8460, 11965, 14654, 16921, 18918,
-                   20724, 22384, 23930, 25381, 26754,
-                   28060, 29308, 30504, 31656, 32767])
+                  [15543, 21981, 26921, 31086, 34755,
+                   38072, 41122, 43962, 46628, 49150])
 
 # brightness 1.0 saves memory by removing need for a second buffer
 # 10 is number of NeoPixels on CPX
