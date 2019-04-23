@@ -1,4 +1,4 @@
-### cpx-noise-synth v1.0
+### cpx-basic-noise-synth v1.0
 ### CircuitPython (on CPX) synth module for crude noise on internal speaker
 ### Very basic noise with constant pitch and volume
 ### for any note on MIDI channel 10
