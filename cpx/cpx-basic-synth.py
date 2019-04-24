@@ -1,4 +1,4 @@
-### cpx-basic-synth v1.3
+### cpx-basic-synth v1.4
 ### CircuitPython (on CPX) synth module using internal speaker
 ### Velocity sensitive monophonic synth
 ### with crude amplitude modulation (cc1) and choppy pitch bend
@@ -71,17 +71,22 @@ sample_len = 12
 base_sample_rate = A4refhz * sample_len
 max_sample_rate = 350000  # a CPX / M0 DAC limitation
 
+midpoint = 32768
+
 # A sawtooth function like math.sin(angle)
 # 0 returns 1.0, pi returns 0.0, 2*pi returns -1.0
 def sawtooth(angle):
     return 1.0 - angle % twopi / twopi * 2
 
 # make a sawtooth wave between +/- each value in volumes
-# phase shifted so it starts and ends near 0
+# phase shifted so it starts and ends near midpoint
+# "H" arrays for RawSample looks more memory efficient
+# see https://forums.adafruit.com/viewtopic.php?f=60&t=150894
 def waveform_sawtooth(length, waves, volumes):
     for vol in volumes:
-        waveraw = array.array("h",
-                              [round(vol * sawtooth((idx + 0.5) / length
+        waveraw = array.array("H",
+                              [midpoint +
+                               round(vol * sawtooth((idx + 0.5) / length
                                                     * twopi
                                                     + math.pi))
                                for idx in list(range(length))])
@@ -90,7 +95,7 @@ def waveform_sawtooth(length, waves, volumes):
 # Make some square waves of different volumes volumes, generated with
 # n=10;[round(math.sqrt(x)/n*32767*n/math.sqrt(n)) for x in range(1, n+1)]
 # square root is for mapping velocity to power rather than signal amplitude
-# 15 uses enough memory to make the code occasionally throw MemoryError :(
+# n=15 throws MemoryError exceptions when a note is played :(
 waveform_by_vol = []
 waveform_sawtooth(sample_len,
                   waveform_by_vol,
