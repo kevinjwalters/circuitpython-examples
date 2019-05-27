@@ -42,16 +42,8 @@ import audioio
 import board
 import neopixel
 
-import adafruit_midi
 
-from adafruit_midi.midi_message     import note_parser
-
-from adafruit_midi.note_on          import NoteOn
-from adafruit_midi.note_off         import NoteOff
-from adafruit_midi.control_change   import ControlChange
-from adafruit_midi.pitch_bend       import PitchBend
-
-# print note frequencies in "mu format"
+# to print note frequencies in "mu format"
 console_output = True
 
 # Turn the speaker on
