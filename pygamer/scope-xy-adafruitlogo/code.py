@@ -1,4 +1,4 @@
-### scope-xy-adafruitlogo v0.5
+### scope-xy-adafruitlogo v0.6
 ### Output a logo to an oscilloscope in X-Y mode on an Adafruit M4
 ### board like Feather M4 or PyGamer (best to disconnect headphones)
 
@@ -33,6 +33,7 @@ import array
 import board
 import busio
 import audioio
+import analogio
 
 ### TODO - split up parts of image to tell addpoints not to put in
 ###        extra points - could just use (None, None) or perhaps a
@@ -48,24 +49,26 @@ import audioio
 ### SAMD51 (M4) boards are steppy on the up
 ### https://forums.adafruit.com/viewtopic.php?f=24&t=153707
 
+### Test square with kinks in each side
+testlogo = [ (100, 100),
+             (200, 120),
+             (300, 100),
+             (280, 200),
+             (300, 300),
+             (200, 280),
+             (100, 300),
+             (120, 200),
+           ]
+
 ### Adafruit logo created from bitmap,
 ### vectorised and flattened to straight lines by Inkscape
 ### then points extracte from SVG data
-
-### another test square with kinks in each side
-testlogo = [ (100, 100),
-         (200, 120),
-         (300, 100),
-         (280, 200),
-         (300, 300),
-         (200, 280),
-         (100, 300),
-         (120, 200),
-       ]
+### (Other route is to ask Adafruit for vector version!)
 
 ### Adafruit logo
 logo = [
-### Remove bounding box
+# Removing the box outline
+# Group 1
 #     (2.9962184, 251.49811),
 #     (2.9962184, 1.4981075),
 #     (252.99622, 1.4981075),
@@ -75,6 +78,10 @@ logo = [
 #     (252.99622, 501.49811),
 #     (2.9962184, 501.49811),
 #     (2.9962184, 251.49811),
+
+# Outline of the flower followed by the five 
+# Group 2
+    [
      (342.49622, 454.21659),
      (346.959242969, 451.054080156),
      (349.16935125, 444.29346125),
@@ -169,8 +176,11 @@ logo = [
      (289.43734875, 427.02384125),
      (327.49622, 454.1789),
      (334.9740875, 456.36105375),
-     (342.49622, 454.2166),
-     (342.49622, 454.21659),
+#     (342.49622, 454.2166),
+#     (342.49622, 454.21659),
+    ],
+# Group 3
+    [
      (269.38148, 328.24811),
      (260.235962344, 318.54971125),
      (252.98225875, 304.9253925),
@@ -187,8 +197,11 @@ logo = [
      (281.55819875, 326.77132),
      (279.99622, 329.49811),
      (275.74986, 331.3257375),
-     (269.38148, 328.24811),
-     (269.38148, 328.24811),
+ #    (269.38148, 328.24811),
+ #    (269.38148, 328.24811),
+    ],
+# Group 4
+    [
      (189.27613, 317.48919),
      (186.689292012, 315.017226172),
      (186.253231719, 310.95217),
@@ -205,8 +218,11 @@ logo = [
      (208.563450625, 310.792326562),
      (201.1146375, 315.3621975),
      (194.417365625, 317.725924687),
-     (189.27613, 317.48919),
-     (189.27613, 317.48919),
+#     (189.27613, 317.48919),
+#     (189.27613, 317.48919),
+    ],
+# Group 5
+    [
      (270.49622, 263.99178),
      (266.275620215, 261.866190078),
      (264.014989219, 259.301005),
@@ -221,8 +237,11 @@ logo = [
      (310.640874688, 259.620080625),
      (297.3441375, 263.7845675),
      (282.673111563, 265.513523125),
-     (270.49622, 263.99178),
-     (270.49622, 263.99178),
+#     (270.49622, 263.99178),
+#     (270.49622, 263.99178),
+    ],
+# Group 6
+    [
      (202.04337, 252.52942),
      (191.235123437, 247.592305),
      (181.9467875, 241.23868),
@@ -238,8 +257,11 @@ logo = [
      (223.57588375, 253.118295),
      (220.450783652, 254.792036523),
      (215.732190781, 255.336538437),
-     (202.04337, 252.52942),
-     (202.04337, 252.52942),
+#     (202.04337, 252.52942),
+#     (202.04337, 252.52942),
+    ],
+# Group 7
+    [
      (243.14004, 239.17141),
      (240.444360469, 233.682861094),
      (238.94700375, 225.78207875),
@@ -255,12 +277,12 @@ logo = [
      (253.205227813, 237.032497812),
      (250.16360918, 239.588868945),
      (246.9823, 240.49811),
-     (243.14004, 239.17141),
-     (243.14004, 239.17141),
-    ]
+#     (243.14004, 239.17141),
+#     (243.14004, 239.17141),
+    ],
+   ]
 
-### A0 will be x, A1 will be y
-dacs = audioio.AudioOut(board.A0, right_channel=board.A1)
+
 
 ### add extra points to any lines if length is greater than min_dist
 def addpoints(points, min_dist):
@@ -288,32 +310,84 @@ def addpoints(points, min_dist):
 
 
 ### get the range of logo points
-min_x, min_y = max_x, max_y = logo[0]
-for point in logo:
-    min_x = min(min_x, point[0])
-    max_x = max(max_x, point[0])
-    min_y = min(min_y, point[1])
-    max_y = max(max_y, point[1])
+min_x, min_y = max_x, max_y = logo[0][0]
+for part in logo:
+    for point in part:
+       min_x = min(min_x, point[0])
+       max_x = max(max_x, point[0])
+       min_y = min(min_y, point[1])
+       max_y = max(max_y, point[1])
 
 ### PyPortal DACs seem to stop around 53000 and there's 2 100 ohm resistors
 ### on output
 dac_x_max = 32768
 dac_y_max = 32768
 
-### Add intermediate points to make line segments look like
-### continuous lines on x-y oscilloscope output
-displaylogo = addpoints(logo, 1)
+### Add intermediate points to make line segments for each part
+### look like continuous lines on x-y oscilloscope output
+display_logo = []
+for part in logo:
+    display_logo.extend(addpoints(part, 1))
 
+### Convert the points into format suitable for audio library
+### and scale to the DAC range used by the library
 rawdata = array.array("H")
 mult_x = dac_x_max / (max_x - min_x)
 mult_y = dac_y_max / (max_y - min_y)
-for point in displaylogo:
+for point in display_logo:
     rawdata.append(round((point[0] - min_x) * mult_x))
     rawdata.append(round((point[1] - min_y) * mult_y))
 
-# 200k seems to be practical limit (1M permissible but seems same)
-output_wave = audioio.RawSample(rawdata, channel_count=2, sample_rate = 200 * 1000)
+### TODO - remove
+### EXPERIMENT WITH STRANGE WARPING BUG - THIS FIXED IT
+#rawdata.append(0)
 
-dacs.play(output_wave, loop=True)
-while True:
-    pass
+### Trying two appends as a "fix"
+rawdata.append(0)
+rawdata.append(0)
+
+### This is 4930 without append(0) "fix" - very odd in a very even way
+print("length of rawdata", len(rawdata))
+
+#for idx, elem in enumerate(rawdata):
+#    print("RAWDATA", idx + 1, elem)
+
+for idx, elem in enumerate(rawdata):
+    if elem < 0 or elem > 32768:
+        print("RAWDATA", idx + 1, elem)
+
+use_wav = False
+
+if use_wav:
+    print("Using audioio.RawSample for DACs")
+    ### 200k (maybe 166.667k) seems to be practical limit
+    ### 1M permissible but seems same as around 200k
+    output_wave = audioio.RawSample(rawdata,
+                                    channel_count=2, sample_rate = 200 * 1000)
+
+    ### This is a solid image
+    #while True:
+    #    dacs.play(output_wave)
+    #    while dacs.playing:
+    #        pass
+
+    ### This shifts very slowly around in a surprising way like X-Y 
+    ### coords go out of phase then eventually come back together
+
+    ### A0 will be x, A1 will be y
+    dacs = audioio.AudioOut(board.A0, right_channel=board.A1)
+
+    ### This is currently a slowly warping image due to a strange bug
+    dacs.play(output_wave, loop=True)
+    while True:
+        pass
+else:
+    print("Using analogio.AnalogOut for DACs")
+    a0 = analogio.AnalogOut(board.A0)
+    a1 = analogio.AnalogOut(board.A1)
+    while True:
+        ### This gives a very flickery image with 4932 points
+        ### might be ok for 1000
+        for idx in range(0, len(rawdata), 2):
+            a0.value = rawdata[idx]
+            a1.value = rawdata[idx + 1]
