@@ -1,4 +1,4 @@
-### scope-xy-adafruitlogo v0.6
+### scope-xy-adafruitlogo v0.7
 ### Output a logo to an oscilloscope in X-Y mode on an Adafruit M4
 ### board like Feather M4 or PyGamer (best to disconnect headphones)
 
@@ -64,6 +64,8 @@ testlogo = [ (100, 100),
 ### vectorised and flattened to straight lines by Inkscape
 ### then points extracte from SVG data
 ### (Other route is to ask Adafruit for vector version!)
+###
+### TODO - this is slightly off centre
 
 ### Adafruit logo
 logo = [
@@ -79,7 +81,7 @@ logo = [
 #     (2.9962184, 501.49811),
 #     (2.9962184, 251.49811),
 
-# Outline of the flower followed by the five 
+# Outline of the flower followed by the five
 # Group 2
     [
      (342.49622, 454.21659),
@@ -291,10 +293,10 @@ def addpoints(points, min_dist):
     for idx in range(original_len):
         x1, y1 = points[idx]
         x2, y2 = points[(idx + 1) % original_len]
-        
+
         ### Always keep the original point
         newpoints.append((x1, y1))
-        
+
         diff_x = x2 - x1
         diff_y = y2 - y1
         dist = math.sqrt(diff_x ** 2 + diff_y ** 2)
@@ -327,24 +329,23 @@ dac_y_max = 32768
 ### look like continuous lines on x-y oscilloscope output
 display_logo = []
 for part in logo:
-    display_logo.extend(addpoints(part, 1))
+    display_logo.extend(addpoints(part, 3))
 
 ### Convert the points into format suitable for audio library
 ### and scale to the DAC range used by the library
-rawdata = array.array("H")
-mult_x = dac_x_max / (max_x - min_x)
-mult_y = dac_y_max / (max_y - min_y)
-for point in display_logo:
-    rawdata.append(round((point[0] - min_x) * mult_x))
-    rawdata.append(round((point[1] - min_y) * mult_y))
+rawdata = array.array("H", (2 * len(display_logo)) * [0])
+range_x = max_x - min_x
+range_y = max_y - min_y
+halfrange_x = range_x / 2
+halfrange_y = range_y / 2
+mid_x = halfrange_x + min_x
+mid_y = halfrange_y + min_y
+mult_x = dac_x_max / range_x
+mult_y = dac_y_max / range_y
 
 ### TODO - remove
 ### EXPERIMENT WITH STRANGE WARPING BUG - THIS FIXED IT
 #rawdata.append(0)
-
-### Trying two appends as a "fix"
-rawdata.append(0)
-rawdata.append(0)
 
 ### This is 4930 without append(0) "fix" - very odd in a very even way
 print("length of rawdata", len(rawdata))
@@ -356,38 +357,70 @@ for idx, elem in enumerate(rawdata):
     if elem < 0 or elem > 32768:
         print("RAWDATA", idx + 1, elem)
 
-use_wav = False
+use_wav = True
+rubbish_wav_bug_workaround = False
 
+### A0 will be x, A1 will be y
 if use_wav:
     print("Using audioio.RawSample for DACs")
-    ### 200k (maybe 166.667k) seems to be practical limit
-    ### 1M permissible but seems same as around 200k
-    output_wave = audioio.RawSample(rawdata,
-                                    channel_count=2, sample_rate = 200 * 1000)
-
-    ### This is a solid image
-    #while True:
-    #    dacs.play(output_wave)
-    #    while dacs.playing:
-    #        pass
-
-    ### This shifts very slowly around in a surprising way like X-Y 
-    ### coords go out of phase then eventually come back together
-
-    ### A0 will be x, A1 will be y
     dacs = audioio.AudioOut(board.A0, right_channel=board.A1)
-
-    ### This is currently a slowly warping image due to a strange bug
-    dacs.play(output_wave, loop=True)
-    while True:
-        pass
 else:
     print("Using analogio.AnalogOut for DACs")
     a0 = analogio.AnalogOut(board.A0)
     a1 = analogio.AnalogOut(board.A1)
-    while True:
-        ### This gives a very flickery image with 4932 points
-        ### might be ok for 1000
-        for idx in range(0, len(rawdata), 2):
-            a0.value = rawdata[idx]
-            a1.value = rawdata[idx + 1]
+
+### 10Hz is ok for AudioOut, optimistic for AnalogOut
+frame_t = 1/5
+prev_t = time.monotonic()
+angle = 0
+frame = 1
+while True:
+    #print("Transforming data for frame:", frame)
+    idx = 0
+    sine = math.sin(angle)
+    cosine = math.cos(angle)
+    for px, py in display_logo:
+       pcx = px - mid_x
+       pcy = py - mid_y
+       dac_a0_x = round((-sine * pcx + cosine * pcy + halfrange_x) * mult_x)
+       dac_a0_x = min(dac_a0_x, 32768)
+       dac_a0_x = max(dac_a0_x, 0)
+       dac_a1_y = round((sine * pcy + cosine * pcx + halfrange_y) * mult_y)
+       dac_a1_y = min(dac_a1_y, 32768)
+       dac_a1_y = max(dac_a1_y, 0)
+       rawdata[idx] = dac_a0_x
+       rawdata[idx + 1] = dac_a1_y
+       #print("XY", dac_a0_x, dac_a1_y)
+       idx += 2
+
+    if use_wav:
+        ### 200k (maybe 166.667k) seems to be practical limit
+        ### 1M permissible but seems same as around 200k
+        output_wave = audioio.RawSample(rawdata,
+                                        channel_count=2, sample_rate = 100 * 1000)
+
+        ### The image may "warp" sometimes with loop=True due to a strange bug
+        ### https://github.com/adafruit/circuitpython/issues/1992
+        if rubbish_wav_bug_workaround:
+            while True:
+                dacs.play(output_wave)
+                if time.monotonic() - prev_t >= frame_t:
+                    break
+        else:
+            dacs.play(output_wave, loop=True)
+            while time.monotonic() - prev_t < frame_t:
+                pass
+
+    else:
+        while True:
+            ### This gives a very flickery image with 4932 points
+            ### slight flicker at 2552
+            ### might be ok for 1000
+            for idx in range(0, len(rawdata), 2):
+                a0.value = rawdata[idx]
+                a1.value = rawdata[idx + 1]
+            if time.monotonic() - prev_t >= frame_t:
+                break
+    prev_t = time.monotonic()
+    angle += math.pi / 60 ### 3 degrees per frame
+    frame += 1
