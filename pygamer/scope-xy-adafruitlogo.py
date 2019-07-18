@@ -54,7 +54,7 @@ def addpoints(points, min_dist):
 
         diff_x = px2 - px1
         diff_y = py2 - py1
-        dist = diff_x ** 2 + diff_y ** 2
+        dist = math.sqrt(diff_x ** 2 + diff_y ** 2)
         if dist > min_dist:
             ### Calculate extra intermediate points plus one
             extrasp1 = int(dist // min_dist) + 1
