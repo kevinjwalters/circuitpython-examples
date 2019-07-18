@@ -39,6 +39,7 @@ import analogio
 ### Vector data for logo
 import adafruit_logo_vector
 
+VECTOR_POINT_SPACING = 3
 
 def addpoints(points, min_dist):
     """Add extra points to any lines if length is greater than min_dist"""
@@ -82,41 +83,19 @@ if adafruit_logo_vector.offset_x != 0 or adafruit_logo_vector.offset_y != 0:
 else:
     data = adafruit_logo_vector.data
 
-### get the range of logo points
-### extra points from linear interpolation will not change this
-min_x, min_y = max_x, max_y = data[0][0]
-for part in data:
-    for point in part:
-        min_x = min(min_x, point[0])
-        max_x = max(max_x, point[0])
-        min_y = min(min_y, point[1])
-        max_y = max(max_y, point[1])
 
 ### Add intermediate points to make line segments for each part
 ### look like continuous lines on x-y oscilloscope output
 display_data = []
 for part in data:
-    display_data.extend(addpoints(part, 3))
-
-### Calculate average
-total_x = 0
-total_y = 0
-count = 0
-for point in display_data:
-    total_x += point[0]
-    total_y += point[1]
-    count += 1
-    avg_x = total_x / count
-    avg_y = total_y / count
-
-print("X min/avg/max:", min_x, avg_x, max_x)
-print("Y min/avg/max:", min_y, avg_y, max_y)
+    display_data.extend(addpoints(part, VECTOR_POINT_SPACING))
 
 ### PyPortal DACs seem to stop around 53000 and there's 2 100 ohm resistors
-### on output
+### on output so maybe large values aren't good idea?
 ### 32768 and 32000 exhibit this bug but 25000 so far appears to be a
 ### workaround, albeit a mysterious one
 ### https://github.com/adafruit/circuitpython/issues/1992
+### Using "h" for audioio.RawSample() DAC range will be 20268 to 45268
 dac_x_min = 0
 dac_y_min = 0
 dac_x_max = 25000
@@ -126,29 +105,26 @@ dac_y_mid = dac_y_max // 2
 
 ### Convert the points into format suitable for audio library
 ### and scale to the DAC range used by the library
-### INTENTIONALLY using "h" here as libraries will make a copy of
+### Intentionally using "h" data representation here as this happens to
+### cause the CircuitPython audio libraries to make a copy of
 ### rawdata which is useful to allow animating code to modify rawdata
-### without affecting output
+### without affecting current DAC output
 rawdata = array.array("h", (2 * len(display_data)) * [0])
-#range_x = max_x - min_x
-#range_y = max_y - min_y
-#halfrange_x = range_x / 2
-#halfrange_y = range_y / 2
-#mid_x = halfrange_x + min_x
-#mid_y = halfrange_y + min_y
 
-halfrange_x = 256.0
-halfrange_y = 256.0
+range_x = 512.0
+range_y = 512.0
+halfrange_x = range_x / 2
+halfrange_y = range_y / 2
 mid_x = 256.0
 mid_y = 256.0
-mult_x = dac_x_max / 512.0
-mult_y = dac_y_max / 512.0
+mult_x = dac_x_max / range_x
+mult_y = dac_y_max / range_y
 
 ### https://github.com/adafruit/circuitpython/issues/1992
 print("length of rawdata", len(rawdata))
 
 use_wav = True
-rubbish_wav_bug_workaround = False
+poor_wav_bug_workaround = False
 leave_wav_looping = True
 
 ### A0 will be x, A1 will be y
@@ -160,13 +136,15 @@ else:
     a0 = analogio.AnalogOut(board.A0)
     a1 = analogio.AnalogOut(board.A1)
 
-### 10Hz is ok for AudioOut, optimistic for AnalogOut
+### 10Hz is about ok for AudioOut, optimistic for AnalogOut
 frame_t = 1/10
 prev_t = time.monotonic()
-angle = 0
+angle = 0  ### in radians
 frame = 1
 while True:
-    #print("Transforming data for frame:", frame)
+    ##print("Transforming data for frame:", frame, "at", prev_t)
+
+    ### Rotate the points of the vector graphic around its centre
     idx = 0
     sine = math.sin(angle)
     cosine = math.cos(angle)
@@ -174,13 +152,15 @@ while True:
         pcx = px - mid_x
         pcy = py - mid_y
         dac_a0_x = round((-sine * pcx + cosine * pcy + halfrange_x) * mult_x)
-        #dac_a0_x = min(dac_a0_x, dac_x_max)
-        #dac_a0_x = max(dac_a0_x, 0)
+        ### Keep x position within legal values (if needed)
+        ##dac_a0_x = min(dac_a0_x, dac_x_max)
+        ##dac_a0_x = max(dac_a0_x, 0)
         dac_a1_y = round((sine * pcy + cosine * pcx + halfrange_y) * mult_y)
-        #dac_a1_y = min(dac_a1_y, dac_y_max)
-        #dac_a1_y = max(dac_a1_y, 0)
-        rawdata[idx] = dac_a0_x - dac_x_mid   ### adjust for "h" array
-        rawdata[idx + 1] = dac_a1_y - dac_y_mid   ### adjust for "h" array
+        ### Keep y position within legal values (if needed)
+        ##dac_a1_y = min(dac_a1_y, dac_y_max)
+        ##dac_a1_y = max(dac_a1_y, 0)
+        rawdata[idx] = dac_a0_x - dac_x_mid      ### adjust for "h" array
+        rawdata[idx + 1] = dac_a1_y - dac_y_mid  ### adjust for "h" array
         idx += 2
 
     if use_wav:
@@ -192,7 +172,7 @@ while True:
 
         ### The image may "warp" sometimes with loop=True due to a strange bug
         ### https://github.com/adafruit/circuitpython/issues/1992
-        if rubbish_wav_bug_workaround:
+        if poor_wav_bug_workaround:
             while True:
                 dacs.play(output_wave)
                 if time.monotonic() - prev_t >= frame_t:
