@@ -1,6 +1,8 @@
 ### scope-xy-adafruitlogo v1.0
-### Output a logo to an oscilloscope in X-Y mode on an Adafruit M4
-### board like Feather M4 or PyGamer (best to disconnect headphones)
+
+"""Output a logo to an oscilloscope in X-Y mode on an Adafruit M4
+board like Feather M4 or PyGamer (best to disconnect headphones).
+"""
 
 ### copy this file to PyGamer (or other M4 board) as code.py
 
@@ -31,7 +33,6 @@ import math
 import array
 
 import board
-import busio
 import audioio
 import analogio
 
@@ -41,25 +42,26 @@ import adafruit_logo_vector
 
 def addpoints(points, min_dist):
     """Add extra points to any lines if length is greater than min_dist"""
+
     newpoints = []
     original_len = len(points)
-    for idx in range(original_len):
-        x1, y1 = points[idx]
-        x2, y2 = points[(idx + 1) % original_len]
+    for pidx in range(original_len):
+        px1, py1 = points[pidx]
+        px2, py2 = points[(pidx + 1) % original_len]
 
         ### Always keep the original point
-        newpoints.append((x1, y1))
+        newpoints.append((px1, py1))
 
-        diff_x = x2 - x1
-        diff_y = y2 - y1
-        dist = math.sqrt(diff_x ** 2 + diff_y ** 2)
+        diff_x = px2 - px1
+        diff_y = py2 - py1
+        dist = diff_x ** 2 + diff_y ** 2
         if dist > min_dist:
             ### Calculate extra intermediate points plus one
             extrasp1 = int(dist // min_dist) + 1
             for extra_idx in range(1, extrasp1):
                 ratio = extra_idx / extrasp1
-                newpoints.append((x1 + diff_x * ratio,
-                                  y1 + diff_y * ratio))
+                newpoints.append((px1 + diff_x * ratio,
+                                  py1 + diff_y * ratio))
         ### Two points define a straight line
         ### so no need to connect final point back to first
         if original_len == 2:
@@ -67,8 +69,9 @@ def addpoints(points, min_dist):
 
     return newpoints
 
+### pylint: disable=invalid-name
 ### If logo is off centre then correct it here
-if adafruit_logo_vector.offset_x != 0 or adafruit_logo_vector.logo_offset_y != 0:
+if adafruit_logo_vector.offset_x != 0 or adafruit_logo_vector.offset_y != 0:
     data = []
     for part in adafruit_logo_vector.data:
         newpart = []
@@ -141,19 +144,8 @@ mid_y = 256.0
 mult_x = dac_x_max / 512.0
 mult_y = dac_y_max / 512.0
 
-### TODO - remove
-### EXPERIMENT WITH STRANGE WARPING BUG - THIS FIXED IT
-#rawdata.append(0)
-
-### This was 4930 without append(0) "fix"
-### very odd in a very even way
 ### https://github.com/adafruit/circuitpython/issues/1992
 print("length of rawdata", len(rawdata))
-
-for idx, elem in enumerate(rawdata):
-#    print("RAWDATA", idx + 1, elem)
-    if elem < 0 or elem > min(dac_x_max, dac_y_max):
-        print("rawdata out of range:", idx + 1, elem)
 
 use_wav = True
 rubbish_wav_bug_workaround = False
@@ -189,7 +181,6 @@ while True:
         #dac_a1_y = max(dac_a1_y, 0)
         rawdata[idx] = dac_a0_x - dac_x_mid   ### adjust for "h" array
         rawdata[idx + 1] = dac_a1_y - dac_y_mid   ### adjust for "h" array
-        #print("XY", dac_a0_x, dac_a1_y)
         idx += 2
 
     if use_wav:
