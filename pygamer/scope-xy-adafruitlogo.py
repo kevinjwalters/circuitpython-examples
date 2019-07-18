@@ -311,6 +311,10 @@ def addpoints(points, min_dist):
                 ratio = extra_idx / extrasp1
                 newpoints.append((x1 + diff_x * ratio,
                                   y1 + diff_y * ratio))
+        ### Two points define a straight line
+        ### so no need to connect final point back to first
+        if original_len == 2:
+            break
 
     return newpoints
 
