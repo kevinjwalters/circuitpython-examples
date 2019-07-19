@@ -10,6 +10,9 @@ then points extracte from SVG data.
 offset_x = -10
 offset_y = 9
 
+### pylint 2.3.1 has some strange opinions on indentation here
+### which conflict with version 1.9.2
+### pylint: bad-continuation
 data = [
         # Removing the box outline
         # Group 1
@@ -218,4 +221,4 @@ data = [
          #(243.14004, 239.17141),
          #(243.14004, 239.17141),
         ]
-        ]  ### pylint has a strange opinion on indentation here
+       ]
