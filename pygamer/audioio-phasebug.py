@@ -4991,6 +4991,14 @@ rawdata = array.array("H",
 ### This prints 4930
 print("rawdata length", len(rawdata))
 
+bizarre_workaround = False
+if bizarre_workaround:
+    rawdata.append(0)
+    rawdata.append(0)
+    rawdata.append(0)
+
+print("rawdata adjusted length", len(rawdata))
+
 ### Change this to True and everything is ok - very odd!
 overwrite_values = False
 
