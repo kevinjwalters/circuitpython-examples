@@ -1,4 +1,4 @@
-### cpx-reaction-timer v0.4
+### cpx-reaction-timer v0.5
 ### A human reaction timer using light and sound with touch pads
 ### Measures the time it takes for user to press A1
 
@@ -106,6 +106,13 @@ buttonleft.switch_to_input(pull=digitalio.Pull.DOWN)
 buttonright = digitalio.DigitalInOut(board.BUTTON_B)
 buttonright.switch_to_input(pull=digitalio.Pull.DOWN)
 
+### servo on a CPX appears to be risky, possibly placing
+### the audio amp at risk of over-heating
+### https://forums.adafruit.com/viewtopic.php?f=58&t=157190
+tactile_enable = False
+
+run=1
+
 while True:
     while touchpad.value:
         pass
@@ -117,7 +124,7 @@ while True:
         pass
     react_t = time.monotonic()
     reaction_dur = react_t - start_t
-    print("Visual reaction time is ", reaction_dur)
+    print("Trial ", run, ": visual reaction time is ", reaction_dur)
     pixels[0] = (0, 0, 0)
         
     while touchpad.value:
@@ -130,22 +137,25 @@ while True:
         pass
     react_t = time.monotonic()
     reaction_dur = react_t - start_t
-    print("Audio reaction time is ", reaction_dur)
+    print("Trial ", run, ": audio reaction time is ", reaction_dur)
     dac.stop()        
     
-    while touchpad.value:
-        pass
-    time.sleep(3.0 + random.random() * 4.0)
-    gc.collect()
-    servo.angle = 10
-    start_t = time.monotonic()
-    while not touchpad.value:
-        pass
-    react_t = time.monotonic()
-    reaction_dur = react_t - start_t
-    print("Tactile reaction time is ", reaction_dur)
-    servo.angle = 0
- 
+    if tactile_enable:
+        while touchpad.value:
+            pass
+        time.sleep(3.0 + random.random() * 4.0)
+        gc.collect()
+        servo.angle = 10
+        start_t = time.monotonic()
+        while not touchpad.value:
+            pass
+        react_t = time.monotonic()
+        reaction_dur = react_t - start_t
+        print("Tactile reaction time is ", reaction_dur)
+        servo.angle = 0
+
+    run += 1
+    
     if buttonleft.value:
         while buttonleft.value:
             pass   ### wait for button up
