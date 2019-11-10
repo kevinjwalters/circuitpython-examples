@@ -1,4 +1,4 @@
-### cpb-quick-draw v0.5
+### cpb-quick-draw v0.6
 ### CircuitPython (on CPB) Quick Draw reaction game
 
 ### Tested with Circuit Playground Bluefruit Alpha
@@ -31,11 +31,13 @@
 ### SOFTWARE.
 
 import time
+import gc
 
 import digitalio
 import touchio
 import board
 import neopixel
+
 
 from adafruit_bluefruit_connect.packet import Packet
 from adafruit_bluefruit_connect.color_packet import ColorPacket
@@ -67,6 +69,18 @@ button_left.switch_to_input(pull=digitalio.Pull.DOWN)
 button_right = digitalio.DigitalInOut(board.BUTTON_B)
 button_right.switch_to_input(pull=digitalio.Pull.DOWN)
 
+### From first tests master shows
+### 
+### RTT plus a bit 0.0546875 (or 0.0507813)
+### RTT plus a bit 0.0429688
+### RTT plus a bit 0.0429688
+### lots repeated, occasional 0.0390625, 0.046875
+
+### TODO - do some order of start-up testing and compare with previous code
+
+### TODO - appearing at CIRCUITPYxxxx where xxxx last 4 hex chars of MAC-
+###      - do I want to change this?
+
 if master_device:
     # Master code
     scanner = Scanner()
@@ -79,20 +93,26 @@ if master_device:
         uart_client.connect(uart_addresses[0], 5)
 
         while uart_client.connected:
-            color_packet = ColorPacket((1,2,3))
+            color_packet = ColorPacket((1, 2, 3))
+            color_packet_bytes = color_packet.to_bytes()
+            gc.collect()  # opportune moment
             try:
                 t1 = time.monotonic()
-                uart_client.write(color_packet.to_bytes())
+                uart_client.write(color_packet_bytes)
+                # TODO - can I split from_stream into read then parse?
                 packet = Packet.from_stream(uart_client)
                 t2 = time.monotonic()
+                if isinstance(packet, ColorPacket):
+                    print("RX", packet.color)
             except OSError:
-                 pass
+                pass
             print("RTT plus a bit", t2 - t1)
             time.sleep(1)
     
 else:
     # Slave code
     uart_server = UARTServer()
+    echo_packet_bytes = ColorPacket((9, 8, 7)).to_bytes()
     while True:
         uart_server.start_advertising()
         while not uart_server.connected:
@@ -101,7 +121,9 @@ else:
         while uart_server.connected:
             packet = Packet.from_stream(uart_server)
             if isinstance(packet, ColorPacket):
-                uart_server.write(packet.to_bytes())
-                print(packet.color)
+                uart_server.write(echo_packet_bytes)
+                print("RX", packet.color)
+            elif packet is None:
+                pass
             else:
                 print("Unexpected packet type", packet)
