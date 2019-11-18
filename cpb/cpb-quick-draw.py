@@ -1,4 +1,4 @@
-### cpb-quick-draw v0.6
+### cpb-quick-draw v0.7
 ### CircuitPython (on CPB) Quick Draw reaction game
 
 ### Tested with Circuit Playground Bluefruit Alpha
@@ -31,7 +31,9 @@
 ### SOFTWARE.
 
 import time
+import sys
 import gc
+import struct
 
 import digitalio
 import touchio
@@ -40,7 +42,46 @@ import neopixel
 
 
 from adafruit_bluefruit_connect.packet import Packet
-from adafruit_bluefruit_connect.color_packet import ColorPacket
+
+class PingPacket(Packet):
+    """A packet of time.monotonic() and lastrtt."""
+
+    _FMT_PARSE = '<xxffx'
+    PACKET_LENGTH = struct.calcsize(_FMT_PARSE)
+    # _FMT_CONSTRUCT doesn't include the trailing checksum byte.
+    _FMT_CONSTRUCT = '<2sff'
+    
+    # TODO - ask for recommendations for application specific range
+    _TYPE_HEADER = b'!z'
+
+    # number of args must match _FMT_PARSE
+    # for Packet.parse_private() to work
+    def __init__(self, lastrtt, sendtime):
+        """Construct a PingPacket."""
+        self._lastrtt = lastrtt
+        self._sendtime = sendtime   # over-written later
+
+    def to_bytes(self):
+        """Return the bytes needed to send this packet.
+        """
+        self._sendtime = time.monotonic()
+        partial_packet = struct.pack(self._FMT_CONSTRUCT, self._TYPE_HEADER,
+                                     self._sendtime, self._lastrtt)
+        return self.add_checksum(partial_packet)
+
+    @property
+    def lastrtt(self):
+        """The last rtt value or a negative number if n/a."""
+        return self._lastrtt
+
+    @property
+    def sendtime(self):
+        """The time packet was sent (when to_bytes() was last called)."""
+        return self._sendtime
+
+PingPacket.register_packet_type()
+
+# from adafruit_bluefruit_connect.color_packet import ColorPacket
 
 switch_left = digitalio.DigitalInOut(board.SLIDE_SWITCH)
 switch_left.switch_to_input(pull=digitalio.Pull.UP)
@@ -76,10 +117,15 @@ button_right.switch_to_input(pull=digitalio.Pull.DOWN)
 ### RTT plus a bit 0.0429688
 ### lots repeated, occasional 0.0390625, 0.046875
 
+### With new PingPacket this is 
+### 0.0546875, 0.046875, 0.0390625, 0.046875, 0.0390625
+
 ### TODO - do some order of start-up testing and compare with previous code
 
 ### TODO - appearing at CIRCUITPYxxxx where xxxx last 4 hex chars of MAC-
 ###      - do I want to change this?
+
+rtt = -1.0
 
 if master_device:
     # Master code
@@ -93,36 +139,39 @@ if master_device:
         uart_client.connect(uart_addresses[0], 5)
 
         while uart_client.connected:
-            color_packet = ColorPacket((1, 2, 3))
-            color_packet_bytes = color_packet.to_bytes()
+            ping_packet = PingPacket(rtt, -1.0)
             gc.collect()  # opportune moment
             try:
-                t1 = time.monotonic()
-                uart_client.write(color_packet_bytes)
+                uart_client.write(ping_packet.to_bytes())
                 # TODO - can I split from_stream into read then parse?
                 packet = Packet.from_stream(uart_client)
                 t2 = time.monotonic()
-                if isinstance(packet, ColorPacket):
-                    print("RX", packet.color)
-            except OSError:
+                if isinstance(packet, PingPacket):
+                    print("RX")
+                    rtt = t2 - ping_packet.sendtime
+                    print("RTT plus a bit", rtt)
+            except OSError as err:
                 pass
-            print("RTT plus a bit", t2 - t1)
+            
             time.sleep(1)
-    
+
 else:
     # Slave code
     uart_server = UARTServer()
-    echo_packet_bytes = ColorPacket((9, 8, 7)).to_bytes()
     while True:
         uart_server.start_advertising()
         while not uart_server.connected:
             pass
 
         while uart_server.connected:
+            # TODO - consider using uart_server.in_waiting 
             packet = Packet.from_stream(uart_server)
-            if isinstance(packet, ColorPacket):
-                uart_server.write(echo_packet_bytes)
-                print("RX", packet.color)
+            if isinstance(packet, PingPacket):
+                print("RX")
+                try:
+                    uart_server.write(PingPacket(123.0, -1.0).to_bytes())
+                except OSError as err:
+                    print(err, file=sys.stderr)
             elif packet is None:
                 pass
             else:
