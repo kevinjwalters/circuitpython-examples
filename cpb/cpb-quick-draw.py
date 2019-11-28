@@ -1,4 +1,4 @@
-### cpb-quick-draw v0.8
+### cpb-quick-draw v0.9
 ### CircuitPython (on CPB) Quick Draw reaction game
 
 ### Tested with Circuit Playground Bluefruit Alpha
@@ -74,7 +74,7 @@ class PingPacket(Packet):
         """
         self._sendtime = time.monotonic()
         partial_packet = struct.pack(self._FMT_CONSTRUCT, self._TYPE_HEADER,
-                                     self._sendtime, self._lastrtt)
+                                     self._lastrtt, self._sendtime)
         return self.add_checksum(partial_packet)
 
     @property
@@ -158,17 +158,18 @@ button_right.switch_to_input(pull=digitalio.Pull.DOWN)
 ### TODO - appearing at CIRCUITPYxxxx where xxxx last 4 hex chars of MAC-
 ###      - do I want to change this?
 
-num_pings = 5
+num_pings = 8
 # The rtt is sent to server but for first packet client
 # sent there's no value to send, -1.0 is specal first packet value
 rtt = -1.0
 rtts = []
 offsets = []
 
+# default timeout is 1.0 but specify this in case it gets "tweaked"
 if master_device:
     # Master code
     scanner = Scanner()
-    uart_client = UARTClient()
+    uart_client = UARTClient(timeout=1.0)
     while True:
         uart_addresses = []
         while not uart_addresses:
@@ -209,14 +210,9 @@ if master_device:
         if len(rtts) >= num_pings:
             break
 
-    ### indicate a good rtt calculate
-    quicker_rtts = sorted(rtts)[0:(num_pings // 2) + 1]
-    mean_rtt = sum(rtts) / len(rtts)
-    ble_send_time = mean_rtt / 2.0
-
 else:
     # Slave code
-    uart_server = UARTServer()
+    uart_server = UARTServer(timeout=1.0)
     responses = 0
     while True:
         uart_server.start_advertising()
@@ -232,6 +228,7 @@ else:
                 try:
                     uart_server.write(PingPacket(-2.0, -1.0).to_bytes())
                     responses += 1
+                    rtts.append(packet.lastrtt)
                     pixels.fill((0,0,10))
                     # this must be less than the client inter-packet pause
                     time.sleep(0.1)
@@ -247,6 +244,23 @@ else:
         if responses >= num_pings:
                 break
 
+### indicate a good rtt calculate, skip first one
+### as it's not present on slave
+print(rtts)
+if master_device:
+    rtt_start = 1
+    rtt_end   = len(rtts) - 1
+else:
+    rtt_start = 2
+    rtt_end   = len(rtts)
+
+quicker_rtts = sorted(rtts[rtt_start:rtt_end])[0:(num_pings // 2) + 1]
+mean_rtt = sum(quicker_rtts) / len(quicker_rtts)
+ble_send_time = mean_rtt / 2.0
+
+print("BSE:", ble_send_time)  ### TODO delete this.
+
+
 pixels.fill((0,0,100))
 time.sleep(2)
 pixels.fill((0,0,0))
@@ -259,32 +273,38 @@ if master_device:
     if uart_client.connected:
         try:
             uart_client.write(StartGame().to_bytes())
-            print("sleeping to sync", ble_send_time)
-            time.sleep(ble_send_time)
             print("StartGame TX")
+            packet = Packet.from_stream(uart_client)
+            if isinstance(packet, StartGame):
+                print("StartGame RX")
+            elif packet is None:
+                pass
+            else:
+                print("Unexpected packet type", packet)
         except OSError as err:
             print(err, file=sys.stderr)
 
-    time.sleep(0.055)  ### TODO - super fudge!!!!!
 else:
     if uart_server.connected:
         packet = Packet.from_stream(uart_server)
         if isinstance(packet, StartGame):
             print("StartGame RX")
+            try:
+                uart_server.write(StartGame().to_bytes())
+                print("StartGame TX")
+            except OSError as err:
+                print(err, file=sys.stderr)
         elif packet is None:
             pass
         else:
             print("Unexpected packet type", packet)
+    print("Sleeping to sync up", ble_send_time)
+    time.sleep(ble_send_time)
 
-### TODO - this does not work!!!
-### K42 is three frames behind at 50Hz video
-### Maybe audio is best way to check sync if i can get it in L / R
-
-### TODO - forget StartGame and check with PingPacket
-### TODO - check registration isn't slowing things down
-
-for idx in range(5):
-    pixels.fill((50, 50, 50))
+# The CPBs should now be synchronised and this could will run at the
+# same time
+for idx in range(10):
+    pixels.fill((30, 30, 30))
     time.sleep(1)
     pixels.fill((0,0,0))
     time.sleep(1)
