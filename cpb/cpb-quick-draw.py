@@ -1,4 +1,4 @@
-### cpb-quick-draw v1.0
+### cpb-quick-draw v1.2
 ### CircuitPython (on CPB) Quick Draw reaction game
 
 ### Tested with Circuit Playground Bluefruit Alpha
@@ -48,6 +48,9 @@ import board
 ## from adafruit_circuitplayground.bluefruit import cpb
 import neopixel
 
+from adafruit_ble import BLERadio
+from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
+from adafruit_ble.services.nordic import UARTService
 
 from adafruit_bluefruit_connect.packet import Packet
 
@@ -92,7 +95,7 @@ TimePacket.register_packet_type()
 
 class StartGame(Packet):
     """A packet to indicate the receiver must start the game immediately."""
-    
+
     _FMT_PARSE = '<xxx'
     PACKET_LENGTH = struct.calcsize(_FMT_PARSE)
     # _FMT_CONSTRUCT doesn't include the trailing checksum byte.
@@ -121,14 +124,6 @@ switch_left.switch_to_input(pull=digitalio.Pull.UP)
 
 master_device = switch_left.value
 
-if master_device:
-    # The master device
-    from adafruit_ble.scanner import Scanner
-    from adafruit_ble.uart_client import UARTClient
-else:
-    # The slave device
-    from adafruit_ble.uart_server import UARTServer
-
 # brightness 1 saves memory by removing need for a second buffer
 # 10 is number of NeoPixels on CPX
 numpixels = const(10)
@@ -142,14 +137,14 @@ if master_device:
     # button A is on left (usb at top
     player_button = digitalio.DigitalInOut(board.BUTTON_A)
     player_button.switch_to_input(pull=digitalio.Pull.DOWN)
-    
+
     player_px = (0, halfnumpixels)
     opponent_px = (halfnumpixels, numpixels)
 else:
     # button B is on right
     player_button = digitalio.DigitalInOut(board.BUTTON_B)
     player_button.switch_to_input(pull=digitalio.Pull.DOWN)
-    
+
     player_px = (halfnumpixels, numpixels)
     opponent_px = (0, halfnumpixels)
 
@@ -179,24 +174,19 @@ rtt = -1.0
 rtts = []
 offsets = []
 
-# default timeout is 1.0 but specify this in case it gets "tweaked"
+# default timeout is 1.0 and on latest library with UARTService this
+# cannot be changed
+ble = BLERadio()
 if master_device:
     # Master code
-    scanner = Scanner()
-    uart_client = UARTClient(timeout=11.0)
+    uart_client = None
     while True:
-        uart_addresses = []
-        while not uart_addresses:
-            uart_addresses = uart_client.scan(scanner)
-        if debug:
-            print("Connecting to", uart_addresses[0])
-        uart_client.connect(uart_addresses[0], 5)
-
         gc.collect()  # opportune moment
-        while uart_client.connected:
+        while ble.connected:
             request = TimePacket(rtt, 0.0)
-            
+
             try:
+                print("TX")
                 uart_client.write(request.to_bytes())
                 # TODO - can I split from_stream into read then parse?
                 response = Packet.from_stream(uart_client)
@@ -212,29 +202,47 @@ if master_device:
                                                                                       time_remote_cpb,
                                                                                       offset))
             except OSError as err:
-                pass
+                print("OSError", err, file=sys.stderr)
 
             if len(rtts) >= num_pings:
                 break
 
             pixels.fill((0,0,10))
-            time.sleep(0.2)
+            time.sleep(0.1)
             pixels.fill((0,0,0))
+            time.sleep(0.1)
 
         if len(rtts) >= num_pings:
             break
 
+        print("disconnected, scanning")
+        for advertisement in ble.start_scan(ProvideServicesAdvertisement,
+                                            timeout=2):
+            if UARTService not in advertisement.services:
+                continue
+            print("connecting")   ### TODO - added what connecting to
+            ble.connect(advertisement)
+            break
+        for conn in ble.connections:
+            if UARTService in conn:
+                print("Set uart_client")
+                uart_client = conn[UARTService]
+                break
+        ble.stop_scan()
+
 else:
     # Slave code
-    uart_server = UARTServer(timeout=11.0)
+    uart_server = UARTService()
+    advertisement = ProvideServicesAdvertisement(uart_server)
     responses = 0
     while True:
-        uart_server.start_advertising()
-        while not uart_server.connected:
+        ble.start_advertising(advertisement)
+        while not ble.connected:
             pass
 
+        print("Incoming connection")
         gc.collect()
-        while uart_server.connected:
+        while ble.connected:
             # TODO - consider using uart_server.in_waiting
             packet = Packet.from_stream(uart_server)
             if isinstance(packet, TimePacket):
@@ -248,7 +256,7 @@ else:
                     time.sleep(0.1)
                     pixels.fill((0,0,0))
                 except OSError as err:
-                    print(err, file=sys.stderr)
+                    print("OSError", err, file=sys.stderr)
             elif packet is None:
                 pass
             else:
@@ -288,7 +296,7 @@ time.sleep(5)
 gc.collect()
 
 if master_device:
-    if uart_client.connected:
+    if ble.connected:
         try:
             uart_client.write(StartGame().to_bytes())
             print("StartGame TX")
@@ -303,7 +311,7 @@ if master_device:
             print(err, file=sys.stderr)
 
 else:
-    if uart_server.connected:
+    if ble.connected:
         packet = Packet.from_stream(uart_server)
         if isinstance(packet, StartGame):
             print("StartGame RX")
@@ -329,11 +337,11 @@ else:
 
 # FOR THIS VERSION USE BUTTON AND USE IT ON THE SIDE THE SWITCH IS SET TO
 # replicate the style of the original quick draw
-# pass results between the two 
+# pass results between the two
 # wait 5 seconds for data packet exchange
 # in notes document it behaves slightly differently as it cannot tell
 # how long other play took until it receives data
-# 
+#
 
 # sound sample?
 
@@ -347,6 +355,8 @@ pixels.fill((0, 0, 0))
 
 ### TODO play sound
 
+### The CPBs are no longer synchronised due to variability of
+### reaction time between players
 player_reaction_dur = finish_t - start_t
 
 ### TODO exchange times over bluetooth
@@ -355,7 +365,7 @@ player_reaction_dur = finish_t - start_t
 error_dur = -1.0
 opponent_reaction_dur = error_dur
 if master_device:
-    if uart_client.connected:
+    if ble.connected:
         try:
             uart_client.write(TimePacket(player_reaction_dur,
                                          0.0).to_bytes())
@@ -372,7 +382,7 @@ if master_device:
             print(err, file=sys.stderr)
 
 else:
-    if uart_server.connected:
+    if ble.connected:
         packet = Packet.from_stream(uart_server)
         if isinstance(packet, TimePacket):
             print("TimePacket RX")
@@ -404,8 +414,8 @@ else:
         # Very unlikely to reach here
         pixels[player_px[0]:player_px[1]] = draw_colour
         pixels[opponent_px[0]:opponent_px[1]] = draw_colour
-        
-### TODO         
+
+### TODO
 #print values in mu friendly format
 #print running stats in my friendly format
 
