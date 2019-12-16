@@ -1,4 +1,4 @@
-### cpb-quick-draw v1.2
+### cpb-quick-draw v1.3
 ### CircuitPython (on CPB) Quick Draw reaction game
 
 ### Tested with Circuit Playground Bluefruit Alpha
@@ -44,9 +44,9 @@ import digitalio
 import touchio
 import board
 
-### TODO - switch over to import cpb - NOT YET IN A LIBRARY BUNDLE
-## from adafruit_circuitplayground.bluefruit import cpb
-import neopixel
+### TODO - fully switch over to import cpb - NOT YET IN A LIBRARY BUNDLE
+### From https://github.com/adafruit/Adafruit_CircuitPython_CircuitPlayground/tree/master/adafruit_circuitplayground
+from adafruit_circuitplayground.bluefruit import cpb
 
 from adafruit_ble import BLERadio
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
@@ -119,31 +119,33 @@ StartGame.register_packet_type()
 
 debug = 1
 
-switch_left = digitalio.DigitalInOut(board.SLIDE_SWITCH)
-switch_left.switch_to_input(pull=digitalio.Pull.UP)
+##switch_left = digitalio.DigitalInOut(board.SLIDE_SWITCH)
+##switch_left.switch_to_input(pull=digitalio.Pull.UP)
 
-master_device = switch_left.value
+master_device = cpb.switch  # True when switch is left (near ear symbol)
 
 # brightness 1 saves memory by removing need for a second buffer
 # 10 is number of NeoPixels on CPX
 numpixels = const(10)
 halfnumpixels = const(5)
-pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1)
+pixels = cpb.pixels
+
+##pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1)
 
 # The touch pads calibrate themselves as they are created, just once here
-touchpad = touchio.TouchIn(board.A1)
+##touchpad = touchio.TouchIn(board.A1)
 
 if master_device:
     # button A is on left (usb at top
-    player_button = digitalio.DigitalInOut(board.BUTTON_A)
-    player_button.switch_to_input(pull=digitalio.Pull.DOWN)
+    player_button = lambda: cpb.button_a
+    ## player_button.switch_to_input(pull=digitalio.Pull.DOWN)
 
     player_px = (0, halfnumpixels)
     opponent_px = (halfnumpixels, numpixels)
 else:
     # button B is on right
-    player_button = digitalio.DigitalInOut(board.BUTTON_B)
-    player_button.switch_to_input(pull=digitalio.Pull.DOWN)
+    player_button = lambda: cpb.button_b
+    ## player_button.switch_to_input(pull=digitalio.Pull.DOWN)
 
     player_px = (halfnumpixels, numpixels)
     opponent_px = (0, halfnumpixels)
@@ -343,17 +345,20 @@ else:
 # how long other play took until it receives data
 #
 
-# sound sample?
+# TODO - need to change at the very least code exchanging TimePacket
+# after this because timeout can no longer be set and 
+
 
 # Start the game
 pixels.fill((30, 30, 30))
 start_t = time.monotonic()
-while not player_button.value:
+while not player_button():
    pass
 finish_t = time.monotonic()
-pixels.fill((0, 0, 0))
 
-### TODO play sound
+pixels.fill((0, 0, 0))
+cpb.play_file("PistolRicochet.wav")
+
 
 ### The CPBs are no longer synchronised due to variability of
 ### reaction time between players
@@ -414,6 +419,7 @@ else:
         # Very unlikely to reach here
         pixels[player_px[0]:player_px[1]] = draw_colour
         pixels[opponent_px[0]:opponent_px[1]] = draw_colour
+
 
 ### TODO
 #print values in mu friendly format
