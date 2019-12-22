@@ -1,4 +1,4 @@
-### cpb-quick-draw v1.8
+### cpb-quick-draw v1.10
 ### CircuitPython (on CPBs) Quick Draw reaction game
 
 ### Tested with Circuit Playground Bluefruit Alpha
@@ -143,6 +143,7 @@ numpixels = const(10)
 halfnumpixels = const(5)
 pixels = cpb.pixels
 
+darkest_red = (1, 0, 0)
 red = (40, 0, 0)
 green = (0, 30, 0)
 blue = (0, 0, 10)
@@ -151,10 +152,14 @@ yellow = (40, 20, 0)
 white = (30, 30, 30)
 black = (0, 0, 0)
 
-win_colour = [green] * halfnumpixels
-misdraw_colour = [red] * halfnumpixels
-draw_colour = [yellow] * halfnumpixels
-
+win_colour = green
+win_pixels = [win_colour] * halfnumpixels
+opponent_misdraw_colour = darkest_red
+misdraw_colour = red
+misdraw_pixels = [misdraw_colour] * halfnumpixels
+draw_colour = yellow
+draw_pixels = [draw_colour] * halfnumpixels
+lose_colour = black
 
 if master_device:
     # button A is on left (usb at top
@@ -174,7 +179,7 @@ else:
 
 ### TODO - do some order of start-up testing and compare with previous code
 
-### TODO - appearing in BLE 
+### TODO - appearing in BLE
 ###      - as CIRCUITPYxxxx where xxxx last 4 hex chars of MAC-
 ###      - do I want to change this?
 
@@ -223,7 +228,7 @@ def connect():
         while not ble.connected:
             pass
         print("Incoming connection from", "???")  # TODO - work out where to get this from?
-    
+
     return uart
 
 
@@ -365,7 +370,7 @@ def sync_test():
 # how long other play took until it receives data
 
 # TODO - need to change at the very least code exchanging TimePacket
-# after this because timeout can no longer be set and 
+# after this because timeout can no longer be set and
 
 
 def get_opponent_reactiontime(player_reaction_dur):
@@ -374,11 +379,11 @@ def get_opponent_reactiontime(player_reaction_dur):
     ### e.g. player1 0.2s player2 6s
     ###      player1 4s   player2 0.5s
     opponent_reaction_dur = ERROR_DUR
-    if master_device:  
+    if master_device:
         uart.write(TimePacket(player_reaction_dur,
                               0.0).to_bytes())
         print("TimePacket TX")
-        packet = read_packet(uart, timeout=protocol_timeout)     
+        packet = read_packet(uart, timeout=protocol_timeout)
         if isinstance(packet, TimePacket):
             print("TimePacket RX")
             opponent_reaction_dur = packet.duration
@@ -403,27 +408,40 @@ def show_winner(player_reaction_dur, opponent_reaction_dur):
     win = False
     misdraw = False
     draw = False
+    colour = lose_colour
 
     if player_reaction_dur < 0.1 or opponent_reaction_dur < 0.1:
         if player_reaction_dur != ERROR_DUR and player_reaction_dur < 0.1:
             misdraw = True
-            pixels[player_px[0]:player_px[1]] = misdraw_colour
+            pixels[player_px[0]:player_px[1]] = misdraw_pixels
+            colour = misdraw_colour
         if opponent_reaction_dur != ERROR_DUR and opponent_reaction_dur < 0.1:
-            pixels[opponent_px[0]:opponent_px[1]] = misdraw_colour
+            pixels[opponent_px[0]:opponent_px[1]] = misdraw_pixels
+            colour = opponent_misdraw_colour
     else:
         if player_reaction_dur < opponent_reaction_dur:
             win = True
-            pixels[player_px[0]:player_px[1]] = win_colour
+            pixels[player_px[0]:player_px[1]] = win_pixels
+            colour = win_colour
         elif opponent_reaction_dur < player_reaction_dur:
-            pixels[opponent_px[0]:opponent_px[1]] = win_colour
+            pixels[opponent_px[0]:opponent_px[1]] = win_pixels
         else:
             # Equality! Very unlikely to reach here
-            pixels[player_px[0]:player_px[1]] = draw_colour
-            pixels[opponent_px[0]:opponent_px[1]] = draw_colour
             draw = False
+            pixels[player_px[0]:player_px[1]] = draw_pixels
+            pixels[opponent_px[0]:opponent_px[1]] = draw_pixels
+            colour = draw_colour
 
-    return (win, misdraw, draw)
+    return (win, misdraw, draw, colour)
 
+
+def show_summary(result_colours):
+    """Show the results on the NeoPixels."""
+    # trim anything beyond 10
+    for idx, colour in enumerate(result_colours[0:numpixels]):
+        pixels[idx] = colour
+        time.sleep(0.5)
+        
 
 ### TODO - this appears to fix a bug which may related to closing the
 ###        connection by program termination and other end not receiving it
@@ -454,6 +472,8 @@ uart = connect()
 if debug:
     print("ping_for_rtt()")
 ble_send_time = ping_for_rtt()
+
+my_results = []
 
 for _ in range(TURNS):
     if uart is None:
@@ -499,8 +519,9 @@ for _ in range(TURNS):
         opponent_reaction_dur = get_opponent_reactiontime(player_reaction_dur)
 
         # Show green for winner and red for any misdraws
-        (win, misdraw, draw) = show_winner(player_reaction_dur,
-                                           opponent_reaction_dur)
+        (win, misdraw, draw, colour) = show_winner(player_reaction_dur,
+                                                   opponent_reaction_dur)
+        my_results.append(colour)
         if misdraw:
             misdraw += 1
         elif draw:
@@ -515,7 +536,7 @@ for _ in range(TURNS):
                                                 player_reaction_dur,
                                                 opponent_reaction_dur))
 
-        # Keep NeoPixel result colour for 5 seconds then turn-off and repeat    
+        # Keep NeoPixel result colour for 5 seconds then turn-off and repeat
         time.sleep(5)
     except OSError as err:
         # TODO - can I print stack trace from a caught exception
@@ -523,4 +544,12 @@ for _ in range(TURNS):
         uart = None  # this will force a reconnection
 
     # TODO - test uart = None here to check reconnection works
+    # TODO - This does not work - need some sort of connection cleanup too
+    ##uart = None
     pixels.fill(black)
+
+# show results summary on NeoPixels
+show_summary(my_results)
+
+while True:
+   pass
