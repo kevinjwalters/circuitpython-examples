@@ -1,12 +1,12 @@
-### cpb-quick-draw v1.7
-### CircuitPython (on CPB) Quick Draw reaction game
+### cpb-quick-draw v1.8
+### CircuitPython (on CPBs) Quick Draw reaction game
 
 ### Tested with Circuit Playground Bluefruit Alpha
 ### and CircuitPython and 5.0.0-beta.2
 
 ### Needs recent adafruit_ble and adafruit_circuitplayground.bluefruit libraries
 
-### Need two CPB boards with switches set to different positions
+### Need 2 CPB boards with switches set to different positions
 
 ### copy this file to CPB board as code.py
 
@@ -52,8 +52,10 @@ from adafruit_ble.services.nordic import UARTService
 
 from adafruit_bluefruit_connect.packet import Packet
 
+debug = 3
+
 # Bluetooth scanning timeout
-BLESCAN_TIMEOUT = 2
+BLESCAN_TIMEOUT = 5
 
 TURNS = 10
 # Integer number of seconds
@@ -63,9 +65,15 @@ LONGEST_DELAY = 10
 # The duration of the short blue flashes (in seconds)
 # during time delay measurement in ping_for_rtt()
 SYNC_FLASH_DUR = 0.1
+# The number of "pings" sent by ping_for_rtt()
+NUM_PINGS = 8
 
 # A special value used to indicate failed exchange of reaction times
 ERROR_DUR = -1.0
+
+# A timeout value for the protocol
+protocol_timeout = 14.0
+
 
 class TimePacket(Packet):
     """A packet for exchanging time information, time.monotonic() and lastrtt."""
@@ -126,8 +134,6 @@ class StartGame(Packet):
 StartGame.register_packet_type()
 
 
-debug = 1
-
 master_device = cpb.switch  # True when switch is left (near ear symbol)
 
 # The default brightness is 1.0 - leaving at that as it
@@ -137,14 +143,17 @@ numpixels = const(10)
 halfnumpixels = const(5)
 pixels = cpb.pixels
 
-win_colour     = [(0,  30, 0) ] * halfnumpixels
-misdraw_colour = [(40, 0,  0) ] * halfnumpixels
-draw_colour    = [(40, 30, 0) ] * halfnumpixels
-
+red = (40, 0, 0)
+green = (0, 30, 0)
 blue = (0, 0, 10)
 brightblue = (0, 0, 100)
+yellow = (40, 20, 0)
 white = (30, 30, 30)
 black = (0, 0, 0)
+
+win_colour = [green] * halfnumpixels
+misdraw_colour = [red] * halfnumpixels
+draw_colour = [yellow] * halfnumpixels
 
 
 if master_device:
@@ -169,7 +178,21 @@ else:
 ###      - as CIRCUITPYxxxx where xxxx last 4 hex chars of MAC-
 ###      - do I want to change this?
 
+def read_packet(uart, timeout=None):
+    """Read a packet with an optional timeout."""
+    if timeout is None:
+        return Packet.from_stream(uart)
+    else:
+        packet = None
+        t1 = time.monotonic()
+        while packet is None and time.monotonic() - t1 < timeout:
+            packet = Packet.from_stream(uart)
+        return packet
+
+
 def connect():
+    """Connect two boards using the first UART Service the client finds
+       over Bluetooth Low Energy. No timeouts, will wait forever."""
     uart = None
     if master_device:
         # Master code
@@ -177,9 +200,11 @@ def connect():
             print("disconnected, scanning")
             for advertisement in ble.start_scan(ProvideServicesAdvertisement,
                                                 timeout=BLESCAN_TIMEOUT):
+                if debug >= 2:
+                    print(advertisement.address, advertisement.rssi)
                 if UARTService not in advertisement.services:
                     continue
-                print("connecting")   ### TODO - added what connecting to
+                print("Connecting to", advertisement.address)
                 ble.connect(advertisement)
                 break
             for conn in ble.connections:
@@ -197,14 +222,17 @@ def connect():
         ble.start_advertising(advertisement)
         while not ble.connected:
             pass
-        print("Incoming connection")
+        print("Incoming connection from", "???")  # TODO - work out where to get this from?
     
     return uart
-    
 
-num_pings = 8
 
 def ping_for_rtt():
+    """Calculate the send time for Bluetooth Low Energy based from
+       a series of round-trip time measurements and assuming that
+       half of that is the send time.
+       This code must be done at approximately the same time
+       on each device as the timeout per packet is one second."""
     # The rtt is sent to server but for first packet client
     # sent there's no value to send, -1.0 is specal first packet value
     rtt = -1.0
@@ -214,65 +242,54 @@ def ping_for_rtt():
     if master_device:
         # Master code
         while True:
-            gc.collect()  # opportune moment
+            gc.collect()  # an opportune moment
             request = TimePacket(rtt, 0.0)
 
-            try:
-                print("TX")
-                uart.write(request.to_bytes())
-                # TODO - can I split from_stream into read then parse?
-                response = Packet.from_stream(uart)
-                t2 = time.monotonic()
-                if isinstance(response, TimePacket):
-                    print("RX")
-                    rtt = t2 - request.sendtime
-                    rtts.append(rtt)
-                    time_remote_cpb = response.sendtime + rtt / 2.0
-                    offset = time_remote_cpb - t2
-                    offsets.append(offset)
-                    print("RTT plus a bit={:f}, remote_time={:f}, offset={:f}".format(rtt,
-                                                                                      time_remote_cpb,
-                                                                                      offset))
-            except OSError as err:
-                print("OSError", err, file=sys.stderr)
-
-            if len(rtts) >= num_pings:
+            print("TX")
+            uart.write(request.to_bytes())
+            response = Packet.from_stream(uart)
+            t2 = time.monotonic()
+            if isinstance(response, TimePacket):
+                print("RX")
+                rtt = t2 - request.sendtime
+                rtts.append(rtt)
+                time_remote_cpb = response.sendtime + rtt / 2.0
+                offset = time_remote_cpb - t2
+                offsets.append(offset)
+                print("RTT plus a bit={:f}, remote_time={:f}, offset={:f}".format(rtt,
+                                                                                  time_remote_cpb,
+                                                                                  offset))
+            if len(rtts) >= NUM_PINGS:
                 break
 
             pixels.fill(blue)
             time.sleep(SYNC_FLASH_DUR)
             pixels.fill(black)
             # This second sleep is very important to ensure that the
-            # server is awaiting the next packet before client
-            # sends it to avoid server reading buffered packets
+            # server is already awaiting the next packet before client
+            # sends it to avoid server instantly reading buffered packets
             time.sleep(SYNC_FLASH_DUR)
 
     else:
         responses = 0
         while True:
-            gc.collect()
-
+            gc.collect()  # an opportune moment
             # TODO - consider using uart.in_waiting
             packet = Packet.from_stream(uart)
             if isinstance(packet, TimePacket):
                 print("RX")
-                try:
-                    uart.write(TimePacket(-2.0, -1.0).to_bytes())
-                    responses += 1
-                    rtts.append(packet.duration)
-                    pixels.fill(blue)
-                    time.sleep(SYNC_FLASH_DUR)
-                    pixels.fill(black)
-                    
-                except OSError as err:
-                    print("OSError", err, file=sys.stderr)
+                uart.write(TimePacket(-2.0, -1.0).to_bytes())
+                responses += 1
+                rtts.append(packet.duration)
+                pixels.fill(blue)
+                time.sleep(SYNC_FLASH_DUR)
+                pixels.fill(black)
             elif packet is None:
                 pass
             else:
                 print("Unexpected packet type", packet)
-            if responses >= num_pings:
+            if responses >= NUM_PINGS:
                 break
-
 
     ### indicate a good rtt calculate, skip first one
     ### as it's not present on slave
@@ -284,66 +301,65 @@ def ping_for_rtt():
         rtt_start = 2
         rtt_end   = len(rtts)
 
-    quicker_rtts = sorted(rtts[rtt_start:rtt_end])[0:(num_pings // 2) + 1]
+    quicker_rtts = sorted(rtts[rtt_start:rtt_end])[0:(NUM_PINGS // 2) + 1]
     mean_rtt = sum(quicker_rtts) / len(quicker_rtts)
-    ble_send_time = mean_rtt / 2.0
+    # Assuming symmetry between send and receive times
+    # this may not be perfectly true, the parsing is one factor here
+    send_time = mean_rtt / 2.0
 
-    print("BSE:", ble_send_time)  ### TODO delete this.
-    
+    print("BSE:", send_time)  ### TODO delete this.
+
+    # Indicate sync with a longer 2 second blue flash
     pixels.fill(brightblue)
     time.sleep(2)
     pixels.fill(black)
-    return ble_send_time
-
-
-def barrier():
-    if master_device:
-        try:
-            uart.write(StartGame().to_bytes())
-            print("StartGame TX")
-            packet = Packet.from_stream(uart)
-            if isinstance(packet, StartGame):
-                print("StartGame RX")
-            elif packet is None:
-                pass
-            else:
-                print("Unexpected packet type", packet)
-        except OSError as err:
-            print(err, file=sys.stderr)
-
-    else:
-        packet = Packet.from_stream(uart)
-        if isinstance(packet, StartGame):
-            print("StartGame RX")
-            try:
-                uart.write(StartGame().to_bytes())
-                print("StartGame TX")
-            except OSError as err:
-                print(err, file=sys.stderr)
-        elif packet is None:
-            pass
-        else:
-            print("Unexpected packet type", packet)
-
-        print("Sleeping to sync up", ble_send_time)
-        time.sleep(ble_send_time)
+    return send_time
 
 
 def random_pause():
     """This is the pause before the players draw.
        It only runs on the master (BLE client) as it should be followed
-       by a synchronisation step."""
+       by a synchronising barrier."""
     if master_device:
         time.sleep(random.randint(SHORTEST_DELAY, LONGEST_DELAY))
 
 
+def barrier(packet_send_time):
+    """Master send a Start message and then waits for a reply.
+       Slave waits for Start message, then sends reply, then pauses
+       for packet_send_time so both master and slave return from
+       barrier() at the same time."""
+
+    if master_device:
+        uart.write(StartGame().to_bytes())
+        print("StartGame TX")
+        packet = read_packet(uart, timeout=protocol_timeout)
+        if isinstance(packet, StartGame):
+            print("StartGame RX")
+        else:
+            print("Unexpected packet type", packet)
+
+    else:
+        packet = read_packet(uart, timeout=protocol_timeout)
+        if isinstance(packet, StartGame):
+            print("StartGame RX")
+            uart.write(StartGame().to_bytes())
+            print("StartGame TX")
+        else:
+            print("Unexpected packet type", packet)
+
+        print("Sleeping to sync up", packet_send_time)
+        time.sleep(packet_send_time)
+
+
 def sync_test():
-    """Only here as it is useful for testing."""
-    for _ in range(10):
+    """For testing synchronisation."""
+    for _ in range(40):
         pixels.fill(white)
-        time.sleep(0.25)
+        time.sleep(0.1)
         pixels.fill(black)
-        time.sleep(0.25)
+        time.sleep(0.1)
+
 
 # TODO in notes document it behaves slightly differently as it cannot tell
 # how long other play took until it receives data
@@ -358,46 +374,36 @@ def get_opponent_reactiontime(player_reaction_dur):
     ### e.g. player1 0.2s player2 6s
     ###      player1 4s   player2 0.5s
     opponent_reaction_dur = ERROR_DUR
-    if master_device:       
-        try:
-            uart.write(TimePacket(player_reaction_dur,
-                                  0.0).to_bytes())
-            print("TimePacket TX")
-            packet = Packet.from_stream(uart)
-            if isinstance(packet, TimePacket):
-                print("TimePacket RX")
-                opponent_reaction_dur = packet.duration
-            elif packet is None:
-                pass
-            else:
-                print("Unexpected packet type", packet)
-        except OSError as err:
-            print(err, file=sys.stderr)
-
-    else:
-        packet = Packet.from_stream(uart)
+    if master_device:  
+        uart.write(TimePacket(player_reaction_dur,
+                              0.0).to_bytes())
+        print("TimePacket TX")
+        packet = read_packet(uart, timeout=protocol_timeout)     
         if isinstance(packet, TimePacket):
             print("TimePacket RX")
             opponent_reaction_dur = packet.duration
-            try:
-                uart.write(TimePacket(player_reaction_dur,
-                                      0.0).to_bytes())
-                print("TimePacket TX")
-            except OSError as err:
-                print(err, file=sys.stderr)
-        elif packet is None:
-            pass
+        else:
+            print("Unexpected packet type", packet)
+
+    else:
+        packet = read_packet(uart, timeout=protocol_timeout)
+        if isinstance(packet, TimePacket):
+            print("TimePacket RX")
+            opponent_reaction_dur = packet.duration
+            uart.write(TimePacket(player_reaction_dur,
+                                  0.0).to_bytes())
+            print("TimePacket TX")
         else:
             print("Unexpected packet type", packet)
     return opponent_reaction_dur
 
 
 # TODO add victory/defeat/misdraw tunes??
-def show_winner_and_misraws(player_reaction_dur, opponent_reaction_dur):
+def show_winner(player_reaction_dur, opponent_reaction_dur):
     win = False
     misdraw = False
     draw = False
-    
+
     if player_reaction_dur < 0.1 or opponent_reaction_dur < 0.1:
         if player_reaction_dur != ERROR_DUR and player_reaction_dur < 0.1:
             misdraw = True
@@ -428,7 +434,6 @@ def show_winner_and_misraws(player_reaction_dur, opponent_reaction_dur):
 
 # CPB seeds from the hardware random number generation on its nRF52840 chip
 # Note: CPX code used A4-A7 analogue inputs, CPB cannot use A7 for analogue in
-
 wins = 0
 misdraws = 0
 losses = 0
@@ -451,63 +456,71 @@ if debug:
 ble_send_time = ping_for_rtt()
 
 for _ in range(TURNS):
-    # TODO - could test and remake connection here?
-    # TODO - decide on exception catching strategy
-    # TODO - can i print stack trace from a caught exception
+    if uart is None:
+        uart = connect()
 
     # This is a good time to garbage collect
     gc.collect()
-    
+
     # Random pause to stop players preempting the draw
     random_pause()
 
-    # Synchronise the two boards by exchanging a Start message
-    if debug:
-        print("barrier()")
-    barrier()
+    try:
+        # Synchronise the two boards by exchanging a Start message
+        if debug:
+            print("barrier()")
+        barrier(ble_send_time)
 
-    # Show white on all NeoPixels to indicate draw now
-    # This will execute at the same time on both boards
-    pixels.fill(white)
+        if debug >= 4:
+            sync_test()
 
-    # Wait for and time how long it takes for player to press button
-    start_t = time.monotonic()
-    while not player_button():
-        pass
-    finish_t = time.monotonic()
+        # Show white on all NeoPixels to indicate draw now
+        # This will execute at the same time on both boards
+        pixels.fill(white)
 
-    # Turn-off NeoPixels
-    pixels.fill(black)
-        
-    # Play the shooting sound
-    # 16k mono 8bit normalised version of
-    # https://freesound.org/people/Diboz/sounds/213925/
-    cpb.play_file("PistolRicochet.wav")
+        # Wait for and time how long it takes for player to press button
+        start_t = time.monotonic()
+        while not player_button():
+            pass
+        finish_t = time.monotonic()
 
-    # Exchange draw times
-    # The CPBs are no longer synchronised due to variability of
-    # reaction time between players
-    player_reaction_dur = finish_t - start_t
+        # Turn-off NeoPixels
+        pixels.fill(black)
 
-    opponent_reaction_dur = get_opponent_reactiontime(player_reaction_dur)
+        # Play the shooting sound
+        # 16k mono 8bit normalised version of
+        # https://freesound.org/people/Diboz/sounds/213925/
+        cpb.play_file("PistolRicochet.wav")
 
-    # Show green for winner and red for any misdraws
-    (win, misdraw, draw) = show_winner_and_misraws(player_reaction_dur,
-                                                   opponent_reaction_dur)
-    if misdraw:
-        misdraw += 1
-    elif draw:
-        draws += 1
-    elif win:
-        wins += 1
-    else:
-        losses += 1
-    
-    # Output reaction times to serial console in Mu friendly format
-    print("({:d}, {:d}, {:f}, {:f})".format(wins, misdraws,
-                                            player_reaction_dur,
-                                            opponent_reaction_dur))
+        # The CPBs are no longer synchronised due to reaction time varying
+        # per player
+        # Exchange draw times
+        player_reaction_dur = finish_t - start_t
+        opponent_reaction_dur = get_opponent_reactiontime(player_reaction_dur)
 
-    # Keep NeoPixel result colour for 5 seconds then turn-off and repeat    
-    time.sleep(5)
+        # Show green for winner and red for any misdraws
+        (win, misdraw, draw) = show_winner(player_reaction_dur,
+                                           opponent_reaction_dur)
+        if misdraw:
+            misdraw += 1
+        elif draw:
+            draws += 1
+        elif win:
+            wins += 1
+        else:
+            losses += 1
+
+        # Output reaction times to serial console in Mu friendly format
+        print("({:d}, {:d}, {:f}, {:f})".format(wins, misdraws,
+                                                player_reaction_dur,
+                                                opponent_reaction_dur))
+
+        # Keep NeoPixel result colour for 5 seconds then turn-off and repeat    
+        time.sleep(5)
+    except OSError as err:
+        # TODO - can I print stack trace from a caught exception
+        print("OSError", err)
+        uart = None  # this will force a reconnection
+
+    # TODO - test uart = None here to check reconnection works
     pixels.fill(black)
