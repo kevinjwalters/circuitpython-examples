@@ -1,4 +1,4 @@
-### cpx-reaction-timer v0.6
+### cpx-reaction-timer v0.7
 ### A human reaction timer using light and sound with touch pads
 ### Measures the time it takes for user to press A1
 
@@ -89,7 +89,7 @@ speaker_enable.direction = digitalio.Direction.OUTPUT
 speaker_on = True
 speaker_enable.value = speaker_on
 
-dac = AudioOut(board.SPEAKER)
+audio = AudioOut(board.SPEAKER)
 
 # Number of seconds
 SHORTEST_DELAY = 3.0
@@ -106,7 +106,7 @@ twopi = 2 * math.pi
 def sawtooth(angle):
     """A sawtooth function like math.sin(angle).
     Input of 0 returns 1.0, pi returns 0.0, 2*pi returns -1.0."""
-    
+
     return 1.0 - angle % twopi / twopi * 2
 
 # make a sawtooth wave between +/- each value in volumes
@@ -116,19 +116,19 @@ def sawtooth(angle):
 vol = 32767
 sample_len = 10
 waveraw = array.array("H",
-                     [midpoint +
-                      round(vol * sawtooth((idx + 0.5) / sample_len
-                                           * twopi
-                                           + math.pi))
-                      for idx in range(sample_len)])
+                      [midpoint +
+                       round(vol * sawtooth((idx + 0.5) / sample_len
+                                            * twopi
+                                            + math.pi))
+                       for idx in range(sample_len)])
 
 beep = RawSample(waveraw, sample_rate = sample_len * A4refhz)
 
 # play something to get things inside audio libraries initialised
-dac.play(beep, loop=True)
+audio.play(beep, loop=True)
 time.sleep(0.1)
-dac.stop()
-dac.play(beep)
+audio.stop()
+audio.play(beep)
 
 
 # brightness 1.0 saves memory by removing need for a second buffer
@@ -146,14 +146,36 @@ def wait_finger_off_and_random_delay():
                 random.random() * (LONGEST_DELAY - SHORTEST_DELAY))
     time.sleep(duration)
 
+
+def update_stats(stats, type, test_num, duration):
+    """Update stats dict and return data in tuple for printing."""
+    stats[type]["values"].append(duration)
+    stats[type]["sum"] += duration
+    stats[type]["mean"] = stats[type]["sum"] / test_num
+
+    if test_num > 1:
+        var_s = (sum([(x - stats[type]["mean"])**2 for x in stats[type]["values"]])
+                 / (test_num - 1))
+    else:
+        var_s = 0.0
+
+    stats[type]["sd_sample"] = var_s ** 0.5
+
+    return ("Trial", type, test_num, duration,
+            stats[type]["mean"], stats[type]["sd_sample"])
+
 ### servo on a CPX appears to be risky, possibly placing
-### the audio amp at risk of over-heating
+### the audio amp at risk of over-heating perhaps in combination
+### with a 500mA capped power supply (from ASUS motherboard)
 ### https://forums.adafruit.com/viewtopic.php?f=58&t=157190
 tactile_enable = False
 
 run = 1
+statistics = {"visual": {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
+              "auditory" : {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
+              "tactile" : {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0}}
 
-### TODO - convert to single print and add stats
+### serial console output is printed at tuple to allow Mu to graph it
 while True:
     wait_finger_off_and_random_delay()
     gc.collect()
@@ -163,19 +185,19 @@ while True:
         pass
     react_t = time.monotonic()
     reaction_dur = react_t - start_t
-    print("Trial ", run, ": visual reaction time is ", reaction_dur)
+    print(update_stats(statistics, "visual", run, reaction_dur))
     pixels[0] = black
 
     wait_finger_off_and_random_delay()
     gc.collect()
-    dac.play(beep, loop=True)
+    audio.play(beep, loop=True)
     start_t = time.monotonic()
     while not touchpad.value:
         pass
     react_t = time.monotonic()
     reaction_dur = react_t - start_t
-    print("Trial ", run, ": audio reaction time is ", reaction_dur)
-    dac.stop()        
+    print(update_stats(statistics, "auditory", run, reaction_dur))
+    audio.stop()
 
     if tactile_enable:
         wait_finger_off_and_random_delay()
@@ -186,7 +208,7 @@ while True:
             pass
         react_t = time.monotonic()
         reaction_dur = react_t - start_t
-        print("Tactile reaction time is ", reaction_dur)
+        print(update_stats(statistics, "tactile", run, reaction_dur))
         servo.angle = 0
 
     run += 1
