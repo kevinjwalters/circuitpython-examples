@@ -1,4 +1,4 @@
-### cpx-reaction-timer v0.7
+### cpx-reaction-timer v0.8
 ### A human reaction timer using light and sound with touch pads
 ### Measures the time it takes for user to press A1
 
@@ -86,8 +86,7 @@ servo.angle = 0
 # Turn the speaker on
 speaker_enable = digitalio.DigitalInOut(board.SPEAKER_ENABLE)
 speaker_enable.direction = digitalio.Direction.OUTPUT
-speaker_on = True
-speaker_enable.value = speaker_on
+speaker_enable.value = False
 
 audio = AudioOut(board.SPEAKER)
 
@@ -136,7 +135,9 @@ audio.play(beep)
 numpixels = const(10)
 pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
 
+### TODO - switch over to button as this may be quicker to press
 ### CPX/CPB touchpad (A0 cannot be used)
+### video of pressing touchpad shows 20-25 ms travel time for about 4mm 
 touchpad = touchio.TouchIn(board.A1)
 
 def wait_finger_off_and_random_delay():
@@ -161,7 +162,7 @@ def update_stats(stats, type, test_num, duration):
 
     stats[type]["sd_sample"] = var_s ** 0.5
 
-    return ("Trial", type, test_num, duration,
+    return ("Trial " + str(test_num), type, duration,
             stats[type]["mean"], stats[type]["sd_sample"])
 
 ### servo on a CPX appears to be risky, possibly placing
@@ -175,7 +176,7 @@ statistics = {"visual": {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0
               "auditory" : {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
               "tactile" : {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0}}
 
-### serial console output is printed at tuple to allow Mu to graph it
+### serial console output is printed as tuple to allow Mu to graph it
 while True:
     wait_finger_off_and_random_delay()
     gc.collect()
@@ -189,6 +190,7 @@ while True:
     pixels[0] = black
 
     wait_finger_off_and_random_delay()
+    speaker_enable.value = True
     gc.collect()
     audio.play(beep, loop=True)
     start_t = time.monotonic()
@@ -198,6 +200,7 @@ while True:
     reaction_dur = react_t - start_t
     print(update_stats(statistics, "auditory", run, reaction_dur))
     audio.stop()
+    speaker_enable.value = False
 
     if tactile_enable:
         wait_finger_off_and_random_delay()
