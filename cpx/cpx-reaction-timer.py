@@ -1,6 +1,6 @@
-### cpx-reaction-timer v0.8
-### A human reaction timer using light and sound with touch pads
-### Measures the time it takes for user to press A1
+### cpx-reaction-timer v0.9
+### A human reaction timer using light and sound
+### Measures the time it takes for user to press the right button
 
 ### Tested on
 ### CPX running CircuitPython 4.1.0
@@ -30,6 +30,8 @@
 ### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ### SOFTWARE.
 
+# pylint: disable=wrong-import-order,invalid-name
+
 import time
 import math
 import random
@@ -38,7 +40,7 @@ import gc
 
 import board
 import pulseio
-import touchio
+##import touchio
 import digitalio
 import analogio
 import os
@@ -135,66 +137,75 @@ audio.play(beep)
 numpixels = const(10)
 pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
 
-### TODO - switch over to button as this may be quicker to press
-### CPX/CPB touchpad (A0 cannot be used)
-### video of pressing touchpad shows 20-25 ms travel time for about 4mm 
-touchpad = touchio.TouchIn(board.A1)
+# CPX/CPB touch pad (A0 cannot be used)
+# video of pressing touch pad shows 20-25 ms travel time for about 4mm
+## touchpad = touchio.TouchIn(board.A1)
+
+# B is right (usb at top)
+button_right = digitalio.DigitalInOut(board.BUTTON_B)
+button_right.switch_to_input(pull=digitalio.Pull.DOWN)
+
 
 def wait_finger_off_and_random_delay():
-    while touchpad.value:
+    """Ensure finger is not touching the button then execute random delay."""
+    while button_right.value:
         pass
     duration = (SHORTEST_DELAY +
                 random.random() * (LONGEST_DELAY - SHORTEST_DELAY))
     time.sleep(duration)
 
 
-def update_stats(stats, type, test_num, duration):
+def update_stats(stats, test_type, test_num, duration):
     """Update stats dict and return data in tuple for printing."""
-    stats[type]["values"].append(duration)
-    stats[type]["sum"] += duration
-    stats[type]["mean"] = stats[type]["sum"] / test_num
+    stats[test_type]["values"].append(duration)
+    stats[test_type]["sum"] += duration
+    stats[test_type]["mean"] = stats[test_type]["sum"] / test_num
 
     if test_num > 1:
-        var_s = (sum([(x - stats[type]["mean"])**2 for x in stats[type]["values"]])
+        # Calculate (sample) variance
+        var_s = (sum([(x - stats[test_type]["mean"])**2
+                      for x in stats[test_type]["values"]])
                  / (test_num - 1))
     else:
         var_s = 0.0
 
-    stats[type]["sd_sample"] = var_s ** 0.5
+    stats[test_type]["sd_sample"] = var_s ** 0.5
 
-    return ("Trial " + str(test_num), type, duration,
-            stats[type]["mean"], stats[type]["sd_sample"])
+    return ("Trial " + str(test_num), test_type, duration,
+            stats[test_type]["mean"], stats[test_type]["sd_sample"])
 
-### servo on a CPX appears to be risky, possibly placing
-### the audio amp at risk of over-heating perhaps in combination
-### with a 500mA capped power supply (from ASUS motherboard)
-### https://forums.adafruit.com/viewtopic.php?f=58&t=157190
+# servo on a CPX appears to be risky, possibly placing
+# the audio amp at risk of over-heating perhaps in combination
+# with a 500mA capped power supply (from ASUS motherboard)
+# https://forums.adafruit.com/viewtopic.php?f=58&t=157190
 tactile_enable = False
 
 run = 1
-statistics = {"visual": {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
-              "auditory" : {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
-              "tactile" : {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0}}
+statistics = {"visual":    {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
+              "auditory":  {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
+              "tactile":   {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0}}
 
-### serial console output is printed as tuple to allow Mu to graph it
+# serial console output is printed as tuple to allow Mu to graph it
 while True:
+    # Visual test using first NeoPixel
     wait_finger_off_and_random_delay()
     gc.collect()
     pixels[0] = red
     start_t = time.monotonic()
-    while not touchpad.value:
+    while not button_right.value:
         pass
     react_t = time.monotonic()
     reaction_dur = react_t - start_t
     print(update_stats(statistics, "visual", run, reaction_dur))
     pixels[0] = black
 
+    # Auditory test using onboard speaker and 444.4Hz beep
     wait_finger_off_and_random_delay()
     speaker_enable.value = True
     gc.collect()
     audio.play(beep, loop=True)
     start_t = time.monotonic()
-    while not touchpad.value:
+    while not button_right.value:
         pass
     react_t = time.monotonic()
     reaction_dur = react_t - start_t
@@ -202,12 +213,13 @@ while True:
     audio.stop()
     speaker_enable.value = False
 
+    # Tactile test using servo - DISABLED for now
     if tactile_enable:
         wait_finger_off_and_random_delay()
         gc.collect()
         servo.angle = 10
         start_t = time.monotonic()
-        while not touchpad.value:
+        while not button_right.value:
             pass
         react_t = time.monotonic()
         reaction_dur = react_t - start_t
