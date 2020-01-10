@@ -1,6 +1,8 @@
-### cpx-reaction-timer v0.9
+### cpx-reaction-timer v1.0
 ### A human reaction timer using light and sound
 ### Measures the time it takes for user to press the right button
+### in response to alternate first NeoPixel and beeps from onboard speaker,
+### prints times and statistics in Mu friendly format.
 
 ### Tested on
 ### CPX running CircuitPython 4.1.0
@@ -10,7 +12,7 @@
 
 ### MIT License
 
-### Copyright (c) 2019 Kevin J. Walters
+### Copyright (c) 2020 Kevin J. Walters
 
 ### Permission is hereby granted, free of charge, to any person obtaining a copy
 ### of this software and associated documentation files (the "Software"), to deal
@@ -185,10 +187,12 @@ statistics = {"visual":    {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 
               "auditory":  {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
               "tactile":   {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0}}
 
+print("# Trialnumber, time, mean, standarddeviation")
 # serial console output is printed as tuple to allow Mu to graph it
 while True:
     # Visual test using first NeoPixel
     wait_finger_off_and_random_delay()
+    # do GC now to reduce likelihood of occurrence during reaction timing
     gc.collect()
     pixels[0] = red
     start_t = time.monotonic()
@@ -202,6 +206,7 @@ while True:
     # Auditory test using onboard speaker and 444.4Hz beep
     wait_finger_off_and_random_delay()
     speaker_enable.value = True
+    # do GC now to reduce likelihood of occurrence during reaction timing
     gc.collect()
     audio.play(beep, loop=True)
     start_t = time.monotonic()
@@ -211,6 +216,7 @@ while True:
     reaction_dur = react_t - start_t
     print(update_stats(statistics, "auditory", run, reaction_dur))
     audio.stop()
+    audio.play(beep)  # ensure speaker is left near midpoint
     speaker_enable.value = False
 
     # Tactile test using servo - DISABLED for now
