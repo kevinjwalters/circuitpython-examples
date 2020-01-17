@@ -1,38 +1,38 @@
-### cpb-quick-draw v1.11
-### CircuitPython (on CPBs) Quick Draw reaction game
-### This is a two player game using two Circuit Playground Bluefruit boards
-### to test the reaction time of the players in a "quick draw" with the
-### synchronisation and draw times exchanged via Bluetooth Low Energy
-### The switches must be set to DIFFERENT positions on the two CPBs
+# cpb-quick-draw v1.11.1
+# CircuitPython (on CPBs) Quick Draw reaction game
+# This is a two player game using two Circuit Playground Bluefruit boards
+# to test the reaction time of the players in a "quick draw" with the
+# synchronisation and draw times exchanged via Bluetooth Low Energy
+# The switches must be set to DIFFERENT positions on the two CPBs
 
-### Tested with Circuit Playground Bluefruit Alpha
-### and CircuitPython and 5.0.0-beta.2
+# Tested with Circuit Playground Bluefruit Alpha
+# and CircuitPython and 5.0.0-beta.2
 
-### Needs recent adafruit_ble and adafruit_circuitplayground.bluefruit libraries
+# Needs recent adafruit_ble and adafruit_circuitplayground.bluefruit libraries
 
-### copy this file to CPB board as code.py
+# copy this file to CPB board as code.py
 
-### MIT License
+# MIT License
 
-### Copyright (c) 2020 Kevin J. Walters
+# Copyright (c) 2020 Kevin J. Walters
 
-### Permission is hereby granted, free of charge, to any person obtaining a copy
-### of this software and associated documentation files (the "Software"), to deal
-### in the Software without restriction, including without limitation the rights
-### to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-### copies of the Software, and to permit persons to whom the Software is
-### furnished to do so, subject to the following conditions:
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
 
-### The above copyright notice and this permission notice shall be included in all
-### copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 
-### THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-### IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-### FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-### AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-### LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-### SOFTWARE.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 import time
 import gc
@@ -178,14 +178,14 @@ lose_colour = black
 if master_device:
     # button A is on left (usb at top
     player_button = lambda: cp.button_a
-    ## player_button.switch_to_input(pull=digitalio.Pull.DOWN)
+    # player_button.switch_to_input(pull=digitalio.Pull.DOWN)
 
     player_px = (0, halfnumpixels)
     opponent_px = (halfnumpixels, numpixels)
 else:
     # button B is on right
     player_button = lambda: cp.button_b
-    ## player_button.switch_to_input(pull=digitalio.Pull.DOWN)
+    # player_button.switch_to_input(pull=digitalio.Pull.DOWN)
 
     player_px = (halfnumpixels, numpixels)
     opponent_px = (0, halfnumpixels)
@@ -316,16 +316,16 @@ def ping_for_rtt():  # pylint: disable=too-many-branches,too-many-statements
             if responses >= NUM_PINGS:
                 break
 
-    ### indicate a good rtt calculate, skip first one
-    ### as it's not present on slave
+    # indicate a good rtt calculate, skip first one
+    # as it's not present on slave
     if debug >= 3:
         print("RTTs:", rtts)
     if master_device:
         rtt_start = 1
-        rtt_end   = len(rtts) - 1
+        rtt_end = len(rtts) - 1
     else:
         rtt_start = 2
-        rtt_end   = len(rtts)
+        rtt_end = len(rtts)
 
     # Use quickest ones and hope any outlier times don't reoccur!
     quicker_rtts = sorted(rtts[rtt_start:rtt_end])[0:(NUM_PINGS // 2) + 1]
@@ -418,7 +418,7 @@ def get_opponent_reactiontime(player_reaction):
 
 def show_winner(player_reaction, opponent_reaction):
     """Show the winner on the appropriate set of NeoPixels.
-       Returns win, misdraw, draw, colour) - three booleans and a result colour."""
+       Returns win, misdraw, draw, colour) - 3 booleans and a result colour."""
     l_win = False
     l_misdraw = False
     l_draw = False
@@ -459,9 +459,9 @@ def show_summary(result_colours):
         pixels[idx] = p_colour
         time.sleep(SUMMARY_DUR)
 
-# CPB auto-seeds from the hardware random number generation on its nRF52840 chip
-# Note: original code for CPX uses A4-A7 analogue inputs,
-#       CPB cannot use A7 for analogue in
+# CPB auto-seeds from hardware random number generation on the nRF52840 chip
+# Note: original code for CPX uses A4-A7 analog inputs,
+#       CPB cannot use A7 for analog in
 
 wins = 0
 misdraws = 0
