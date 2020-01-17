@@ -35,14 +35,9 @@
 ### SOFTWARE.
 
 import time
-#import sys
 import gc
 import struct
 import random  # On a CPB this seeds from a hardware RNG in the CPU
-
-#import digitalio
-#import touchio
-#import board
 
 # This is the new cp object which works on CPX and CPB
 from adafruit_circuitplayground import cp
