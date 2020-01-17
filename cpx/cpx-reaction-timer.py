@@ -1,38 +1,9 @@
-### cpx-reaction-timer v1.0
-### A human reaction timer using light and sound
-### Measures the time it takes for user to press the right button
-### in response to alternate first NeoPixel and beeps from onboard speaker,
-### prints times and statistics in Mu friendly format.
+# cpx-reaction-timer v1.0.1
+# A human reaction timer using light and sound
 
-### Tested on
-### CPX running CircuitPython 4.1.0
-### CPB running CircuitPython 5.0.0-beta.2
-
-### copy this file to CPX as code.py
-
-### MIT License
-
-### Copyright (c) 2020 Kevin J. Walters
-
-### Permission is hereby granted, free of charge, to any person obtaining a copy
-### of this software and associated documentation files (the "Software"), to deal
-### in the Software without restriction, including without limitation the rights
-### to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-### copies of the Software, and to permit persons to whom the Software is
-### furnished to do so, subject to the following conditions:
-
-### The above copyright notice and this permission notice shall be included in all
-### copies or substantial portions of the Software.
-
-### THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-### IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-### FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-### AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-### LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-### SOFTWARE.
-
-# pylint: disable=wrong-import-order,invalid-name
+# Measures the time it takes for user to press the right button
+# in response to alternate first NeoPixel and beeps from onboard speaker,
+# prints times and statistics in Mu friendly format.
 
 import time
 import math
@@ -59,7 +30,6 @@ except ImportError:
     from audiopwmio import PWMAudioOut as AudioOut
 
 import neopixel
-import adafruit_motor.servo
 
 
 def seed_with_noise():
@@ -82,15 +52,10 @@ try:
 except NotImplementedError:
     seed_with_noise()
 
-# create a PWMOut object on pad A6
-pwma6 = pulseio.PWMOut(board.A6, duty_cycle=2 ** 15, frequency=50)
-servo = adafruit_motor.servo.Servo(pwma6)
-servo.angle = 0
-
 # Turn the speaker on
 speaker_enable = digitalio.DigitalInOut(board.SPEAKER_ENABLE)
 speaker_enable.direction = digitalio.Direction.OUTPUT
-speaker_enable.value = False
+speaker_enable.value = True
 
 audio = AudioOut(board.SPEAKER)
 
@@ -114,8 +79,6 @@ def sawtooth(angle):
 
 # make a sawtooth wave between +/- each value in volumes
 # phase shifted so it starts and ends near midpoint
-# "H" arrays for RawSample looks more memory efficient
-# see https://forums.adafruit.com/viewtopic.php?f=60&t=150894
 vol = 32767
 sample_len = 10
 waveraw = array.array("H",
@@ -138,10 +101,6 @@ audio.play(beep)
 # 10 is number of NeoPixels on CPX/CPB
 numpixels = const(10)
 pixels = neopixel.NeoPixel(board.NEOPIXEL, numpixels, brightness=1.0)
-
-# CPX/CPB touch pad (A0 cannot be used)
-# video of pressing touch pad shows 20-25 ms travel time for about 4mm
-## touchpad = touchio.TouchIn(board.A1)
 
 # B is right (usb at top)
 button_right = digitalio.DigitalInOut(board.BUTTON_B)
@@ -176,11 +135,6 @@ def update_stats(stats, test_type, test_num, duration):
     return ("Trial " + str(test_num), test_type, duration,
             stats[test_type]["mean"], stats[test_type]["sd_sample"])
 
-# servo on a CPX appears to be risky, possibly placing
-# the audio amp at risk of over-heating perhaps in combination
-# with a 500mA capped power supply (from ASUS motherboard)
-# https://forums.adafruit.com/viewtopic.php?f=58&t=157190
-tactile_enable = False
 
 run = 1
 statistics = {"visual":    {"values": [], "sum": 0.0, "mean": 0.0, "sd_sample": 0.0},
@@ -205,7 +159,6 @@ while True:
 
     # Auditory test using onboard speaker and 444.4Hz beep
     wait_finger_off_and_random_delay()
-    speaker_enable.value = True
     # do GC now to reduce likelihood of occurrence during reaction timing
     gc.collect()
     audio.play(beep, loop=True)
@@ -217,19 +170,5 @@ while True:
     print(update_stats(statistics, "auditory", run, reaction_dur))
     audio.stop()
     audio.play(beep)  # ensure speaker is left near midpoint
-    speaker_enable.value = False
-
-    # Tactile test using servo - DISABLED for now
-    if tactile_enable:
-        wait_finger_off_and_random_delay()
-        gc.collect()
-        servo.angle = 10
-        start_t = time.monotonic()
-        while not button_right.value:
-            pass
-        react_t = time.monotonic()
-        reaction_dur = react_t - start_t
-        print(update_stats(statistics, "tactile", run, reaction_dur))
-        servo.angle = 0
 
     run += 1
