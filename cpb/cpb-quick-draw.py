@@ -158,8 +158,8 @@ master_device = cp.switch  # True when switch is left (near ear symbol)
 # The default brightness is 1.0 - leaving at that as it
 # improves performance by removing need for a second buffer in memory
 # 10 is number of NeoPixels on CPX/CPB
-numpixels = const(10)
-halfnumpixels = const(5)
+numpixels = 10
+halfnumpixels = numpixels // 2
 pixels = cp.pixels
 
 faint_red = (1, 0, 0)
