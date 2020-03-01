@@ -1,4 +1,4 @@
-### clue-plotter v0.5
+### clue-plotter v0.6
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -31,24 +31,21 @@
 ### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ### SOFTWARE.
 
-import board
-import displayio
 import time
 import array
 import random
-import terminalio
+import math
 
-from adafruit_display_text import label
+import board
+import displayio
+import terminalio
+import analogio
 
 # There's a form of on-demand instanitation for touch pads
 # but analogio can be used if touch_0 - touch_3 have not been used
 from adafruit_clue import clue
+from adafruit_display_text import label
 
-### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
-clue._sensor.integration_time = 249 # 19.46ms, ~ 50Hz
-clue._sensor.color_gain = 0x02 # 16x (library default is 4x)
-
-import analogio
 # remember this was a p3.reference_voltage which is 3.3
 # p3 = analogio.AnalogIn(board.P3)
 
@@ -92,7 +89,33 @@ import analogio
 ### if clue.touch_3 has not been used then it doesn't instantiate
 ### the TouchIn object so there's no problem with creating an AnalogIn
 
-class PinPlotSource():
+class PlotSource():
+    MIN = 0 
+    MAX = 65535
+    SCALE_MIN = 0
+    SCALE_MAX = 65535
+    # practical maximum read rate per second on CLUE hardware
+    RATE = 0
+    UNIT = None
+    VALUES = 0
+    
+    def __init__(self):
+        self._name = ""
+
+    def __str__(self):
+        return self._name
+        
+    def data(self):
+        return None
+
+    def start(self):
+        pass
+        
+    def stop(self):
+        pass
+
+
+class PinPlotSource(PlotSource):
     def __init__(self, pin):
         self._pin = pin
         self._analogin = analogio.AnalogIn(pin)
@@ -109,16 +132,12 @@ class PinPlotSource():
     
     ### for VALUE of 1, returns int or float
     ### for VALUE > 1, returns tuple of aforementioned
-    @property
     def data(self):
         return self._analogin.value
 
-    def __str__(self):
-        return self._name
-        
 
 ### TODO - consider returning colour hints or alternative colours
-class ColorPlotSource():
+class ColorPlotSource(PlotSource):
     def __init__(self, clue):
         self._clue = clue
         self._name = ("Color: R, G, B")
@@ -134,18 +153,17 @@ class ColorPlotSource():
     
     ### for VALUE of 1, returns int or float
     ### for VALUE > 1, returns tuple of aforementioned
-    @property
     def data(self):
         (r, g, b, c) = self._clue.color
         return (r, g, b)
-        
-    def __str__(self):
-        return self._name
+
+    def start(self):
+        ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
+        self._clue._sensor.integration_time = 249 # 19.46ms, ~ 50Hz
+        self._clue._sensor.color_gain = 0x02 # 16x (library default is 4x)
 
 
-### TODO - do i want to put the lights on in here
-### on a begin / end type method?
-class ColorGreenPlotSource():
+class ColorReflectedGreenPlotSource(PlotSource):
     def __init__(self, clue):
         self._clue = clue
         self._name = ("Color: G")
@@ -161,18 +179,46 @@ class ColorGreenPlotSource():
 
     ### for VALUE of 1, returns int or float
     ### for VALUE > 1, returns tuple of aforementioned
-    @property
     def data(self):
         (r, g, b, c) = self._clue.color
         return g
+
+    def start(self):
+        ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
+        self._clue._sensor.integration_time = 249 # 19.46ms, ~ 50Hz
+        self._clue._sensor.color_gain = 0x02 # 16x (library default is 4x)
+      
+        self._clue.white_leds = True
         
-    def __str__(self):
-        return self._name
+    def stop(self):
+        self._clue.white_leds = False
+
+
+class VolumePlotSource(PlotSource):
+    def __init__(self, clue):
+        self._clue = clue
+        self._name = ("Volume (dB)")
+        
+    MIN = 0 
+    MAX = 97 + 3
+    SCALE_MIN = 0
+    SCALE_MAX = 97 + 3
+    # practical maximum read rate per second on CLUE hardware
+    RATE = 10000
+    UNIT = "dB"
+    VALUES = 1
+
+    _LN_CONVERSION_FACTOR = 20 / math.log(10)
+
+    def data(self):
+        return (math.log(self._clue.sound_level + 1)
+                * self._LN_CONVERSION_FACTOR)
 
 
 #source = PinPlotSource(board.P3)
 #source = ColorPlotSource(clue)
-source = ColorGreenPlotSource(clue)
+#source = ColorReflectedGreenPlotSource(clue)
+source = VolumePlotSource(clue)
 
 display = board.DISPLAY
 
@@ -184,13 +230,17 @@ plot_height = 201
 grid_height = plot_height
 
 ### TODO - separate palette for plot_grid ?
-plot_grid = displayio.Bitmap(grid_width, grid_height, 8)
+plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
 plots = displayio.Bitmap(plot_width, plot_height, 8)
 
+g_palette = displayio.Palette(2)
+g_palette.make_transparent(0)
+g_palette[0] = 0x000000
+g_palette[1] = 0x40c040
 
 # Create a colour palette
 # Eventually scope colours will be ch1 yellow, ch2 cyan, ch3 magenta
-palette = displayio.Palette(8)
+palette = displayio.Palette(9)
 
 palette.make_transparent(0)
 palette[1] = 0x0000ff
@@ -202,11 +252,11 @@ palette[6] = 0xffff00
 palette[7] = 0xffffff
 
 ### TODO - this all needs a lot of work on colour names etc
-### 
+###
 channel_colidx = (6, 3, 5)
 
 # Create a TileGrid using the Bitmap and Palette
-tg_plot_grid = displayio.TileGrid(plot_grid, pixel_shader=palette)
+tg_plot_grid = displayio.TileGrid(plot_grid, pixel_shader=g_palette)
 tg_plot_grid.x = 39
 tg_plot_grid.y = 20
 
@@ -240,21 +290,23 @@ main_group.append(tg_plot_data)
 # Add the Group to the Display
 display.show(main_group)
 
+GRID_DOT_SPACING = 8
+
 # horizontal lines
-for x in range(0, grid_width, 4):
+for x in range(0, grid_width, GRID_DOT_SPACING):
     for y in range(0, grid_height, 50):
-        plot_grid[x, y] = 2  ### TODO - this is green review this
+        plot_grid[x, y] = 1  ### TODO - this is green review this
 
 # vertical lines
 for x in range(0, grid_width, 50):
-    for y in range(0, grid_height, 4):
-        plot_grid[x, y] = 2  ### TODO - this is green review this
+    for y in range(0, grid_height, GRID_DOT_SPACING):
+        plot_grid[x, y] = 1  ### TODO - this is green review this
 
 # Get some data on read rates on CLUE
 for trial in range(5):
     t1 = time.monotonic()
     for i in range(100):
-        _ = source.data
+        _ = source.data()
     t2 = time.monotonic()
     print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
 
@@ -284,10 +336,9 @@ points = [array.array('B', [0] * plot_width),
           array.array('B', [0] * plot_width),
           array.array('B', [0] * plot_width)]
 
-### Experiment with finger
-clue.white_leds = True
-
 display.auto_refresh = True
+
+source.start()
 channels_in_use = source.VALUES
 plot_initial_min = 0
 plot_max = 300
@@ -295,15 +346,18 @@ plot_range = plot_max - plot_initial_min
 plot_scale = (plot_height - 1) / plot_range
 data_min = [float("inf")] * MAX_CHANNELS
 data_max = [float("-inf")] * MAX_CHANNELS
+MINMAX_HISTORY = 5
+prior_data_min = [float("inf")] * MINMAX_HISTORY 
+prior_data_max = [float("-inf")] * MINMAX_HISTORY
 transparent = 0
 off_scale = False
 
-for scans in range(200):
+for scan in range(200):
     t1 = time.monotonic()
     for x in range(plot_width):
-        data = source.data
+        data = source.data()
         if channels_in_use > 1:
-            data = source.data
+            data = source.data()
             for ch in range(channels_in_use):
                 plots[x, points[ch][x]] = transparent
                 #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
@@ -325,7 +379,7 @@ for scans in range(200):
                 if data[ch] > data_max[ch]:
                     data_max[ch] = data[ch]
         else:
-            data = source.data
+            data = source.data()
             plots[x, points[0][x]] = transparent
             #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
             #points[0][x] = round((clue.temperature - 20.0) * 15)
@@ -338,7 +392,7 @@ for scans in range(200):
             else:
                 plots[x, ypos] = channel_colidx[0]
                 points[0][x] = ypos
-            
+
             if data < data_min[0]:
                 data_min[0] = data
             if data > data_max[0]:
@@ -350,32 +404,39 @@ for scans in range(200):
     ### TODO - this needs a lot of refinement and testing
     ### test with flat line
     ### TODO - does this need a vertical shift without rescale?
+    new_min = min(data_min)
     new_max = max(data_max)
-    new_range = (new_max - min(data_min))
-    if new_range > 0:
-        if off_scale:
-            print("ZOOM OUT")
-            ### Add 12.5% on top and bottom
-            plot_max = new_max + 0.125 * new_range
-            plot_range = 1.25 * new_range
-            plot_scale = (plot_height - 1) / plot_range
-            ### TODO - redraw grid and labels
-            off_scale = False
-        elif plot_range * 0.6 > new_range:
+    prior_data_min[scan % MINMAX_HISTORY] = new_min
+    prior_data_max[scan % MINMAX_HISTORY] = new_max
+    current_range = new_max - new_min
+    if current_range > 0 and off_scale:
+        print("ZOOM OUT / RECENTRE")
+        ### Add 12.5% on top and bottom
+        plot_max = new_max + 0.125 * current_range
+        plot_range = 1.25 * current_range
+        plot_scale = (plot_height - 1) / plot_range
+        ### TODO - redraw grid and labels
+        off_scale = False
+    else:
+        hist_min = min(prior_data_min)
+        hist_max = max(prior_data_max)
+        historical_range = hist_max - hist_min
+        if historical_range > 0 and plot_range * 0.8 > historical_range:
             print("ZOOM IN")
             ### TODO - needs to look at more historical data for min/max
             ### Check to see if we should zoom in
-            plot_max = new_max + 0.125 * new_range
-            plot_range = 1.25 * new_range
+            plot_max = new_max + 0.125 * historical_range
+            plot_range = 1.25 * historical_range
             plot_scale = (plot_height - 1) / plot_range
 
     data_min = [float("inf")] * MAX_CHANNELS
     data_max = [float("-inf")] * MAX_CHANNELS
+    
 ### About 0.4s for clue.acceleration[0]
 ### About 8.4s for temperature !
 ### About 0.09-0.14 for analogio
 
-clue.white_leds = False
+source.stop()
 
 # display.auto_refresh = False
 # for scans in range(20):
@@ -385,7 +446,7 @@ clue.white_leds = False
         # #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
         # #points[0][x] = round((clue.temperature - 20.0) * 15)
         # #points[0][x] = random.randint(50, 150)
-        # points[0][x] = round(source.data / 328)
+        # points[0][x] = round(source.data() / 328)
         # plots[x, points[0][x]] = 1
     # display.refresh(minimum_frames_per_second=0)
     # t2 = time.monotonic()
@@ -400,7 +461,7 @@ clue.white_leds = False
         # #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
         # #points[0][x] = round((clue.temperature - 20.0) * 15)
         # #points[0][x] = random.randint(50, 150)
-        # points[0][x] = round(source.data / 328)
+        # points[0][x] = round(source.data() / 328)
         # plots[x, points[0][x]] = 1
         # if x % 50 == 49:
             # display.refresh(minimum_frames_per_second=0)
