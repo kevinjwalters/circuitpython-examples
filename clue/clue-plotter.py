@@ -1,4 +1,4 @@
-### clue-plotter v0.7
+### clue-plotter v0.8
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -145,6 +145,8 @@ class PlotSource():
         return self._rate
 
 
+### This over-reads presumably due to electronics warming boards update
+### plus it looks odd on close inspection as it climbs about 0.1 as being read
 class TemperaturePlotSource(PlotSource):
     def _convert(self, value):
         return value * self._scale + self._offset
@@ -163,7 +165,7 @@ class TemperaturePlotSource(PlotSource):
             type_name = "Celsius"
             self._scale = 1.0
             self._offset = 0.0
-        super().__init__(1, "Temperature (" + type_name + ")", 
+        super().__init__(1, "Temperature (" + type_name[0] + ")", 
                          min=self._convert(0),
                          max=self._convert(100),
                          initial_min=self._convert(10),
@@ -230,20 +232,35 @@ class ColorPlotSource(PlotSource):
         self._clue._sensor.color_gain = 0x02 # 16x (library default is 4x)
 
 
-class ColorReflectedGreenPlotSource(PlotSource):
-    def __init__(self, clue):
+class IlluminatedColorPlotSource(PlotSource):
+    def __init__(self, clue, colour):
         self._clue = clue
-        super().__init__(1, "Ilum. color: G", 
+        if colour[0] == "R":
+            self._channel = "R"
+        elif colour[0] == "G":
+            self._channel = "G"
+        elif colour[0] == "B":
+            self._channel = "B"
+        else:
+            raise ValueError("colour must be Red, Green or Blue")
+
+        super().__init__(1, "Ilum. color: " + self._channel, 
                          min=0, max=8000,
                          initial_min=100, initial_max=700,
                          rate=100)
-
 
     ### for VALUE of 1, returns int or float
     ### for VALUE > 1, returns tuple of aforementioned
     def data(self):
         (r, g, b, c) = self._clue.color
-        return g
+        if self._channel == "R":
+            return r
+        elif self._channel == "G":
+            return g
+        elif self._channel == "B":
+            return b
+        else:
+            return None  ### This should never happen
 
     def start(self):
         ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
@@ -276,7 +293,9 @@ sources = [#PinPlotSource(board.P0),
            #PinPlotSource(board.P2),
            PinPlotSource([board.P0, board.P1, board.P2]),
            ColorPlotSource(clue),
-           ColorReflectedGreenPlotSource(clue),
+           IlluminatedColorPlotSource(clue, "Red"),
+           IlluminatedColorPlotSource(clue, "Green"),
+           IlluminatedColorPlotSource(clue, "Blue"),
            VolumePlotSource(clue),
            PressurePlotSource(clue),
            TemperaturePlotSource(clue),
@@ -429,6 +448,12 @@ points = [array.array('B', [0] * plot_width),
           array.array('B', [0] * plot_width),
           array.array('B', [0] * plot_width)]
 
+### TODO - looking to use button_b to select different plot modes
+### TODO - look at scrolling like Arcada one does
+mode = ("points", "lines", "range")
+current_mode = 1
+
+
 display.auto_refresh = True
 
 def set_grid_labels(p_labels, p_max, p_range):
@@ -465,8 +490,7 @@ while True:
     plot_scale = (plot_height - 1) / plot_range
     set_grid_labels(plot_labels, plot_max, plot_range)
 
-    data_min = [float("inf")] * MAX_CHANNELS
-    data_max = [float("-inf")] * MAX_CHANNELS
+    
     MINMAX_HISTORY = 5
     prior_data_min = [float("inf")] * MINMAX_HISTORY
     prior_data_max = [float("-inf")] * MINMAX_HISTORY
@@ -475,6 +499,8 @@ while True:
     scan = 1
 
     while True:
+        data_min = [float("inf")] * MAX_CHANNELS
+        data_max = [float("-inf")] * MAX_CHANNELS
         t1 = time.monotonic()
         for x in range(plot_width):
             data = source.data()
@@ -546,7 +572,6 @@ while True:
         hist_min = min(prior_data_min)
         hist_max = max(prior_data_max)
         hist_range = hist_max - hist_min
-        #current_range = new_max - new_min
         if hist_range > 0 and off_scale:
             print("ZOOM OUT / RECENTRE")
             ### Add 12.5% on top and bottom
@@ -556,28 +581,24 @@ while True:
             clear_plot(plots, points, channels_in_use)
             set_grid_labels(plot_labels, plot_max, plot_range)
             off_scale = False
-        elif hist_range > 0 and plot_range * 0.8 > hist_range:
+        
+        ### Check to see if we should zoom in
+        elif hist_range > 0 and plot_range * 0.5 > hist_range:
             print("ZOOM IN")
-            ### TODO - needs to look at more historical data for min/max
-            ### Check to see if we should zoom in
             plot_max = hist_max + 0.125 * hist_range
             plot_range = 1.25 * hist_range
             plot_scale = (plot_height - 1) / plot_range
             clear_plot(plots, points, channels_in_use)
             set_grid_labels(plot_labels, plot_max, plot_range)
 
-        data_min = [float("inf")] * MAX_CHANNELS
-        data_max = [float("-inf")] * MAX_CHANNELS
         t3 = time.monotonic()
         print("LINEA", t2 - t1, t3 - t2)
         scan += 1
 
+    source.stop()
     ### About 0.4s for clue.acceleration[0]
     ### About 8.4s for temperature !
     ### About 0.09-0.14 for analogio
-
-    source.stop()
-
 
 
 # display.auto_refresh = False
