@@ -1,4 +1,4 @@
-### clue-plotter v0.9
+### clue-plotter v1.0
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -92,16 +92,19 @@ debug = 2
 ### the TouchIn object so there's no problem with creating an AnalogIn
 
 ### TODO - lots of documentation on meaning/use of all these parameters
-class PlotSource():
+class PlotSource():   
+    DEFAULT_COLORS = (0xffff00, 0x00ffff, 0xff00ff)
+    RGB_COLORS = (0xff0000, 0x00ff00, 0x0000ff)
+
     def __init__(self, values, name, units="",
                  min=0, max=65535, initial_min=None, initial_max=None,
-                 rate=None):
+                 rate=None, colors=None):
         self._name = name
         self._values = values
         self._units = units
         self._min = min
         self._max = max
-        if initial_min is not None:        
+        if initial_min is not None:
             self._initial_min = initial_min
         else:
             self._initial_min = min
@@ -110,6 +113,10 @@ class PlotSource():
         else:
             self._initial_max = max
         self._rate = rate
+        if colors is not None:
+            self._colors = colors
+        else:
+            self._colors = self.DEFAULT_COLORS[:values]
 
     def __str__(self):
         return self._name
@@ -122,7 +129,7 @@ class PlotSource():
 
     def max(self):
         return self._max
-        
+
     def initial_min(self):
         return self._initial_min
 
@@ -143,6 +150,9 @@ class PlotSource():
 
     def rate(self):
         return self._rate
+
+    def colors(self):
+        return self._colors
 
 
 ### This over-reads presumably due to electronics warming boards update
@@ -165,7 +175,7 @@ class TemperaturePlotSource(PlotSource):
             type_name = "Celsius"
             self._scale = 1.0
             self._offset = 0.0
-        super().__init__(1, "Temperature (" + type_name[0] + ")", 
+        super().__init__(1, "Temperature (" + type_name[0] + ")",
                          min=self._convert(0),
                          max=self._convert(100),
                          initial_min=self._convert(10),
@@ -201,8 +211,8 @@ class ProximityPlotSource(PlotSource):
 class HumidityPlotSource(PlotSource):
     def __init__(self, clue):
         self._clue = clue
-        super().__init__(1, "Humidity (%)",
-                         min=0, max=100, initial_min=30, initial_max=60,
+        super().__init__(1, "Rel. Humidity (%)",
+                         min=0, max=100, initial_min=20, initial_max=60,
                          rate=54)
 
     def data(self):
@@ -236,8 +246,9 @@ class PinPlotSource(PlotSource):
 class ColorPlotSource(PlotSource):
     def __init__(self, clue):
         self._clue = clue
-        super().__init__(3, "Color: R, G, B", 
-                         min=0, max=8000,  ### TODO - get actual value
+        super().__init__(3, "Color: R, G, B",
+                         min=0, max=8000,  ### 7169 looks like max
+                         colors=self.RGB_COLORS,
                          rate=100)
 
 
@@ -259,16 +270,20 @@ class IlluminatedColorPlotSource(PlotSource):
         self._clue = clue
         if colour[0] == "R":
             self._channel = "R"
+            rgb_idx = 0
         elif colour[0] == "G":
             self._channel = "G"
+            rgb_idx = 1
         elif colour[0] == "B":
             self._channel = "B"
+            rgb_idx = 2
         else:
             raise ValueError("colour must be Red, Green or Blue")
 
-        super().__init__(1, "Ilum. color: " + self._channel, 
+        super().__init__(1, "Ilum. color: " + self._channel,
                          min=0, max=8000,
                          initial_min=100, initial_max=700,
+                         colors=(self.RGB_COLORS[rgb_idx],),
                          rate=100)
 
     ### for VALUE of 1, returns int or float
@@ -287,7 +302,7 @@ class IlluminatedColorPlotSource(PlotSource):
     def start(self):
         ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
         self._clue._sensor.integration_time = 249 # 19.46ms, ~ 50Hz
-        self._clue._sensor.color_gain = 0x02 # 16x (library default is 4x)
+        self._clue._sensor.color_gain = 0x03 # 64x (library default is 4x)
 
         self._clue.white_leds = True
 
@@ -299,7 +314,8 @@ class VolumePlotSource(PlotSource):
     def __init__(self, clue):
         self._clue = clue
         super().__init__(1, "Volume (dB)",
-                         min=0, max=97+3, initial_min=10, initial_max=60,
+                         min=0, max=97+3,   ### 97dB is 16bit dynamic range
+                         initial_min=10, initial_max=60,
                          rate=41)
 
     _LN_CONVERSION_FACTOR = 20 / math.log(10)
@@ -307,6 +323,48 @@ class VolumePlotSource(PlotSource):
     def data(self):
         return (math.log(self._clue.sound_level + 1)
                 * self._LN_CONVERSION_FACTOR)
+
+
+### TODO - this is not a blocking read for new data,
+###        data comes back faster (500Hz) than it changes
+###        if read in a tight loop
+class GyroPlotSource(PlotSource):
+    def __init__(self, clue):
+        self._clue = clue
+        super().__init__(3, "Gyro (dps?)",
+                         min=-287-13, max=287+13,  ### 286.703 appears to be max
+                         initial_min=-100, initial_max=100,
+                         colors=self.RGB_COLORS,
+                         rate=500)
+
+    def data(self):
+        return clue.gyro
+
+
+class AccelerometerPlotSource(PlotSource):
+    def __init__(self, clue):
+        self._clue = clue
+        super().__init__(3, "Accelerometer (g)",
+                         min=-40, max=40,  ### 39.1992 approx max
+                         initial_min=-20, initial_max=20,
+                         colors=self.RGB_COLORS,
+                         rate=500)
+
+    def data(self):
+        return clue.acceleration
+
+
+class MagnetometerPlotSource(PlotSource):
+    def __init__(self, clue):
+        self._clue = clue
+        super().__init__(3, "Magnetometer (uT)",
+                         min=-479-21, max=479+21,  ### 478.866 approx max
+                         initial_min=-80, initial_max=80,  ### Earth around 60uT
+                         colors=self.RGB_COLORS,
+                         rate=500)
+
+    def data(self):
+        return clue.magnetic
 
 
 ### TODO - got to solve the issue of reusing pins
@@ -324,7 +382,11 @@ sources = [#PinPlotSource(board.P0),
            HumidityPlotSource(clue),
            PressurePlotSource(clue),
            TemperaturePlotSource(clue),
-           TemperaturePlotSource(clue, type="F")]
+           TemperaturePlotSource(clue, type="F"),
+           GyroPlotSource(clue),
+           AccelerometerPlotSource(clue),
+           MagnetometerPlotSource(clue)
+          ]
 
 
 #source = PinPlotSource(board.P2)
@@ -353,20 +415,19 @@ g_palette[1] = 0x308030
 
 # Create a colour palette
 # Eventually scope colours will be ch1 yellow, ch2 cyan, ch3 magenta
-palette = displayio.Palette(9)
+plot_palette = displayio.Palette(9)
 
-palette.make_transparent(0)
-palette[1] = 0x0000ff
-palette[2] = 0x00ff00
-palette[3] = 0x00ffff
-palette[4] = 0xff0000
-palette[5] = 0xff00ff
-palette[6] = 0xffff00
-palette[7] = 0xffffff
+plot_palette.make_transparent(0)
+plot_palette[1] = 0x0000ff
+plot_palette[2] = 0x00ff00
+plot_palette[3] = 0x00ffff
+plot_palette[4] = 0xff0000
+plot_palette[5] = 0xff00ff
+plot_palette[6] = 0xffff00
+plot_palette[7] = 0xffffff
 
 ### TODO - this all needs a lot of work on colour names etc
-###
-channel_colidx = (6, 3, 5)
+channel_colidx_default = (6, 3, 5)
 
 # Create a TileGrid using the Bitmap and Palette
 tg_plot_grid = displayio.TileGrid(plot_grid, pixel_shader=g_palette)
@@ -411,7 +472,7 @@ for label in plot_labels:
     g_background.append(label)
 g_background.append(source_label)
 
-tg_plot_data = displayio.TileGrid(plots, pixel_shader=palette)
+tg_plot_data = displayio.TileGrid(plots, pixel_shader=plot_palette)
 tg_plot_data.x = 39
 tg_plot_data.y = 20
 
@@ -445,25 +506,25 @@ for trial in range(5):
     t2 = time.monotonic()
     print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
 
-# Draw even more pixels
-t1 = time.monotonic()
-for x in range(plot_width):
-    for y in range(plot_height):
-        plots[x, y] = 3
-t2 = time.monotonic()
-# The pixels have not necessarily all been shown at this point
-print("AUTO", t2 - t1)
-# 4.09s for 240x240, 3.00s for 200x200
+# # Draw even more pixels
+# t1 = time.monotonic()
+# for x in range(plot_width):
+    # for y in range(plot_height):
+        # plots[x, y] = 3
+# t2 = time.monotonic()
+# # The pixels have not necessarily all been shown at this point
+# print("AUTO", t2 - t1)
+# # 4.09s for 240x240, 3.00s for 200x200
 
-display.auto_refresh = False
-t1 = time.monotonic()
-for x in range(plot_width):
-    for y in range(plot_height):
-        plots[x, y] = 0
-display.refresh(minimum_frames_per_second=0)
-t2 = time.monotonic()
-print("MANUAL", t2 - t1)
-# 3.32s for 240x240, 2.45 for 200x200
+# display.auto_refresh = False
+# t1 = time.monotonic()
+# for x in range(plot_width):
+    # for y in range(plot_height):
+        # plots[x, y] = 0
+# display.refresh(minimum_frames_per_second=0)
+# t2 = time.monotonic()
+# print("MANUAL", t2 - t1)
+# # 3.32s for 240x240, 2.45 for 200x200
 
 print("DONT FORGET pylint")
 
@@ -475,9 +536,12 @@ points = [array.array('B', [0] * plot_width),
 
 ### TODO - looking to use button_b to select different plot modes
 ### TODO - look at scrolling like Arcada one does
-mode = ("lines",   # draws lines between points
-        "points",  # just points - slightly quicker
-        "range",   # collects data for 1 second and displays min/avg/max
+modes = ("points",   # draws lines between points
+         "lines",  # just points - slightly quicker
+         "range",   # collects data for 1 second and displays min/avg/max
+         "points scroll",
+         "lines scroll",
+         "range scroll",
        )
 current_mode = 0
 
@@ -499,6 +563,7 @@ def set_grid_labels(p_labels, p_max, p_range):
             text_value = "{:.3f}".format(value)   ### 0.0 to 9.99999
         plot_label.text = text_value
 
+
 def clear_plot(plts, pnts, channs):
     for x in range(len(pnts[0])):
         for ch in range(channs):
@@ -509,72 +574,91 @@ while True:
     switch_source = False
     source = sources[current_source_idx]
     ### Put the description of the source on screen at the top
-    source_label.text = str(source)
+    source_name = str(source)
+    if debug:
+        print("Selecting source:", source_name)
+    source_label.text = source_name
     source.start()
     channels_in_use = source.values()
+
+    ### Use any requested colors that are found in palette
+    ### otherwise use defaults
+    channel_colidx = []
+    palette = list(plot_palette)
+    for idx, col in enumerate(source.colors()):
+        try:
+            channel_colidx.append(palette.index(col))
+        except:
+            channel_colidx.append(channel_colidx_default[idx])
+
     plot_initial_min = source.initial_min()
     plot_max = source.initial_max()
     plot_range = plot_max - plot_initial_min
     plot_scale = (plot_height - 1) / plot_range
     set_grid_labels(plot_labels, plot_max, plot_range)
 
-    
     MINMAX_HISTORY = 5
     prior_data_min = [float("inf")] * MINMAX_HISTORY
     prior_data_max = [float("-inf")] * MINMAX_HISTORY
     transparent = 0
     off_scale = False
     scan = 1
-
+    mode = modes[current_mode]
+    
     while True:
         data_min = [float("inf")] * MAX_CHANNELS
         data_max = [float("-inf")] * MAX_CHANNELS
         t1 = time.monotonic()
         for x in range(plot_width):
-            data = source.data()
-            if channels_in_use > 1:
-                data = source.data()
-                for ch in range(channels_in_use):
-                    plots[x, points[ch][x]] = transparent
-                    #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
-                    #points[0][x] = round((clue.temperature - 20.0) * 15)
-                    #points[0][x] = random.randint(50, 150)
-                    ypos = round((plot_max - data[ch]) * plot_scale)
-                    if ypos < 0:
-                        data_max[ch] = data[ch]
-                        off_scale = True
-                    elif ypos >= plot_height:
-                        data_min[ch] = data[ch]
-                        off_scale = True
-                    else:
-                        plots[x, ypos] = channel_colidx[ch]
-                        points[ch][x] = ypos
+            for ch in range(channels_in_use):
+                if ch == 0:
+                    all_data = source.data()
+                if channels_in_use == 1:
+                    data = all_data
+                else:
+                    data = all_data[ch]
 
-                    if data[ch] < data_min[ch]:
-                        data_min[ch] = data[ch]
-                    if data[ch] > data_max[ch]:
-                        data_max[ch] = data[ch]
-            else:
-                data = source.data()
-                plots[x, points[0][x]] = transparent
-                #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
-                #points[0][x] = round((clue.temperature - 20.0) * 15)
-                #points[0][x] = random.randint(50, 150)
+                print("TODO", "replace this with undraws by drawing transparent line")
+                plots[x, points[ch][x]] = transparent
+                
                 ypos = round((plot_max - data) * plot_scale)
                 if ypos < 0:
-                    off_scale = True
+                    data_max[ch] = data
+                    off_scale = True  ### off the top
                 elif ypos >= plot_height:
-                    off_scale = True
+                    data_min[ch] = data
+                    off_scale = True  ### off the bottom
                 else:
-                    plots[x, ypos] = channel_colidx[0]
-                    points[0][x] = ypos
+                    points[ch][x] = ypos
 
-                if data < data_min[0]:
-                    data_min[0] = data
-                if data > data_max[0]:
-                    data_max[0] = data
+                if mode == "points" and not off_scale:
+                    plots[x, ypos] = channel_colidx[ch]
+                elif mode == "lines":
+                    if x == 0:
+                        plots[x, ypos] = channel_colidx[ch]
+                    else:
+                        ### TODO - replace this with line drawing code
+                        
+                        ### simplified line drawing with just verticals
+                        if ypos == points[ch][x - 1]:
+                            plots[x, ypos] = channel_colidx[ch]
+                        else:
+                            step = 1 if ypos > points[ch][x - 1] else -1
+                            for lypos in range(points[ch][x - 1] + step, 
+                                               max(0, min(ypos + step,
+                                                          plot_height - 1)),
+                                               step):
+                                plots[x, lypos] = channel_colidx[ch]
 
-            if clue.button_a:
+                elif mode == "range":
+                    pass  ### TODO - implement!
+
+                if data < data_min[ch]:
+                    data_min[ch] = data
+                if data > data_max[ch]:
+                    data_max[ch] = data
+
+            if clue.button_a:  ### change plot source
                 ### Wait for release of button
                 while clue.button_a:
                     pass
@@ -586,10 +670,18 @@ while True:
                 switch_source = True
                 break
 
+            if clue.button_b:  ### change plot mode
+                ### Wait for release of button
+                while clue.button_b:
+                    pass
+                current_mode = (current_mode + 1) % len(modes)
+                mode = modes[current_mode]
+
         t2 = time.monotonic()
 
         if switch_source:
             break
+        ### TODO - this needs to take into account min/max from source
         ### TODO - this needs a lot of refinement and testing
         ### test with flat line
         ### TODO - does this need a vertical shift without rescale?
@@ -609,7 +701,7 @@ while True:
             clear_plot(plots, points, channels_in_use)
             set_grid_labels(plot_labels, plot_max, plot_range)
             off_scale = False
-        
+
         ### Check to see if we should zoom in
         elif hist_range > 0 and plot_range * 0.5 > hist_range:
             print("ZOOM IN")
@@ -660,5 +752,6 @@ while True:
     # print("LINEM4", t2 - t1)
 ### About 0.12-0.15 for analogio
 
+### TODO REMOVE
 print("sleeping 10 seconds")
 time.sleep(10)
