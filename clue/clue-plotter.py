@@ -1,4 +1,4 @@
-### clue-plotter v0.8
+### clue-plotter v0.9
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -187,6 +187,28 @@ class PressurePlotSource(PlotSource):
         return self._clue.pressure
 
 
+class ProximityPlotSource(PlotSource):
+    def __init__(self, clue):
+        self._clue = clue
+        super().__init__(1, "Proximity",
+                         min=0, max=255,
+                         rate=720)
+
+    def data(self):
+        return self._clue.proximity
+
+
+class HumidityPlotSource(PlotSource):
+    def __init__(self, clue):
+        self._clue = clue
+        super().__init__(1, "Humidity (%)",
+                         min=0, max=100, initial_min=30, initial_max=60,
+                         rate=54)
+
+    def data(self):
+        return self._clue.humidity
+
+
 class PinPlotSource(PlotSource):
     def __init__(self, pin):
         try:
@@ -288,6 +310,7 @@ class VolumePlotSource(PlotSource):
 
 
 ### TODO - got to solve the issue of reusing pins
+### group by sensor?
 sources = [#PinPlotSource(board.P0),
            #PinPlotSource(board.P1),
            #PinPlotSource(board.P2),
@@ -296,7 +319,9 @@ sources = [#PinPlotSource(board.P0),
            IlluminatedColorPlotSource(clue, "Red"),
            IlluminatedColorPlotSource(clue, "Green"),
            IlluminatedColorPlotSource(clue, "Blue"),
+           ProximityPlotSource(clue),
            VolumePlotSource(clue),
+           HumidityPlotSource(clue),
            PressurePlotSource(clue),
            TemperaturePlotSource(clue),
            TemperaturePlotSource(clue, type="F")]
@@ -305,7 +330,7 @@ sources = [#PinPlotSource(board.P0),
 #source = PinPlotSource(board.P2)
 #source = ColorPlotSource(clue)
 #source = ColorReflectedGreenPlotSource(clue)
-current_source_idx = 5
+current_source_idx = 7
 source = sources[current_source_idx]   ### TODO - review where this is set
 
 display = board.DISPLAY
@@ -450,8 +475,11 @@ points = [array.array('B', [0] * plot_width),
 
 ### TODO - looking to use button_b to select different plot modes
 ### TODO - look at scrolling like Arcada one does
-mode = ("points", "lines", "range")
-current_mode = 1
+mode = ("lines",   # draws lines between points
+        "points",  # just points - slightly quicker
+        "range",   # collects data for 1 second and displays min/avg/max
+       )
+current_mode = 0
 
 
 display.auto_refresh = True
