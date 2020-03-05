@@ -188,6 +188,7 @@ class PinPlotSource(PlotSource):
         self._analogin = [analogio.AnalogIn(p) for p in pins]
         # Assumption here that reference_voltage is same for all
         self._reference_voltage = self._analogin[0].reference_voltage
+        self._conversion_factor = self._reference_voltage / (2**16 - 1)
         super().__init__(len(pins),
                          "Pad: " + ", ".join([str(p).split('.')[-1] for p in pins]),
                          units="V",
@@ -196,9 +197,9 @@ class PinPlotSource(PlotSource):
 
     def data(self):
         if len(self._analogin) == 1:
-            return self._analogin[0].value
+            return self._analogin[0].value * self._conversion_factor
         else:
-            return [ana.value for ana in self._analogin]
+            return [ana.value * self._conversion_factor for ana in self._analogin]
 
     def pins(self):
         return self._pins

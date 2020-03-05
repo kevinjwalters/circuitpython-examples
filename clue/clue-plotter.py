@@ -158,7 +158,7 @@ channel_colidx_default = (6, 8, 5)
 # Create a TileGrid using the Bitmap and Palette
 tg_plot_grid = displayio.TileGrid(plot_grid, pixel_shader=g_palette)
 tg_plot_grid.x = 39
-tg_plot_grid.y = 20
+tg_plot_grid.y = 30
 
 font = terminalio.FONT
 font_w, font_h = font.get_bounding_box()
@@ -169,6 +169,13 @@ font_w, font_h = font.get_bounding_box()
 ### 240/45 = 5.333
 ### Could set this to max of the the name lengths?
 ### Could write about arbtriry text and truncations and ... UI feature
+
+def plot_details(title="", ylab=""):
+    source_label.text = title
+    units_label.text = ylab
+    ### center the text
+    units_label.x = max(0, (40 - font_w * len(ylab))) // 2
+
 text_colour=0xc0c0c0
 initial_text = "CLUE Plotter"
 max_text_len = max(len(initial_text), max([len(str(so)) for so in sources]))
@@ -183,7 +190,7 @@ max_text_len = max(len(initial_units), max([len(so.units()) for so in sources]))
 units_label = label.Label(font, text=initial_units,
                           max_glyphs=max_text_len,
                           line_spacing=1, color=text_colour)
-units_label.x = max(0, (40 - font_w * len(initial_units))) // 2
+units_label.x = 0
 units_label.y = font_h // 2
 
 X_DIVS = 4
@@ -195,7 +202,7 @@ for ydiv in range(Y_DIVS + 1):
     plot_labels.append(label.Label(font, text="-----",
                        max_glyphs=5, line_spacing=1, color=text_colour))
     plot_labels[-1].x = 5
-    plot_labels[-1].y = (ydiv) * 50 + 19  ### TODO THIS PROPERLY
+    plot_labels[-1].y = (ydiv) * 50 + 30 - 1  ### TODO THIS PROPERLY
 
 ### This is not needed as Label parent class is Group and scale works
 #g_source = displayio.Group(scale=2, max_size=1)
@@ -210,7 +217,7 @@ g_background.append(source_label)
 
 tg_plot_data = displayio.TileGrid(plots, pixel_shader=plot_palette)
 tg_plot_data.x = 39
-tg_plot_data.y = 20
+tg_plot_data.y = 30
 
 # Create a Group
 main_group = displayio.Group(max_size=2)
@@ -306,6 +313,9 @@ def clear_plot(plts, pnts, channs):
             plts[x, pnts[ch][x]] = transparent
 
 
+
+
+
 while True:
     switch_source = False
     source = sources[current_source_idx]
@@ -314,9 +324,7 @@ while True:
     if debug:
         print("Selecting source:", source_name)
 
-    source_label.text = source_name
-    units_label.text = source.units()
-    units_label.x = max(0, (40 - font_w * len(source.units()))) // 2
+    plot_details(title=source_name, ylab=source.units())
     source.start()
     channels_in_use = source.values()
 
