@@ -169,13 +169,22 @@ font_w, font_h = font.get_bounding_box()
 ### 240/45 = 5.333
 ### Could set this to max of the the name lengths?
 ### Could write about arbtriry text and truncations and ... UI feature
+text_colour=0xc0c0c0
 initial_text = "CLUE Plotter"
-max_text_len = max(len(initial_text), max([len(str(x)) for x in sources]))
+max_text_len = max(len(initial_text), max([len(str(so)) for so in sources]))
 source_label = label.Label(font, text=initial_text,
                            max_glyphs=max_text_len,
-                           scale=2, line_spacing=1, color=0xc0c0c0)
+                           scale=2, line_spacing=1, color=text_colour)
 source_label.x = 40
-source_label.y = font_h // 2  ### TODO this doesn't look quite right
+source_label.y = font_h // 2
+
+initial_units=""
+max_text_len = max(len(initial_units), max([len(so.units()) for so in sources]))
+units_label = label.Label(font, text=initial_units,
+                          max_glyphs=max_text_len,
+                          line_spacing=1, color=text_colour)
+units_label.x = max(0, (40 - font_w * len(initial_units))) // 2
+units_label.y = font_h // 2
 
 X_DIVS = 4
 Y_DIVS = 4
@@ -184,7 +193,7 @@ plot_labels = []
 ### from top to bottom
 for ydiv in range(Y_DIVS + 1):
     plot_labels.append(label.Label(font, text="-----",
-                       max_glyphs=5, line_spacing=1, color=0xc0c0c0))
+                       max_glyphs=5, line_spacing=1, color=text_colour))
     plot_labels[-1].x = 5
     plot_labels[-1].y = (ydiv) * 50 + 19  ### TODO THIS PROPERLY
 
@@ -192,10 +201,11 @@ for ydiv in range(Y_DIVS + 1):
 #g_source = displayio.Group(scale=2, max_size=1)
 #g_source.append(source_label)
 
-g_background = displayio.Group(max_size=2+len(plot_labels))
+g_background = displayio.Group(max_size=3+len(plot_labels))
 g_background.append(tg_plot_grid)
 for label in plot_labels:
     g_background.append(label)
+g_background.append(units_label)
 g_background.append(source_label)
 
 tg_plot_data = displayio.TileGrid(plots, pixel_shader=plot_palette)
@@ -303,7 +313,10 @@ while True:
     source_name = str(source)
     if debug:
         print("Selecting source:", source_name)
+
     source_label.text = source_name
+    units_label.text = source.units()
+    units_label.x = max(0, (40 - font_w * len(source.units()))) // 2
     source.start()
     channels_in_use = source.values()
 
@@ -330,7 +343,7 @@ while True:
     off_scale = False
     scan = 1
     mode = modes[current_mode]
-    
+
     while True:
         data_min = [float("inf")] * MAX_CHANNELS
         data_max = [float("-inf")] * MAX_CHANNELS
@@ -346,7 +359,7 @@ while True:
 
                 print("TODO", "replace this with undraws by drawing transparent line")
                 plots[x, points[ch][x]] = transparent
-                
+
                 ypos = round((plot_max - data) * plot_scale)
                 if ypos < 0:
                     data_max[ch] = data
@@ -364,13 +377,13 @@ while True:
                         plots[x, ypos] = channel_colidx[ch]
                     else:
                         ### TODO - replace this with line drawing code
-                        
+
                         ### simplified line drawing with just verticals
                         if ypos == points[ch][x - 1]:
                             plots[x, ypos] = channel_colidx[ch]
                         else:
                             step = 1 if ypos > points[ch][x - 1] else -1
-                            for lypos in range(points[ch][x - 1] + step, 
+                            for lypos in range(points[ch][x - 1] + step,
                                                max(0, min(ypos + step,
                                                           plot_height - 1)),
                                                step):
