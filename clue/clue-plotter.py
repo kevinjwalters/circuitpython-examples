@@ -1,4 +1,4 @@
-### clue-plotter v1.1
+### clue-plotter v1.2
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -42,6 +42,8 @@ import terminalio
 import analogio
 
 from plot_source import *
+
+### C/Arduino one https://github.com/adafruit/Adafruit_Arcada/blob/master/examples/full_board_tests/arcada_clue_sensorplotter/arcada_clue_sensorplotter.ino
 
 # There's a form of on-demand instanitation for touch pads
 # but analogio can be used if touch_0 - touch_3 have not been used
@@ -96,27 +98,28 @@ debug = 2
 sources = [#PinPlotSource(board.P0),
            #PinPlotSource(board.P1),
            #PinPlotSource(board.P2),
-           PinPlotSource([board.P0, board.P1, board.P2]),
+           TemperaturePlotSource(clue, type="C"),
+           TemperaturePlotSource(clue, type="F"),
+           PressurePlotSource(clue),
+           HumidityPlotSource(clue),
            ColorPlotSource(clue),
+           ProximityPlotSource(clue),
            IlluminatedColorPlotSource(clue, "Red"),
            IlluminatedColorPlotSource(clue, "Green"),
            IlluminatedColorPlotSource(clue, "Blue"),
-           ProximityPlotSource(clue),
+           IlluminatedColorPlotSource(clue, "Clear"),
            VolumePlotSource(clue),
-           HumidityPlotSource(clue),
-           PressurePlotSource(clue),
-           TemperaturePlotSource(clue),
-           TemperaturePlotSource(clue, type="F"),
-           GyroPlotSource(clue),
            AccelerometerPlotSource(clue),
-           MagnetometerPlotSource(clue)
+           GyroPlotSource(clue),
+           MagnetometerPlotSource(clue),
+           PinPlotSource([board.P0, board.P1, board.P2])
           ]
 
 
 #source = PinPlotSource(board.P2)
 #source = ColorPlotSource(clue)
 #source = ColorReflectedGreenPlotSource(clue)
-current_source_idx = 7
+current_source_idx = 0
 source = sources[current_source_idx]   ### TODO - review where this is set
 
 display = board.DISPLAY
@@ -307,7 +310,7 @@ def set_grid_labels(p_labels, p_max, p_range):
         plot_label.text = text_value
 
 
-def clear_plot(plts, pnts, channs):
+def clear_plot_points(plts, pnts, channs):
     for x in range(len(pnts[0])):
         for ch in range(channs):
             plts[x, pnts[ch][x]] = transparent
@@ -410,7 +413,7 @@ while True:
                 while clue.button_a:
                     pass
                 ### Clear the screen
-                clear_plot(plots, points, channels_in_use)
+                clear_plot_points(plots, points, channels_in_use)
 
                 ### Select the next source
                 current_source_idx = (current_source_idx + 1) % len(sources)
@@ -445,7 +448,7 @@ while True:
             plot_max = hist_max + 0.125 * hist_range
             plot_range = 1.25 * hist_range
             plot_scale = (plot_height - 1) / plot_range
-            clear_plot(plots, points, channels_in_use)
+            clear_plot_points(plots, points, channels_in_use)
             set_grid_labels(plot_labels, plot_max, plot_range)
             off_scale = False
 
@@ -455,7 +458,7 @@ while True:
             plot_max = hist_max + 0.125 * hist_range
             plot_range = 1.25 * hist_range
             plot_scale = (plot_height - 1) / plot_range
-            clear_plot(plots, points, channels_in_use)
+            clear_plot_points(plots, points, channels_in_use)
             set_grid_labels(plot_labels, plot_max, plot_range)
 
         t3 = time.monotonic()

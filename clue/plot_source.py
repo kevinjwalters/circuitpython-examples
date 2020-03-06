@@ -61,6 +61,8 @@ class PlotSource():
     def __init__(self, values, name, units="",
                  min=0, max=65535, initial_min=None, initial_max=None,
                  rate=None, colors=None, debug=0):
+        if type(self) == PlotSource:
+            raise TypeError("PlotSource must be subclassed")
         self._values = values
         self._name = name
         self._units = units
@@ -79,7 +81,7 @@ class PlotSource():
         return self._name
 
     def data(self):
-        return None
+        raise NotImplementedError()
 
     def min(self):
         return self._min
@@ -210,7 +212,7 @@ class ColorPlotSource(PlotSource):
         self._clue = clue
         super().__init__(3, "Color: R, G, B",
                          min=0, max=8000,  ### 7169 looks like max
-                         rate=100,
+                         rate=50,
                          colors=self.RGB_COLORS,
                          )
 
@@ -228,32 +230,35 @@ class ColorPlotSource(PlotSource):
 class IlluminatedColorPlotSource(PlotSource):
     def __init__(self, clue, colour):
         self._clue = clue
-        if colour[0] == "R":
-            self._channel = "R"
-            rgb_idx = 0
-        elif colour[0] == "G":
-            self._channel = "G"
-            rgb_idx = 1
-        elif colour[0] == "B":
-            self._channel = "B"
-            rgb_idx = 2
+        col_fl_lc = colour[0].lower()
+        if col_fl_lc == "r":
+            plot_colour = self.RGB_COLORS[0]
+        elif col_fl_lc == "g":
+            plot_colour = self.RGB_COLORS[1]
+        elif col_fl_lc == "b":
+            plot_colour = self.RGB_COLORS[2]
+        elif col_fl_lc == "c":
+            plot_colour = self.DEFAULT_COLORS[0]
         else:
-            raise ValueError("colour must be Red, Green or Blue")
+            raise ValueError("Colour must be Red, Green, Blue or Clear")
 
-        super().__init__(1, "Ilum. color: " + self._channel,
+        self._channel = col_fl_lc
+        super().__init__(1, "Ilum. color: " + self._channel.upper(),
                          min=0, max=8000,
                          initial_min=100, initial_max=700,
-                         colors=(self.RGB_COLORS[rgb_idx],),
-                         rate=100)
+                         colors=(plot_colour,),
+                         rate=50)
 
     def data(self):
         (r, g, b, c) = self._clue.color
-        if self._channel == "R":
+        if self._channel == "r":
             return r
-        elif self._channel == "G":
+        elif self._channel == "g":
             return g
-        elif self._channel == "B":
+        elif self._channel == "b":
             return b
+        elif self._channel == "c":
+            return c
         else:
             return None  ### This should never happen
 
