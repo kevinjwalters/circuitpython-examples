@@ -120,13 +120,13 @@ class TemperaturePlotSource(PlotSource):
     def _convert(self, value):
         return value * self._scale + self._offset
 
-    def __init__(self, clue, type="C"):
+    def __init__(self, clue, type="Celsius"):
         self._clue = clue
-        if type[0] == "F":
+        if type[0].lower() == "f":
             type_name = "Fahrenheit"
             self._scale = 1.8
             self._offset = 32.0
-        elif type[0] == "K":
+        elif type[0].lower == "k":
             type_name = "Kelvin"
             self._scale = 1.0
             self._offset = -273.15
@@ -147,14 +147,25 @@ class TemperaturePlotSource(PlotSource):
 
 ### The 300, 1100 values are in adafruit_bmp280 but are private variables
 class PressurePlotSource(PlotSource):
-    def __init__(self, clue):
+    def _convert(self, value):
+        return value * self._scale
+
+    def __init__(self, clue, type="M"):
         self._clue = clue
-        super().__init__(1, "Pressure", units="hPa",
-                         min=300, max=1100, initial_min=980, initial_max=1040,
+        if type[0].lower() == "i":
+            self._scale = 29.92 / 1013.25
+            units = "inHg"
+        else:
+            self._scale = 1.0
+            units = "hPa"  ### AKA millibars (mb)
+
+        super().__init__(1, "Pressure", units=units,
+                         min=self._convert(300), max=self._convert(1100),
+                         initial_min=self._convert(980), initial_max=self._convert(1040),
                          rate=22)
 
     def data(self):
-        return self._clue.pressure
+        return self._convert(self._clue.pressure)
 
 
 class ProximityPlotSource(PlotSource):
@@ -189,12 +200,13 @@ class PinPlotSource(PlotSource):
         self._pins = pins
         self._analogin = [analogio.AnalogIn(p) for p in pins]
         # Assumption here that reference_voltage is same for all
+        # 3.3V graphs nicely with rounding up to 4.0V
         self._reference_voltage = self._analogin[0].reference_voltage
         self._conversion_factor = self._reference_voltage / (2**16 - 1)
         super().__init__(len(pins),
                          "Pad: " + ", ".join([str(p).split('.')[-1] for p in pins]),
                          units="V",
-                         min=0.0, max=self._reference_voltage,
+                         min=0.0, max=math.ceil(self._reference_voltage),
                          rate=10000)
 
     def data(self):
@@ -292,6 +304,10 @@ class VolumePlotSource(PlotSource):
 ### TODO - this is not a blocking read for new data,
 ###        data comes back faster (500Hz) than it changes
 ###        if read in a tight loop
+### CP standard says this should be radians per second
+### but library returns degrees per second
+### https://circuitpython.readthedocs.io/en/latest/docs/design_guide.html#sensor-properties-and-units
+### https://github.com/adafruit/Adafruit_CircuitPython_LSM6DS/issues/9
 class GyroPlotSource(PlotSource):
     def __init__(self, clue):
         self._clue = clue

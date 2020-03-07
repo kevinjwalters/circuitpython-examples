@@ -1,4 +1,4 @@
-### clue-plotter v1.3
+### clue-plotter v1.4
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -52,7 +52,7 @@ from plot_source import *
 from adafruit_clue import clue
 from adafruit_display_text import label
 
-debug = 2
+debug = 4
 
 # remember this was a p3.reference_voltage which is 3.3
 # p3 = analogio.AnalogIn(board.P3)
@@ -99,9 +99,10 @@ debug = 2
 sources = [#PinPlotSource(board.P0),
            #PinPlotSource(board.P1),
            #PinPlotSource(board.P2),
-           TemperaturePlotSource(clue, type="C"),
-           TemperaturePlotSource(clue, type="F"),
+           TemperaturePlotSource(clue, type="Celsius"),
+           TemperaturePlotSource(clue, type="Fahrenheit"),
            PressurePlotSource(clue),
+           PressurePlotSource(clue, type="Imperial"),
            HumidityPlotSource(clue),
            ColorPlotSource(clue),
            ProximityPlotSource(clue),
@@ -121,7 +122,7 @@ sources = [#PinPlotSource(board.P0),
 #source = ColorPlotSource(clue)
 #source = ColorReflectedGreenPlotSource(clue)
 current_source_idx = 0
-source = sources[current_source_idx]   ### TODO - review where this is set
+##source = sources[current_source_idx]   ### TODO - review where this is set
 
 display = board.DISPLAY
 
@@ -245,14 +246,6 @@ for x in range(0, grid_width, 50):
     for y in range(0, grid_height, GRID_DOT_SPACING):
         plot_grid[x, y] = 1  ### TODO - this is green review this
 
-# Get some data on read rates on CLUE
-for trial in range(5):
-    t1 = time.monotonic()
-    for i in range(100):
-        _ = source.data()
-    t2 = time.monotonic()
-    print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
-
 # # Draw even more pixels
 # t1 = time.monotonic()
 # for x in range(plot_width):
@@ -299,7 +292,7 @@ modes = ("points",   # draws lines between points
 ### Not sure if I'll use this or not ...
 scale_mode = {"points": "screen",
               "lines": "column",
-              "range", "column",
+              "range": "column",
               "points scroll": "column",
               "lines scroll": "column",
               "range scroll": "column"}
@@ -332,9 +325,8 @@ def clear_plot_points(plts, pnts, channs):
             plts[x, pnts[ch][x]] = transparent
 
 
-while True:
-    switch_source = False
-    source = sources[current_source_idx]
+def start_source(index=0):
+    source = sources[index]
     ### Put the description of the source on screen at the top
     source_name = str(source)
     if debug:
@@ -343,7 +335,7 @@ while True:
     plot_details(title=source_name, ylab=source.units())
     source.start()
     channels_in_use = source.values()
-
+    
     ### Use any requested colors that are found in palette
     ### otherwise use defaults
     channel_colidx = []
@@ -353,6 +345,26 @@ while True:
             channel_colidx.append(palette.index(col))
         except:
             channel_colidx.append(channel_colidx_default[idx])
+    
+    return (source, channels_in_use, channel_colidx)
+
+
+def print_data_rate(source):
+    """Print data read rate for debugging and setting PlotSource rates."""
+    for trial in range(5):
+        t1 = time.monotonic()
+        for i in range(100):
+            _ = source.data()
+        t2 = time.monotonic()
+        print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
+
+
+while True:
+    switch_source = False
+    (source, channels_in_use, channel_colidx) = start_source(current_source_idx)
+
+    if debug >= 5:
+        print_data_rate(source)
 
     plot_initial_min = source.initial_min()
     plot_max = source.initial_max()
