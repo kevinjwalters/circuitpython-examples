@@ -1,4 +1,4 @@
-### clue-plotter v1.2
+### clue-plotter v1.3
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -8,6 +8,7 @@
 ### ANY CRITICAL NOTES ON LIBRARIES GO HERE
 
 ### copy this file to CLUE board as code.py
+### needs companion plot_sensor.py file
 
 ### MIT License
 
@@ -280,6 +281,11 @@ points = [array.array('B', [0] * plot_width),
           array.array('B', [0] * plot_width),
           array.array('B', [0] * plot_width)]
 
+data_cbuf = [array.array('f', [0] * plot_width),
+             array.array('f', [0] * plot_width),
+             array.array('f', [0] * plot_width)]
+
+
 ### TODO - looking to use button_b to select different plot modes
 ### TODO - look at scrolling like Arcada one does
 modes = ("points",   # draws lines between points
@@ -289,6 +295,16 @@ modes = ("points",   # draws lines between points
          "lines scroll",
          "range scroll",
        )
+
+### Not sure if I'll use this or not ...
+scale_mode = {"points": "screen",
+              "lines": "column",
+              "range", "column",
+              "points scroll": "column",
+              "lines scroll": "column",
+              "range scroll": "column"}
+       
+       
 current_mode = 0
 
 
@@ -314,9 +330,6 @@ def clear_plot_points(plts, pnts, channs):
     for x in range(len(pnts[0])):
         for ch in range(channs):
             plts[x, pnts[ch][x]] = transparent
-
-
-
 
 
 while True:
@@ -354,7 +367,8 @@ while True:
     off_scale = False
     scan = 1
     mode = modes[current_mode]
-
+    cbuf_idx = 0
+    
     while True:
         data_min = [float("inf")] * MAX_CHANNELS
         data_max = [float("-inf")] * MAX_CHANNELS
@@ -371,6 +385,7 @@ while True:
                 print("TODO", "replace this with undraws by drawing transparent line")
                 plots[x, points[ch][x]] = transparent
 
+                data_cbuf[ch][cbuf_idx] = data
                 ypos = round((plot_max - data) * plot_scale)
                 if ypos < 0:
                     data_max[ch] = data
@@ -426,6 +441,8 @@ while True:
                     pass
                 current_mode = (current_mode + 1) % len(modes)
                 mode = modes[current_mode]
+
+            cbuf_idx += 1
 
         t2 = time.monotonic()
 

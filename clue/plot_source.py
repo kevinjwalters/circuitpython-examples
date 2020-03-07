@@ -308,7 +308,7 @@ class GyroPlotSource(PlotSource):
 class AccelerometerPlotSource(PlotSource):
     def __init__(self, clue):
         self._clue = clue
-        super().__init__(3, "Accelerometer", units="g",
+        super().__init__(3, "Accelerometer", units="ms-2",
                          min=-40, max=40,  ### 39.1992 approx max
                          initial_min=-20, initial_max=20,
                          colors=self.RGB_COLORS,
