@@ -1,4 +1,4 @@
-### clue-plotter v1.4
+### clue-plotter v1.5
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -327,32 +327,32 @@ def clear_plot_points(plts, pnts, channs):
             plts[x, pnts[ch][x]] = transparent
 
 
-def start_source(index=0):
-    source = sources[index]
+def ready_plot_source(plttr, srcs, index=0):
+    source = srcs[index]
     ### Put the description of the source on screen at the top
     source_name = str(source)
     if debug:
         print("Selecting source:", source_name)
 
-    ### TODO - work out how to deal with this with new object.
-    ## plot_details(title=source_name, ylab=source.units())
-    source.start()
-    channels_in_use = source.values()
+    plttr.title = source_name
+    plttr.y_axis_lab = source.units()
+    plttr.y_range = (source.initial_min(), source.initial_max())
+    channels_from_source = source.values()
+    plttr.channels = channels_from_source
     
-    ### Use any requested colors that are found in palette
-    ### otherwise use defaults
+    # Use any requested colors that are found in palette
+    # otherwise use defaults
     channel_colidx = []
-    #palette = list(plot_palette)
-    ### TODO - clean this up structurally
-    palette = plotter.get_colors()
+    palette = plttr.get_colors()
     for idx, col in enumerate(source.colors()):
         try:
             channel_colidx.append(palette.index(col))
         except:
             channel_colidx.append(channel_colidx_default[idx])
     
-    return (source, channels_in_use, channel_colidx)
-
+    plttr.channel_colidx = channel_colidx
+    source.start()
+    return (source, channels_from_source)
 
 def print_data_rate(source):
     """Print data read rate for debugging and setting PlotSource rates."""
@@ -363,12 +363,15 @@ def print_data_rate(source):
         t2 = time.monotonic()
         print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
 
+MU_PLOTTER_OUTPUT = True
+
 initial_title = "CLUE Plotter"
 max_title_len = max(len(initial_title), max([len(str(so)) for so in sources]))
 plotter = Plotter(board.DISPLAY,
                   type="lines", mode="scroll",
                   title=initial_title,
                   max_title_len=max_title_len,
+                  mu_output=MU_PLOTTER_OUTPUT,
                   debug=debug)
 
 plotter.display_on()
@@ -376,27 +379,28 @@ plotter.display_on()
 while True:
     # set the source and start items
     switch_source = False
-    (source, channels_in_use, channel_colidx) = start_source(current_source_idx)
+    (source, channels) = ready_plot_source(plotter, sources, current_source_idx)
 
     if debug >= 5:
         print_data_rate(source)
 
-    # read data
-    all_data = source.data()
+    while True:
+        # read data
+        all_data = source.data()
             
-    # store the data
+        # store the data
     
-    # check for button pressesdisplay
+        # check for button pressesdisplay
     
-    # display it
-    if channels_in_use == 1:
-        plotter.data_add((all_data,))
-    else:
-        plotter.data_add(all_data)
+        # display it
+        if channels == 1:
+            plotter.data_add((all_data,))
+        else:
+            plotter.data_add(all_data)
 
-source.stop()
+    source.stop()
+
 plotter.display_off()
-
 
 
 ### OLD CODE BELOW

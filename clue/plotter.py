@@ -52,11 +52,39 @@ from adafruit_display_text.label import Label
 ### mention this does a bit more than simple raw plotting
 ### as its doing stats and holding original values
 
+
+def mapf(value, in_min, in_max, out_min, out_max):
+    return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
+
+
+# This creates ('{.0f}', '{.1f}', '{.2f}', etc
+_FMT_DEC_PLACES = tuple("{:." + str(x) + "f}" for x in range(10))
+
+def format_width(nchars, value):
+    """Simple attempt to generate a value within nchars characters.
+       Return value can be too long, e.g. for nchars=5, bad things happen
+       with values > 99999 or < -9999 or < -99.9."""
+    neg_format = _FMT_DEC_PLACES[nchars - 3]
+    pos_format = _FMT_DEC_PLACES[nchars - 2]
+    if value <= -10.0:
+        # this might overflow width
+        text_value = neg_format.format(value)
+    elif value < 0.0:
+        text_value = neg_format.format(value)
+    elif value >= 10.0:
+        # this might overflow width
+        text_value = pos_format.format(value)
+    else:
+        text_value = pos_format.format(value)  # 0.0 to 9.99999
+    return text_value
+
+
 class Plotter():
     _DEFAULT_SCALE_MODE = {"lines": "pixel",
                            "dots": "screen",
                            "minavgmax": "pixel"}
-
+    
+    # Palette for plotting, first one is set transparent
     PLOT_COLORS = [0x000000,
                    0x0000ff,
                    0x00ff00,
@@ -66,6 +94,9 @@ class Plotter():
                    0xffff00,
                    0xffffff,
                    0xff0080]
+
+    POS_INF = float("inf")
+    NEG_INF = float("-inf")
 
     def _display_manual(self):
         self._output.auto_refresh = False
@@ -82,6 +113,7 @@ class Plotter():
                  plot_width=200, plot_height=201,
                  x_divs=4, y_divs=4,
                  max_channels=3,
+                 est_rate=50,
                  title="CLUE Plotter",
                  max_title_len=20,
                  mu_output=False,
@@ -95,6 +127,7 @@ class Plotter():
         self._x_divs = x_divs
         self._y_divs = y_divs
         self._max_channels = max_channels
+        self._est_rate = est_rate
         self._title = title
         self._max_title_len = max_title_len
 
@@ -104,11 +137,15 @@ class Plotter():
         self._mu_output = mu_output
         self._debug = debug
 
-        self._min = None
-        self._max = None
+        self._channels = None
+        self._channel_colidx = []
+
+        # The range the data source generates within
         self._abs_min = None
         self._abs_max = None
-        self._plot_range = None
+        
+        # The current plot min/max
+        self._plot_min = None
         self._plot_max = None
 
         self._font = terminalio.FONT
@@ -127,6 +164,9 @@ class Plotter():
 
     def clear_data(self):
         # Allocate arrays for each possible channel with plot_width elements
+        self._data_min = None
+        self._data_max = None
+        
         self._data_y_pos = []
         self._data_value = []
         for _ in range(self._max_channels):
@@ -220,20 +260,21 @@ class Plotter():
         self._displayio_y_axis_lab.x = 0  # 0 works here because text is ""
         self._displayio_y_axis_lab.y = font_h // 2
 
-        plot_labels = []
+        plot_y_labels = []
         # from top of screen to bottom
         ### TODO - try 6 chars
         for y_div in range(self._y_divs + 1):
-            plot_labels.append(Label(self._font,
-                                     text="-" * self._y_lab_width,
-                                     max_glyphs=self._y_lab_width,
-                                     line_spacing=1,
-                                     color=self._y_lab_color))
-            plot_labels[-1].x = 5 ### TODO THIS PROPERLY
-            plot_labels[-1].y = y_div * 50 + 30 - 1  ### TODO THIS PROPERLY
-        self._displayio_y_labs = plot_labels
+            plot_y_labels.append(Label(self._font,
+                                       text="-" * self._y_lab_width,
+                                       max_glyphs=self._y_lab_width,
+                                       line_spacing=1,
+                                       color=self._y_lab_color))
+            plot_y_labels[-1].x = 5 ### TODO THIS PROPERLY
+            plot_y_labels[-1].y = y_div * 50 + 30 - 1  ### TODO THIS PROPERLY
+        self._displayio_y_labs = plot_y_labels
 
-        g_background = displayio.Group(max_size=3+len(plot_labels))
+        # three items (grid, axis label, title) plus the y tick labels
+        g_background = displayio.Group(max_size=3+len(plot_y_labels))
         g_background.append(tg_plot_grid)
         for label in self._displayio_y_labs:
             g_background.append(label)
@@ -253,6 +294,13 @@ class Plotter():
         main_group.append(tg_plot_data)
         return main_group
 
+    def set_y_axis_tick_labels(self, y_min, y_max):
+        px_per_div = (y_max - y_min) / self._y_divs
+        for idx, tick_label in enumerate(self._displayio_y_labs):
+            value = y_max - idx * px_per_div
+            text_value = format_width(self._y_lab_width, value)
+            tick_label.text = text_value[:self._y_lab_width]
+
     def display_on(self):
         if self._displayio_graph is None:
             self._displayio_graph = self._make_empty_graph()
@@ -264,8 +312,15 @@ class Plotter():
 
     def data_add(self, values):
         for idx, value in enumerate(values):
-            self._data_value[idx][self._x_pos] = value
-            self._data_y_pos[idx][self._x_pos] = 00000  ### mapped value
+            x_pos = self._x_pos
+            self._data_value[idx][x_pos] = value
+            y_pos = round(mapf(value,
+                               self._plot_min, self._plot_max,
+                               0, self._plot_height - 1))
+            self._data_y_pos[idx][x_pos] = y_pos
+
+            # TEMP PLOT - TODO REPLACE with line one
+            self._displayio_plot[x_pos, y_pos] = self._channel_colidx[idx]
 
         new_x_pos = self._x_pos + 1
         if new_x_pos >= self._plot_width:
@@ -277,6 +332,7 @@ class Plotter():
             self._x_pos = new_x_pos
 
         self._values += 1
+
         if self._mu_output:
             print(values)
         if self._mode == "scroll":
@@ -289,3 +345,53 @@ class Plotter():
     @title.setter
     def title(self, value):
         self._title = value[:self._max_title_len]  # does not show truncation
+        self._displayio_title.text = self._title
+        
+    @property
+    def channels(self):
+        return self._channels
+
+    @channels.setter
+    def channels(self, value):
+        if value > self._max_channels:
+            raise ValueError("Exceeds max_channels")
+        self._channels = value
+
+    @property
+    def y_range(self):
+        return (self._plot_min, self._plot_max)
+        
+    @y_range.setter
+    def y_range(self, minmax):
+        changed = False
+        if minmax[0] != self._plot_min:
+            self._plot_min = minmax[0]
+            changed = True
+        if minmax[1] != self._plot_max:
+            self._plot_max = minmax[1]
+            changed = True
+
+        if changed:
+            self.set_y_axis_tick_labels(self._plot_min, self._plot_max)
+
+    @property
+    def y_axis_lab(self):
+        return self._y_axis_lab
+        
+    @y_axis_lab.setter
+    def y_axis_lab(self, text):
+        self._y_axis_lab = text[:self._y_lab_width]
+        font_w, font_h = self._font.get_bounding_box()
+        x_pos = (40 - font_w * len(self._y_axis_lab)) // 2
+        # max() used to prevent negative (off-screen) values
+        self._displayio_y_axis_lab.x = max(0, x_pos)
+        self._displayio_y_axis_lab.text = self._y_axis_lab
+
+    @property
+    def channel_colidx(self):
+        return self._channel_colidx
+        
+    @channel_colidx.setter
+    def channel_colidx(self, value):
+        # tuple(0 ensures object has a local / read-only copy of data
+        self._channel_colidx = tuple(value)
