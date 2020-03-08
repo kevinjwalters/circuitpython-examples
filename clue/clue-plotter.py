@@ -3,7 +3,7 @@
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
 
-### Tested with an Adafruit CLUE Alpha and CircuitPython and 5.0.0
+### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.0.0
 
 ### ANY CRITICAL NOTES ON LIBRARIES GO HERE
 
@@ -43,6 +43,7 @@ import terminalio
 import analogio
 
 from plot_source import *
+from plotter import Plotter
 
 ### C/Arduino one https://github.com/adafruit/Adafruit_Arcada/blob/master/examples/full_board_tests/arcada_clue_sensorplotter/arcada_clue_sensorplotter.ino
 
@@ -50,7 +51,7 @@ from plot_source import *
 # but analogio can be used if touch_0 - touch_3 have not been used
 # https://github.com/adafruit/Adafruit_CircuitPython_CLUE
 from adafruit_clue import clue
-from adafruit_display_text import label
+##from adafruit_display_text import label
 
 debug = 4
 
@@ -124,127 +125,129 @@ sources = [#PinPlotSource(board.P0),
 current_source_idx = 0
 ##source = sources[current_source_idx]   ### TODO - review where this is set
 
-display = board.DISPLAY
+# display = board.DISPLAY
 
-# Create a bitmap with two colors
+# # Create a bitmap with two colors
 
-plot_width  = 200
-grid_width  = plot_width + 1
-plot_height = 201
-grid_height = plot_height
+# plot_width  = 200
+# grid_width  = plot_width + 1
+# plot_height = 201
+# grid_height = plot_height
 
-### TODO - separate palette for plot_grid ?
-plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
-plots = displayio.Bitmap(plot_width, plot_height, 8)
+# ### TODO - separate palette for plot_grid ?
+# plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
+# plots = displayio.Bitmap(plot_width, plot_height, 8)
 
-g_palette = displayio.Palette(2)
-g_palette.make_transparent(0)
-g_palette[0] = 0x000000
-g_palette[1] = 0x308030
+# g_palette = displayio.Palette(2)
+# g_palette.make_transparent(0)
+# g_palette[0] = 0x000000
+# g_palette[1] = 0x308030
 
-# Create a colour palette
-# Eventually scope colours will be ch1 yellow, ch2 cyan, ch3 magenta
-plot_palette = displayio.Palette(9)
+# # Create a colour palette
+# # Eventually scope colours will be ch1 yellow, ch2 cyan, ch3 magenta
+# plot_palette = displayio.Palette(9)
 
-plot_palette.make_transparent(0)
-plot_palette[1] = 0x0000ff
-plot_palette[2] = 0x00ff00
-plot_palette[3] = 0x00ffff
-plot_palette[4] = 0xff0000
-plot_palette[5] = 0xff00ff
-plot_palette[6] = 0xffff00
-plot_palette[7] = 0xffffff
-plot_palette[8] = 0xff0080
+# plot_palette.make_transparent(0)
+# plot_palette[1] = 0x0000ff
+# plot_palette[2] = 0x00ff00
+# plot_palette[3] = 0x00ffff
+# plot_palette[4] = 0xff0000
+# plot_palette[5] = 0xff00ff
+# plot_palette[6] = 0xffff00
+# plot_palette[7] = 0xffffff
+# plot_palette[8] = 0xff0080
 
-### TODO - this all needs a lot of work on colour names etc
-#channel_colidx_default = (6, 8, 5)
-channel_colidx_default = (6, 8, 5)
+# ### TODO - this all needs a lot of work on colour names etc
+# #channel_colidx_default = (6, 8, 5)
+# channel_colidx_default = (6, 8, 5)
 
-# Create a TileGrid using the Bitmap and Palette
-tg_plot_grid = displayio.TileGrid(plot_grid, pixel_shader=g_palette)
-tg_plot_grid.x = 39
-tg_plot_grid.y = 30
+# # Create a TileGrid using the Bitmap and Palette
+# tg_plot_grid = displayio.TileGrid(plot_grid, pixel_shader=g_palette)
+# tg_plot_grid.x = 39
+# tg_plot_grid.y = 30
 
-font = terminalio.FONT
-font_w, font_h = font.get_bounding_box()
-### Text here is later changed to the source name
-### TODO - max_glyphs here needs some enforcement
-###        OR could write about that as a bug/risk
-### Magic value of 45 in https://github.com/adafruit/Adafruit_CircuitPython_CLUE/blob/master/adafruit_clue.py#L128
-### 240/45 = 5.333
-### Could set this to max of the the name lengths?
-### Could write about arbtriry text and truncations and ... UI feature
+# font = terminalio.FONT
+# font_w, font_h = font.get_bounding_box()
+# ### Text here is later changed to the source name
+# ### TODO - max_glyphs here needs some enforcement
+# ###        OR could write about that as a bug/risk
+# ### Magic value of 45 in https://github.com/adafruit/Adafruit_CircuitPython_CLUE/blob/master/adafruit_clue.py#L128
+# ### 240/45 = 5.333
+# ### Could set this to max of the the name lengths?
+# ### Could write about arbtriry text and truncations and ... UI feature
 
-def plot_details(title="", ylab=""):
-    source_label.text = title
-    units_label.text = ylab
-    ### center the text
-    units_label.x = max(0, (40 - font_w * len(ylab))) // 2
+# def plot_details(title="", ylab=""):
+    # source_label.text = title
+    # units_label.text = ylab
+    # ### center the text
+    # units_label.x = max(0, (40 - font_w * len(ylab))) // 2
 
-text_colour=0xc0c0c0
-initial_text = "CLUE Plotter"
-max_text_len = max(len(initial_text), max([len(str(so)) for so in sources]))
-source_label = label.Label(font, text=initial_text,
-                           max_glyphs=max_text_len,
-                           scale=2, line_spacing=1, color=text_colour)
-source_label.x = 40
-source_label.y = font_h // 2
+# text_colour=0xc0c0c0
+# initial_text = "CLUE Plotter"
+# max_title_len = max(len(initial_text), max([len(str(so)) for so in sources]))
+# source_label = label.Label(font, text=initial_text,
+                           # max_glyphs=max_title_len,
+                           # scale=2, line_spacing=1, color=text_colour)
+# source_label.x = 40
+# source_label.y = font_h // 2
 
-initial_units=""
-max_text_len = max(len(initial_units), max([len(so.units()) for so in sources]))
-units_label = label.Label(font, text=initial_units,
-                          max_glyphs=max_text_len,
-                          line_spacing=1, color=text_colour)
-units_label.x = 0
-units_label.y = font_h // 2
+# initial_units=""
+# max_text_len = max(len(initial_units), max([len(so.units()) for so in sources]))
+# units_label = label.Label(font, text=initial_units,
+                          # max_glyphs=max_text_len,
+                          # line_spacing=1, color=text_colour)
+# units_label.x = 0
+# units_label.y = font_h // 2
 
-X_DIVS = 4
-Y_DIVS = 4
-plot_labels = []
+# X_DIVS = 4
+# Y_DIVS = 4
+# plot_labels = []
 
-### from top to bottom
-for ydiv in range(Y_DIVS + 1):
-    plot_labels.append(label.Label(font, text="-----",
-                       max_glyphs=5, line_spacing=1, color=text_colour))
-    plot_labels[-1].x = 5
-    plot_labels[-1].y = (ydiv) * 50 + 30 - 1  ### TODO THIS PROPERLY
+# ### from top to bottom
+# for ydiv in range(Y_DIVS + 1):
+    # plot_labels.append(label.Label(font, text="-----",
+                       # max_glyphs=5, line_spacing=1, color=text_colour))
+    # plot_labels[-1].x = 5
+    # plot_labels[-1].y = (ydiv) * 50 + 30 - 1  ### TODO THIS PROPERLY
 
-### This is not needed as Label parent class is Group and scale works
-#g_source = displayio.Group(scale=2, max_size=1)
-#g_source.append(source_label)
+# ### This is not needed as Label parent class is Group and scale works
+# #g_source = displayio.Group(scale=2, max_size=1)
+# #g_source.append(source_label)
 
-g_background = displayio.Group(max_size=3+len(plot_labels))
-g_background.append(tg_plot_grid)
-for label in plot_labels:
-    g_background.append(label)
-g_background.append(units_label)
-g_background.append(source_label)
+# g_background = displayio.Group(max_size=3+len(plot_labels))
+# g_background.append(tg_plot_grid)
+# for label in plot_labels:
+    # g_background.append(label)
+# g_background.append(units_label)
+# g_background.append(source_label)
 
-tg_plot_data = displayio.TileGrid(plots, pixel_shader=plot_palette)
-tg_plot_data.x = 39
-tg_plot_data.y = 30
+# tg_plot_data = displayio.TileGrid(plots, pixel_shader=plot_palette)
+# tg_plot_data.x = 39
+# tg_plot_data.y = 30
 
-# Create a Group
-main_group = displayio.Group(max_size=2)
+# # Create a Group
+# main_group = displayio.Group(max_size=2)
 
-# Add the TileGrid to the Group
-main_group.append(g_background)
-main_group.append(tg_plot_data)
+# # Add the TileGrid to the Group
+# main_group.append(g_background)
+# main_group.append(tg_plot_data)
 
-# Add the Group to the Display
-display.show(main_group)
+# # Add the Group to the Display
+# ### DISABLING for switchover to use of Plotter
+# if False:
+    # display.show(main_group)
 
-GRID_DOT_SPACING = 8
+# GRID_DOT_SPACING = 8
 
-# horizontal lines
-for x in range(0, grid_width, GRID_DOT_SPACING):
-    for y in range(0, grid_height, 50):
-        plot_grid[x, y] = 1  ### TODO - this is green review this
+# # horizontal lines
+# for x in range(0, grid_width, GRID_DOT_SPACING):
+    # for y in range(0, grid_height, 50):
+        # plot_grid[x, y] = 1  ### TODO - this is green review this
 
-# vertical lines
-for x in range(0, grid_width, 50):
-    for y in range(0, grid_height, GRID_DOT_SPACING):
-        plot_grid[x, y] = 1  ### TODO - this is green review this
+# # vertical lines
+# for x in range(0, grid_width, 50):
+    # for y in range(0, grid_height, GRID_DOT_SPACING):
+        # plot_grid[x, y] = 1  ### TODO - this is green review this
 
 # # Draw even more pixels
 # t1 = time.monotonic()
@@ -300,8 +303,7 @@ scale_mode = {"points": "screen",
        
 current_mode = 0
 
-
-display.auto_refresh = True
+## display.auto_refresh = True
 
 def set_grid_labels(p_labels, p_max, p_range):
     for idx, plot_label in enumerate(p_labels):
@@ -332,14 +334,17 @@ def start_source(index=0):
     if debug:
         print("Selecting source:", source_name)
 
-    plot_details(title=source_name, ylab=source.units())
+    ### TODO - work out how to deal with this with new object.
+    ## plot_details(title=source_name, ylab=source.units())
     source.start()
     channels_in_use = source.values()
     
     ### Use any requested colors that are found in palette
     ### otherwise use defaults
     channel_colidx = []
-    palette = list(plot_palette)
+    #palette = list(plot_palette)
+    ### TODO - clean this up structurally
+    palette = plotter.get_colors()
     for idx, col in enumerate(source.colors()):
         try:
             channel_colidx.append(palette.index(col))
@@ -358,179 +363,216 @@ def print_data_rate(source):
         t2 = time.monotonic()
         print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
 
+initial_title = "CLUE Plotter"
+max_title_len = max(len(initial_title), max([len(str(so)) for so in sources]))
+plotter = Plotter(board.DISPLAY,
+                  type="lines", mode="scroll",
+                  title=initial_title,
+                  max_title_len=max_title_len,
+                  debug=debug)
+
+plotter.display_on()
 
 while True:
+    # set the source and start items
     switch_source = False
     (source, channels_in_use, channel_colidx) = start_source(current_source_idx)
 
     if debug >= 5:
         print_data_rate(source)
 
-    plot_initial_min = source.initial_min()
-    plot_max = source.initial_max()
-    plot_range = plot_max - plot_initial_min
-    plot_scale = (plot_height - 1) / plot_range
-    set_grid_labels(plot_labels, plot_max, plot_range)
-
-    MINMAX_HISTORY = 5
-    prior_data_min = [float("inf")] * MINMAX_HISTORY
-    prior_data_max = [float("-inf")] * MINMAX_HISTORY
-    transparent = 0
-    off_scale = False
-    scan = 1
-    mode = modes[current_mode]
-    cbuf_idx = 0
+    # read data
+    all_data = source.data()
+            
+    # store the data
     
-    while True:
-        data_min = [float("inf")] * MAX_CHANNELS
-        data_max = [float("-inf")] * MAX_CHANNELS
-        t1 = time.monotonic()
-        for x in range(plot_width):
-            for ch in range(channels_in_use):
-                if ch == 0:
-                    all_data = source.data()
-                if channels_in_use == 1:
-                    data = all_data
-                else:
-                    data = all_data[ch]
+    # check for button pressesdisplay
+    
+    # display it
+    if channels_in_use == 1:
+        plotter.data_add((all_data,))
+    else:
+        plotter.data_add(all_data)
 
-                print("TODO", "replace this with undraws by drawing transparent line")
-                plots[x, points[ch][x]] = transparent
-
-                data_cbuf[ch][cbuf_idx] = data
-                ypos = round((plot_max - data) * plot_scale)
-                if ypos < 0:
-                    data_max[ch] = data
-                    off_scale = True  ### off the top
-                elif ypos >= plot_height:
-                    data_min[ch] = data
-                    off_scale = True  ### off the bottom
-                else:
-                    points[ch][x] = ypos
-
-                if mode == "points" and not off_scale:
-                    plots[x, ypos] = channel_colidx[ch]
-                elif mode == "lines":
-                    if x == 0:
-                        plots[x, ypos] = channel_colidx[ch]
-                    else:
-                        ### TODO - replace this with line drawing code
-
-                        ### simplified line drawing with just verticals
-                        if ypos == points[ch][x - 1]:
-                            plots[x, ypos] = channel_colidx[ch]
-                        else:
-                            step = 1 if ypos > points[ch][x - 1] else -1
-                            for lypos in range(points[ch][x - 1] + step,
-                                               max(0, min(ypos + step,
-                                                          plot_height - 1)),
-                                               step):
-                                plots[x, lypos] = channel_colidx[ch]
-
-                elif mode == "range":
-                    pass  ### TODO - implement!
-
-                if data < data_min[ch]:
-                    data_min[ch] = data
-                if data > data_max[ch]:
-                    data_max[ch] = data
-
-            if clue.button_a:  ### change plot source
-                ### Wait for release of button
-                while clue.button_a:
-                    pass
-                ### Clear the screen
-                clear_plot_points(plots, points, channels_in_use)
-
-                ### Select the next source
-                current_source_idx = (current_source_idx + 1) % len(sources)
-                switch_source = True
-                break
-
-            if clue.button_b:  ### change plot mode
-                ### Wait for release of button
-                while clue.button_b:
-                    pass
-                current_mode = (current_mode + 1) % len(modes)
-                mode = modes[current_mode]
-
-            cbuf_idx += 1
-
-        t2 = time.monotonic()
-
-        if switch_source:
-            break
-        ### TODO - this needs to take into account min/max from source
-        ### TODO - this needs a lot of refinement and testing
-        ### test with flat line
-        ### TODO - does this need a vertical shift without rescale?
-        new_min = min(data_min)
-        new_max = max(data_max)
-        prior_data_min[scan % MINMAX_HISTORY] = new_min
-        prior_data_max[scan % MINMAX_HISTORY] = new_max
-        hist_min = min(prior_data_min)
-        hist_max = max(prior_data_max)
-        hist_range = hist_max - hist_min
-        if hist_range > 0 and off_scale:
-            print("ZOOM OUT / RECENTRE")
-            ### Add 12.5% on top and bottom
-            plot_max = hist_max + 0.125 * hist_range
-            plot_range = 1.25 * hist_range
-            plot_scale = (plot_height - 1) / plot_range
-            clear_plot_points(plots, points, channels_in_use)
-            set_grid_labels(plot_labels, plot_max, plot_range)
-            off_scale = False
-
-        ### Check to see if we should zoom in
-        elif hist_range > 0 and plot_range * 0.5 > hist_range:
-            print("ZOOM IN")
-            plot_max = hist_max + 0.125 * hist_range
-            plot_range = 1.25 * hist_range
-            plot_scale = (plot_height - 1) / plot_range
-            clear_plot_points(plots, points, channels_in_use)
-            set_grid_labels(plot_labels, plot_max, plot_range)
-
-        t3 = time.monotonic()
-        print("LINEA", t2 - t1, t3 - t2)
-        scan += 1
-
-    source.stop()
-    ### About 0.4s for clue.acceleration[0]
-    ### About 8.4s for temperature !
-    ### About 0.09-0.14 for analogio
+source.stop()
+plotter.display_off()
 
 
-# display.auto_refresh = False
-# for scans in range(20):
-    # t1 = time.monotonic()
-    # for x in range(plot_width):
-        # plots[x, points[0][x]] = 0
-        # #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
-        # #points[0][x] = round((clue.temperature - 20.0) * 15)
-        # #points[0][x] = random.randint(50, 150)
-        # points[0][x] = round(source.data() / 328)
-        # plots[x, points[0][x]] = 1
-    # display.refresh(minimum_frames_per_second=0)
-    # t2 = time.monotonic()
-    # print("LINEM", t2 - t1)
-### About 0.04 for analogio
 
-# display.auto_refresh = False
-# for scans in range(20):
-    # t1 = time.monotonic()
-    # for x in range(plot_width):
-        # plots[x, points[0][x]] = 0
-        # #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
-        # #points[0][x] = round((clue.temperature - 20.0) * 15)
-        # #points[0][x] = random.randint(50, 150)
-        # points[0][x] = round(source.data() / 328)
-        # plots[x, points[0][x]] = 1
-        # if x % 50 == 49:
-            # display.refresh(minimum_frames_per_second=0)
-    # t2 = time.monotonic()
-    # print("LINEM4", t2 - t1)
-### About 0.12-0.15 for analogio
+### OLD CODE BELOW
 
-### TODO REMOVE
-print("sleeping 10 seconds")
-time.sleep(10)
+# while True:
+    # switch_source = False
+    # (source, channels_in_use, channel_colidx) = start_source(current_source_idx)
+
+    # if debug >= 5:
+        # print_data_rate(source)
+
+    # plot_initial_min = source.initial_min()
+    # plot_max = source.initial_max()
+    # plot_range = plot_max - plot_initial_min
+    # plot_scale = (plot_height - 1) / plot_range
+    # set_grid_labels(plot_labels, plot_max, plot_range)
+
+    # MINMAX_HISTORY = 5
+    # prior_data_min = [float("inf")] * MINMAX_HISTORY
+    # prior_data_max = [float("-inf")] * MINMAX_HISTORY
+    # transparent = 0
+    # off_scale = False
+    # scan = 1
+    # mode = modes[current_mode]
+    # cbuf_idx = 0
+
+    # while True:
+        # data_min = [float("inf")] * MAX_CHANNELS
+        # data_max = [float("-inf")] * MAX_CHANNELS
+        # t1 = time.monotonic()
+        # for x in range(plot_width):
+            # for ch in range(channels_in_use):
+                # if ch == 0:
+                    # all_data = source.data()
+                # if channels_in_use == 1:
+                    # data = all_data
+                # else:
+                    # data = all_data[ch]
+
+                # print("TODO", "replace this with undraws by drawing transparent line")
+                # plots[x, points[ch][x]] = transparent
+
+                # data_cbuf[ch][cbuf_idx] = data
+                # ypos = round((plot_max - data) * plot_scale)
+                # if ypos < 0:
+                    # data_max[ch] = data
+                    # off_scale = True  ### off the top
+                # elif ypos >= plot_height:
+                    # data_min[ch] = data
+                    # off_scale = True  ### off the bottom
+                # else:
+                    # points[ch][x] = ypos
+
+                # if mode == "points" and not off_scale:
+                    # plots[x, ypos] = channel_colidx[ch]
+                # elif mode == "lines":
+                    # if x == 0:
+                        # plots[x, ypos] = channel_colidx[ch]
+                    # else:
+                        # ### TODO - replace this with line drawing code
+
+                        # ### simplified line drawing with just verticals
+                        # if ypos == points[ch][x - 1]:
+                            # plots[x, ypos] = channel_colidx[ch]
+                        # else:
+                            # step = 1 if ypos > points[ch][x - 1] else -1
+                            # for lypos in range(points[ch][x - 1] + step,
+                                               # max(0, min(ypos + step,
+                                                          # plot_height - 1)),
+                                               # step):
+                                # plots[x, lypos] = channel_colidx[ch]
+
+                # elif mode == "range":
+                    # pass  ### TODO - implement!
+
+                # if data < data_min[ch]:
+                    # data_min[ch] = data
+                # if data > data_max[ch]:
+                    # data_max[ch] = data
+
+            # if clue.button_a:  ### change plot source
+                # ### Wait for release of button
+                # while clue.button_a:
+                    # pass
+                # ### Clear the screen
+                # clear_plot_points(plots, points, channels_in_use)
+
+                # ### Select the next source
+                # current_source_idx = (current_source_idx + 1) % len(sources)
+                # switch_source = True
+                # break
+
+            # if clue.button_b:  ### change plot mode
+                # ### Wait for release of button
+                # while clue.button_b:
+                    # pass
+                # current_mode = (current_mode + 1) % len(modes)
+                # mode = modes[current_mode]
+
+            # cbuf_idx += 1
+
+        # t2 = time.monotonic()
+
+        # if switch_source:
+            # break
+        # ### TODO - this needs to take into account min/max from source
+        # ### TODO - this needs a lot of refinement and testing
+        # ### test with flat line
+        # ### TODO - does this need a vertical shift without rescale?
+        # new_min = min(data_min)
+        # new_max = max(data_max)
+        # prior_data_min[scan % MINMAX_HISTORY] = new_min
+        # prior_data_max[scan % MINMAX_HISTORY] = new_max
+        # hist_min = min(prior_data_min)
+        # hist_max = max(prior_data_max)
+        # hist_range = hist_max - hist_min
+        # if hist_range > 0 and off_scale:
+            # print("ZOOM OUT / RECENTRE")
+            # ### Add 12.5% on top and bottom
+            # plot_max = hist_max + 0.125 * hist_range
+            # plot_range = 1.25 * hist_range
+            # plot_scale = (plot_height - 1) / plot_range
+            # clear_plot_points(plots, points, channels_in_use)
+            # set_grid_labels(plot_labels, plot_max, plot_range)
+            # off_scale = False
+
+        # ### Check to see if we should zoom in
+        # elif hist_range > 0 and plot_range * 0.5 > hist_range:
+            # print("ZOOM IN")
+            # plot_max = hist_max + 0.125 * hist_range
+            # plot_range = 1.25 * hist_range
+            # plot_scale = (plot_height - 1) / plot_range
+            # clear_plot_points(plots, points, channels_in_use)
+            # set_grid_labels(plot_labels, plot_max, plot_range)
+
+        # t3 = time.monotonic()
+        # print("LINEA", t2 - t1, t3 - t2)
+        # scan += 1
+
+    # source.stop()
+    # ### About 0.4s for clue.acceleration[0]
+    # ### About 8.4s for temperature !
+    # ### About 0.09-0.14 for analogio
+
+
+# # display.auto_refresh = False
+# # for scans in range(20):
+    # # t1 = time.monotonic()
+    # # for x in range(plot_width):
+        # # plots[x, points[0][x]] = 0
+        # # #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
+        # # #points[0][x] = round((clue.temperature - 20.0) * 15)
+        # # #points[0][x] = random.randint(50, 150)
+        # # points[0][x] = round(source.data() / 328)
+        # # plots[x, points[0][x]] = 1
+    # # display.refresh(minimum_frames_per_second=0)
+    # # t2 = time.monotonic()
+    # # print("LINEM", t2 - t1)
+# ### About 0.04 for analogio
+
+# # display.auto_refresh = False
+# # for scans in range(20):
+    # # t1 = time.monotonic()
+    # # for x in range(plot_width):
+        # # plots[x, points[0][x]] = 0
+        # # #points[0][x] = round(clue.acceleration[0] * 6.0) + 100
+        # # #points[0][x] = round((clue.temperature - 20.0) * 15)
+        # # #points[0][x] = random.randint(50, 150)
+        # # points[0][x] = round(source.data() / 328)
+        # # plots[x, points[0][x]] = 1
+        # # if x % 50 == 49:
+            # # display.refresh(minimum_frames_per_second=0)
+    # # t2 = time.monotonic()
+    # # print("LINEM4", t2 - t1)
+# ### About 0.12-0.15 for analogio
+
+# ### TODO REMOVE
+# print("sleeping 10 seconds")
+# time.sleep(10)
