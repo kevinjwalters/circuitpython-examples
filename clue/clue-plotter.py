@@ -55,6 +55,14 @@ from adafruit_clue import clue
 
 debug = 4
 
+### TODO - work out how/if to use this in libraries
+def d_print(level, *args, **kwargs):
+    """A simple conditional print for debugging based on global debug level."""
+    if not isinstance(level, int):
+        print(level, *args, **kwargs)
+    elif debug >= level:
+        print(*args, **kwargs)
+
 # remember this was a p3.reference_voltage which is 3.3
 # p3 = analogio.AnalogIn(board.P3)
 
@@ -96,13 +104,13 @@ debug = 4
 
 
 ### TODO - got to solve the issue of reusing pins
-### group by sensor?
+### group by sensor or leave this as an enhancement?
 sources = [#PinPlotSource(board.P0),
            #PinPlotSource(board.P1),
            #PinPlotSource(board.P2),
            TemperaturePlotSource(clue, type="Celsius"),
            TemperaturePlotSource(clue, type="Fahrenheit"),
-           PressurePlotSource(clue),
+           PressurePlotSource(clue, type="Metric"),
            PressurePlotSource(clue, type="Imperial"),
            HumidityPlotSource(clue),
            ColorPlotSource(clue),
@@ -271,60 +279,24 @@ current_source_idx = 0
 
 print("DONT FORGET pylint")
 
-MAX_CHANNELS = 3
-plot_width = 200
-points = [array.array('B', [0] * plot_width),
-          array.array('B', [0] * plot_width),
-          array.array('B', [0] * plot_width)]
+# MAX_CHANNELS = 3
+# plot_width = 200
+# points = [array.array('B', [0] * plot_width),
+          # array.array('B', [0] * plot_width),
+          # array.array('B', [0] * plot_width)]
 
-data_cbuf = [array.array('f', [0] * plot_width),
-             array.array('f', [0] * plot_width),
-             array.array('f', [0] * plot_width)]
+# data_cbuf = [array.array('f', [0] * plot_width),
+             # array.array('f', [0] * plot_width),
+             # array.array('f', [0] * plot_width)]
 
+typemodes = (("lines", "scroll"),   # draws lines between points
+             ("lines", "wrap"),
+             ("dots", "scroll"),    # just points - slightly quicker
+             ("dots", "wrap"),
+             ("heatmap", "scroll"), # collects data for 1 second and displays min/avg/max
+             ("heatmap", "wrap"))
 
-### TODO - looking to use button_b to select different plot modes
-### TODO - look at scrolling like Arcada one does
-modes = ("points",   # draws lines between points
-         "lines",  # just points - slightly quicker
-         "range",   # collects data for 1 second and displays min/avg/max
-         "points scroll",
-         "lines scroll",
-         "range scroll",
-       )
-
-### Not sure if I'll use this or not ...
-scale_mode = {"points": "screen",
-              "lines": "column",
-              "range": "column",
-              "points scroll": "column",
-              "lines scroll": "column",
-              "range scroll": "column"}
-       
-       
-current_mode = 0
-
-## display.auto_refresh = True
-
-def set_grid_labels(p_labels, p_max, p_range):
-    for idx, plot_label in enumerate(p_labels):
-        value = p_max - idx * p_range / Y_DIVS
-        ### Simple attempt to generate a value within 5 characters
-        ### Bad things happen with values > 99999 or < -9999
-        if value <= -10.0:
-            text_value = "{:.2f}".format(value)[0:5]
-        elif value < 0.0:
-            text_value = "{:.2f}".format(value)
-        elif value >= 10.0:
-            text_value = "{:.3f}".format(value)[0:5]
-        else:
-            text_value = "{:.3f}".format(value)   ### 0.0 to 9.99999
-        plot_label.text = text_value
-
-
-def clear_plot_points(plts, pnts, channs):
-    for x in range(len(pnts[0])):
-        for ch in range(channs):
-            plts[x, pnts[ch][x]] = transparent
+current_tm_idx = 0
 
 
 def ready_plot_source(plttr, srcs, index=0):
@@ -334,6 +306,7 @@ def ready_plot_source(plttr, srcs, index=0):
     if debug:
         print("Selecting source:", source_name)
 
+    plttr.clear_data()
     plttr.title = source_name
     plttr.y_axis_lab = source.units()
     plttr.y_range = (source.initial_min(), source.initial_max())
@@ -363,12 +336,22 @@ def print_data_rate(source):
         t2 = time.monotonic()
         print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
 
+def wait_for_release(func):
+   t1 = time.monotonic()
+   while func():
+       pass
+   return (time.monotonic() - t1)
+
+
 MU_PLOTTER_OUTPUT = True
+
+
 
 initial_title = "CLUE Plotter"
 max_title_len = max(len(initial_title), max([len(str(so)) for so in sources]))
 plotter = Plotter(board.DISPLAY,
-                  type="lines", mode="scroll",
+                  type=typemodes[current_tm_idx][0],
+                  mode=typemodes[current_tm_idx][1],
                   title=initial_title,
                   max_title_len=max_title_len,
                   mu_output=MU_PLOTTER_OUTPUT,
@@ -378,7 +361,7 @@ plotter.display_on()
 
 while True:
     # set the source and start items
-    switch_source = False
+    ##switch_source = False
     (source, channels) = ready_plot_source(plotter, sources, current_source_idx)
 
     if debug >= 5:
@@ -390,8 +373,19 @@ while True:
             
         # store the data
     
-        # check for button pressesdisplay
-    
+        # check for button presses
+        if clue.button_a:  # change plot source
+            release_time = wait_for_release(lambda: clue.button_a)
+            current_source_idx = (current_source_idx + 1) % len(sources)
+            ##switch_source = True
+            break
+
+        if clue.button_b:  # change plot type and mode
+            release_time = wait_for_release(lambda: clue.button_b)
+            current_tm_idx = (current_tm_idx + 1) % len(typemodes)
+            d_print(1, "Graph change", typemodes[current_tm_idx])
+            plotter.change_typemode(*typemodes[current_tm_idx])
+
         # display it
         if channels == 1:
             plotter.data_add((all_data,))

@@ -57,7 +57,7 @@ def mapf(value, in_min, in_max, out_min, out_max):
     return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 
 
-# This creates ('{.0f}', '{.1f}', '{.2f}', etc
+# This creates ('{:.0f}', '{:.1f}', '{:.2f}', etc
 _FMT_DEC_PLACES = tuple("{:." + str(x) + "f}" for x in range(10))
 
 def format_width(nchars, value):
@@ -82,9 +82,10 @@ def format_width(nchars, value):
 class Plotter():
     _DEFAULT_SCALE_MODE = {"lines": "pixel",
                            "dots": "screen",
-                           "minavgmax": "pixel"}
-    
+                           "heatmap": "pixel"}
+
     # Palette for plotting, first one is set transparent
+    TRANSPARENT_IDX = 0
     PLOT_COLORS = [0x000000,
                    0x0000ff,
                    0x00ff00,
@@ -99,17 +100,24 @@ class Plotter():
     NEG_INF = float("-inf")
 
     def _display_manual(self):
-        self._output.auto_refresh = False
-
+        # TODO re-enable self._output.auto_refresh = False
+        # _display_refresh doesn't seem to work possibly if called very freq.
+        self._output.auto_refresh = True
+        
     def _display_auto(self):
         self._output.auto_refresh = True
 
     def _display_refresh(self):
-        self._output.refresh(minimum_frames_per_second=0)
+        if self._debug >= 5:
+            t1 = time.monotonic()
+            self._output.refresh(minimum_frames_per_second=0)
+            print("Manual screen refresh time", time.monotonic() - t1)
+        else:
+            self._output.refresh(minimum_frames_per_second=0)
 
     def __init__(self, output,
                  type="lines", mode="scroll", scale_mode=None,
-                 width=240, height=240,
+                 screen_width=240, screen_height=240,
                  plot_width=200, plot_height=201,
                  x_divs=4, y_divs=4,
                  max_channels=3,
@@ -119,9 +127,9 @@ class Plotter():
                  mu_output=False,
                  debug=0):
         self._output = output
-        self.change_mode(type, mode, scale_mode=scale_mode)
-        self._width = width
-        self._height = height
+        self.change_typemode(type, mode, scale_mode=scale_mode)
+        self._screen_width = screen_width
+        self._screen_height = screen_height
         self._plot_width = plot_width
         self._plot_height = plot_height
         self._x_divs = x_divs
@@ -143,7 +151,7 @@ class Plotter():
         # The range the data source generates within
         self._abs_min = None
         self._abs_max = None
-        
+
         # The current plot min/max
         self._plot_min = None
         self._plot_max = None
@@ -166,7 +174,7 @@ class Plotter():
         # Allocate arrays for each possible channel with plot_width elements
         self._data_min = None
         self._data_max = None
-        
+
         self._data_y_pos = []
         self._data_value = []
         for _ in range(self._max_channels):
@@ -179,67 +187,82 @@ class Plotter():
 
         self._values = 0
         self._x_pos = 0
-        self.data_idx = 0
+        self._data_idx = 0
+        self._lastcolumn = False
+        
+        # This is created to facilitate fast clear of the plot Bitmap
+        #self._transparent_array = array.array('B')
+        #self._row_of_zeros = array.array('B', [0] * self._plot_width)
+        #for row in range(self._plot_height):
+        #    self._transparent_array.extend(row_of_zeros)
 
     # Simple implementation here is to clear the screen on change...
-    def change_mode(self, type, mode, scale_mode=None):
+    def change_typemode(self, type, mode, scale_mode=None):
         if type not in ("lines", "dots", "heatmap"):
             raise ValueError("type not lines or dots")
         self._type = type
+
         if mode not in ("scroll", "wrap"):
             raise ValueError("mode not scroll or wrap")
         self._mode = mode
+
         if scale_mode is None:
             scale_mode = self._DEFAULT_SCALE_MODE[type]
         elif scale_mode not in ("pixel", "screen", "time"):
             raise ValueError("scale_mode not pixel, screen or time")
         self._scale_mode = scale_mode
 
-        if self._mode == "scroll":
+        if self._mode == "wrap":
             self._display_auto()
-        elif self_mode == "pixel":
+        elif self._mode == "scroll":
             self._display_manual()
 
+    def _make_empty_tg_plot_bitmap(self):
+        plot_bitmap = displayio.Bitmap(self._plot_width, self._plot_height, 9)
+        # Create a colour palette for plot dots/lines
+        plot_palette = displayio.Palette(9)
+
+        for idx in range(len(self.PLOT_COLORS)):
+            plot_palette[idx] = self.PLOT_COLORS[idx]
+        plot_palette.make_transparent(0)
+        tg_plot_data = displayio.TileGrid(plot_bitmap,
+                                          pixel_shader=plot_palette)
+        tg_plot_data.x = 39
+        tg_plot_data.y = 30
+        return (tg_plot_data, plot_bitmap)
+        
     def _make_empty_graph(self):
         ### TODO - cut size down here
         ### perhaps make grid in another method?
         grid_width  = self._plot_width + 1
         grid_height = self._plot_height
-        plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
+        #plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
         
         GRID_DOT_SPACING = 8  ### TODO - move this.
 
         # horizontal lines
-        for x in range(0, grid_width, GRID_DOT_SPACING):
-            for y in range(0, grid_height, 50):   ### TODO calc these 50 values or this range
-                plot_grid[x, y] = 1
+        #for x in range(0, grid_width, GRID_DOT_SPACING):
+        #    for y in range(0, grid_height, 50):   ### TODO calc these 50 values or this range
+        #        plot_grid[x, y] = 1
 
         # vertical lines
-        for x in range(0, grid_width, 50):
-            for y in range(0, grid_height, GRID_DOT_SPACING):
-                plot_grid[x, y] = 1
+        #for x in range(0, grid_width, 50):
+        #    for y in range(0, grid_height, GRID_DOT_SPACING):
+        #        plot_grid[x, y] = 1
 
         # grid colours
-        grid_palette = displayio.Palette(2)
-        grid_palette.make_transparent(0)
-        grid_palette[0] = 0x000000
-        grid_palette[1] = 0x308030
-
-        self._displayio_plot = displayio.Bitmap(self._plot_width, self._plot_height, 8)
-        # Create a colour palette for plot dots/lines
-        plot_palette = displayio.Palette(9)
-
-        for idx in range(len(self.PLOT_COLORS)):
-           plot_palette[idx] = self.PLOT_COLORS[idx]
-        plot_palette.make_transparent(0)
+        #grid_palette = displayio.Palette(2)
+        #grid_palette.make_transparent(0)
+        #grid_palette[0] = 0x000000
+        #grid_palette[1] = 0x308030
 
         # consider enlarging this for different intensities of the channel plots
 
         # Create a TileGrid using the Bitmap and Palette
-        tg_plot_grid = displayio.TileGrid(plot_grid,
-                                          pixel_shader=grid_palette)
-        tg_plot_grid.x = 39
-        tg_plot_grid.y = 30
+        #tg_plot_grid = displayio.TileGrid(plot_grid,
+        #                                  pixel_shader=grid_palette)
+        #tg_plot_grid.x = 39
+        #tg_plot_grid.y = 30
 
         font_w, font_h = self._font.get_bounding_box()
 
@@ -275,23 +298,22 @@ class Plotter():
 
         # three items (grid, axis label, title) plus the y tick labels
         g_background = displayio.Group(max_size=3+len(plot_y_labels))
-        g_background.append(tg_plot_grid)
+        #temp# g_background.append(tg_plot_grid)
         for label in self._displayio_y_labs:
             g_background.append(label)
         g_background.append(self._displayio_y_axis_lab)
         g_background.append(self._displayio_title)
 
-        tg_plot_data = displayio.TileGrid(self._displayio_plot,
-                                          pixel_shader=plot_palette)
-        tg_plot_data.x = 39
-        tg_plot_data.y = 30
+        (tg_plot, plot) = self._make_empty_tg_plot_bitmap()
+
+        self._displayio_plot = plot
 
         # Create a Group
         main_group = displayio.Group(max_size=2)
 
         # Add the TileGrid to the Group
         main_group.append(g_background)
-        main_group.append(tg_plot_data)
+        main_group.append(tg_plot)
         return main_group
 
     def set_y_axis_tick_labels(self, y_min, y_max):
@@ -310,24 +332,140 @@ class Plotter():
     def display_off(self):
         pass
 
+    def _draw_vline(self, x1, y1, y2, colidx):
+        """Draw a vertical line at x1 from pixel one along from y1 to y2.
+           This currently clips at one end - TODO REVIEW!!!!"""
+        if y2 == y1:
+            self._displayio_plot[x1, y2] = colidx
+            return
+            
+        if y2 > y1:
+            step = 1
+        else:
+            step = -1
+        for line_y_pos in range(y1 + step,
+                                max(0, min(y2 + step,
+                                           self._plot_height - 1)),
+                                step):
+            self._displayio_plot[x1, line_y_pos] = colidx
+
+    def _clear_plot_bitmap(self):
+        t1=time.monotonic()
+        # This approach gave
+        # "MemoryError: memory allocation failed, allocating 20100 bytes"
+        #(tg_plot, plot) = self._make_empty_tg_plot_bitmap()
+        #self._displayio_plot = plot
+        #self._displayio_graph[1] = tg_plot
+        
+        #self._displayio_plot[:] = self._transparent_array
+        
+        # Probably a bit quicker to do 
+        # for val in self._displayio_plot: val=0
+        offset = 0
+        for yy in range(self._plot_height):
+            for xx in range(self._plot_width):
+                self._displayio_plot[xx, yy] = self.TRANSPARENT_IDX
+
+        if self._debug >= 4:
+            print("Clear plot bitmap", time.monotonic() - t1)
+
+    # This is almost always going to be quicker
+    # than the slow _clear_plot_bitmap
+    def _undraw_bitmap(self):
+        if self._values < self._plot_width:
+            data_idx = 0
+        else:
+            data_idx = self._data_idx
+
+        for ch_idx in range(self._channels):
+            colidx = self.TRANSPARENT_IDX
+            for x_pos in range(min(self._plot_width, self._values)):
+                y_pos = self._data_y_pos[ch_idx][data_idx]
+                if self._type == "lines" and x_pos != 0:
+                    # Python supports negative array index
+                    prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
+                    self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
+                else:
+                    self._displayio_plot[x_pos, y_pos] = colidx
+                data_idx += 1
+                if data_idx >= self._plot_width:
+                    data_idx = 0
+
+    def _undraw_column(self, x_pos, data_idx):
+        for ch_idx in range(self._channels):
+            y_pos = self._data_y_pos[ch_idx][data_idx]
+            if self._type == "lines" and x_pos != 0:
+                # Python supports negative array index
+                prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
+                self._draw_vline(x_pos, prev_y_pos, y_pos,
+                                 self.TRANSPARENT_IDX)
+            else:
+                self._displayio_plot[x_pos, y_pos] = self.TRANSPARENT_IDX   
+
+    # TODO - very similar code to _undraw_bitmap ...
+    def _data_redraw(self, x1, x2, data_idx):
+        """Redraw data from x1 to x2 inclusive."""
+        for ch_idx in range(self._channels):
+            colidx = self._channel_colidx[ch_idx]
+            for x_pos in range(x1, x2 + 1):
+                y_pos = self._data_y_pos[ch_idx][data_idx]
+                if self._type == "lines" and x_pos != 0:
+                    # Python supports negative array index
+                    prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
+                    self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)                                     
+                else:
+                    self._displayio_plot[x_pos, y_pos] = colidx
+                data_idx += 1
+                if data_idx >= self._plot_width:
+                    data_idx = 0
+
     def data_add(self, values):
-        for idx, value in enumerate(values):
-            x_pos = self._x_pos
-            self._data_value[idx][x_pos] = value
+        x_pos = self._x_pos
+        data_idx = self._data_idx
+        
+        if self._lastcolumn and self._mode == "scroll":
+            # Clear and redraw the bitmap to scroll it leftward
+            #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
+            self._undraw_bitmap()
+            self._data_redraw(0, self._plot_width - 2,
+                              (data_idx + 1) % self._plot_width)
+            
+        if self._values >= self._plot_width and self._mode == "wrap":
+            self._undraw_column(x_pos, data_idx)
+
+        ##TODO REMOVE print("XD", x_pos, data_idx)
+        for ch_idx, value in enumerate(values):    
+            self._data_value[ch_idx][data_idx] = value
+            # last two parameters appear "swapped" - this deals with the
+            # displayio screen y coordinate increasing downwards
             y_pos = round(mapf(value,
                                self._plot_min, self._plot_max,
-                               0, self._plot_height - 1))
-            self._data_y_pos[idx][x_pos] = y_pos
+                               self._plot_height - 1, 0)) 
+            self._data_y_pos[ch_idx][data_idx] = y_pos
 
-            # TEMP PLOT - TODO REPLACE with line one
-            self._displayio_plot[x_pos, y_pos] = self._channel_colidx[idx]
+            # TODO - clipping / rescaling
+            if self._type == "lines" and self._values != 0:
+                # Python supports negative array index
+                prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
+                self._draw_vline(x_pos, prev_y_pos, y_pos,
+                                 self._channel_colidx[ch_idx])
+            else:
+                self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
 
+        # increment the data index wrapping around
+        self._data_idx += 1
+        if self._data_idx >= self._plot_width:
+            self._data_idx = 0
+
+        # increment x position dealing with wrap/scroll
         new_x_pos = self._x_pos + 1
         if new_x_pos >= self._plot_width:
-            # fallen off so wrap or leave position
+            # fallen off edge so wrap or leave position
             # on last column for scroll
             if self._mode == "wrap":
                 self._x_pos = 0
+            else:
+                self._lastcolumn = True
         else:
             self._x_pos = new_x_pos
 
@@ -335,6 +473,8 @@ class Plotter():
 
         if self._mu_output:
             print(values)
+
+        # scrolling mode has automatic refresh in background turned off
         if self._mode == "scroll":
             self._display_refresh()
 
