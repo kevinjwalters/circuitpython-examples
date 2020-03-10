@@ -102,30 +102,52 @@ class Plotter():
     def _display_manual(self):
         # TODO re-enable self._output.auto_refresh = False
         # _display_refresh doesn't seem to work possibly if called very freq.
-        self._output.auto_refresh = True
+        # Trying False again - simple test of Label/Bitmap shows this is ok... odd...
+        #self._output.auto_refresh = False
         
+        # DISABLING manual for now by not setting this to False
+        self._output.auto_refresh = True
+
     def _display_auto(self):
         self._output.auto_refresh = True
 
     def _display_refresh(self):
+        return True
+        # This is a hack to work around how refresh() works
+        # as it is designed for constant frame rate updates and
+        # blocks accordingly based on duration of a frame
+        # there's currently no simple "refresh now"
+        # HACK needs more research 
+        if self._last_manual_refresh is not None:
+            # using int() to round down
+            tfps = int(1000.0 / (time.monotonic() - self._last_manual_refresh))
+        else:
+            tfps = 60
         if self._debug >= 5:
             t1 = time.monotonic()
-            self._output.refresh(minimum_frames_per_second=0)
-            print("Manual screen refresh time", time.monotonic() - t1)
+            updated = self._output.refresh(target_frames_per_second=tfps,
+                                           minimum_frames_per_second=0)
+            print("Manual screen refresh time", time.monotonic() - t1, updated)
         else:
-            self._output.refresh(minimum_frames_per_second=0)
+            updated = self._output.refresh(target_frames_per_second=tfps,
+                                           minimum_frames_per_second=0)
+        if updated:
+            self._last_manual_refresh = time.monotonic() # Perhaps this should be pre-refresh
+        return updated
 
     def __init__(self, output,
                  type="lines", mode="scroll", scale_mode=None,
                  screen_width=240, screen_height=240,
                  plot_width=200, plot_height=201,
                  x_divs=4, y_divs=4,
+                 scroll_px=25,
                  max_channels=3,
                  est_rate=50,
                  title="CLUE Plotter",
                  max_title_len=20,
                  mu_output=False,
                  debug=0):
+        """scroll_px of greater than 1 gives a jump scroll."""
         self._output = output
         self.change_typemode(type, mode, scale_mode=scale_mode)
         self._screen_width = screen_width
@@ -134,6 +156,7 @@ class Plotter():
         self._plot_height = plot_height
         self._x_divs = x_divs
         self._y_divs = y_divs
+        self._scroll_px = scroll_px
         self._max_channels = max_channels
         self._est_rate = est_rate
         self._title = title
@@ -166,6 +189,7 @@ class Plotter():
         self._displayio_title = None
         self._displayio_y_labs = None
         self._displayio_y_axis_lab = None
+        self._last_manual_refresh = None 
 
     def get_colors(self):
         return self.PLOT_COLORS
@@ -420,16 +444,19 @@ class Plotter():
                     data_idx = 0
 
     def data_add(self, values):
-        x_pos = self._x_pos
         data_idx = self._data_idx
-        
+
         if self._lastcolumn and self._mode == "scroll":
             # Clear and redraw the bitmap to scroll it leftward
             #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
             self._undraw_bitmap()
-            self._data_redraw(0, self._plot_width - 2,
-                              (data_idx + 1) % self._plot_width)
-            
+            self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
+                              (data_idx + self._scroll_px) % self._plot_width)
+            self._x_pos = self._plot_width - self._scroll_px
+            self._lastcolumn = False
+
+        x_pos = self._x_pos
+
         if self._values >= self._plot_width and self._mode == "wrap":
             self._undraw_column(x_pos, data_idx)
 
@@ -465,6 +492,7 @@ class Plotter():
             if self._mode == "wrap":
                 self._x_pos = 0
             else:
+                self._x_pos = new_x_pos  # this is off screen
                 self._lastcolumn = True
         else:
             self._x_pos = new_x_pos
