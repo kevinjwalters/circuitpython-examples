@@ -306,7 +306,7 @@ def ready_plot_source(plttr, srcs, index=0):
     if debug:
         print("Selecting source:", source_name)
 
-    plttr.clear_data()
+    plttr.clear_all()
     plttr.title = source_name
     plttr.y_axis_lab = source.units()
     plttr.y_range = (source.initial_min(), source.initial_max())

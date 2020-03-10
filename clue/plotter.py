@@ -149,7 +149,7 @@ class Plotter():
                  debug=0):
         """scroll_px of greater than 1 gives a jump scroll."""
         self._output = output
-        self.change_typemode(type, mode, scale_mode=scale_mode)
+        self.change_typemode(type, mode, scale_mode=scale_mode, clear=False)
         self._screen_width = screen_width
         self._screen_height = screen_height
         self._plot_width = plot_width
@@ -194,6 +194,11 @@ class Plotter():
     def get_colors(self):
         return self.PLOT_COLORS
 
+    def clear_all(self):
+        if self._values != 0:
+            self._undraw_bitmap()
+        self.clear_data()
+
     def clear_data(self):
         # Allocate arrays for each possible channel with plot_width elements
         self._data_min = None
@@ -221,7 +226,7 @@ class Plotter():
         #    self._transparent_array.extend(row_of_zeros)
 
     # Simple implementation here is to clear the screen on change...
-    def change_typemode(self, type, mode, scale_mode=None):
+    def change_typemode(self, type, mode, scale_mode=None, clear=True):
         if type not in ("lines", "dots", "heatmap"):
             raise ValueError("type not lines or dots")
         self._type = type
@@ -235,6 +240,11 @@ class Plotter():
         elif scale_mode not in ("pixel", "screen", "time"):
             raise ValueError("scale_mode not pixel, screen or time")
         self._scale_mode = scale_mode
+
+        # Clearing everything on screen and stored in variables
+        # is simplest approach here
+        if clear:
+            self.clear_all()
 
         if self._mode == "wrap":
             self._display_auto()
