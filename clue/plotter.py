@@ -154,6 +154,7 @@ class Plotter():
         self._screen_height = screen_height
         self._plot_width = plot_width
         self._plot_height = plot_height
+        self._plot_height_m1 = plot_height - 1
         self._x_divs = x_divs
         self._y_divs = y_divs
         self._scroll_px = scroll_px
@@ -178,6 +179,7 @@ class Plotter():
         # The current plot min/max
         self._plot_min = None
         self._plot_max = None
+        self._plot_offscale = False
 
         self._font = terminalio.FONT
         self._y_axis_lab = ""
@@ -201,14 +203,14 @@ class Plotter():
 
     def clear_data(self):
         # Allocate arrays for each possible channel with plot_width elements
-        self._data_min = None
-        self._data_max = None
+        self._data_min = self.POS_INF
+        self._data_max = self.NEG_INF
 
         self._data_y_pos = []
         self._data_value = []
         for _ in range(self._max_channels):
-            # 'B' allows 0-255 which is ok for CLUE ...
-            self._data_y_pos.append(array.array('B', [0] * self._plot_width))
+            # 'i' is 32 bit signed integer
+            self._data_y_pos.append(array.array('i', [0] * self._plot_width))
             self._data_value.append(array.array('f', [0.0] * self._plot_width))
 
         # When in use the arrays in here are variable length
@@ -218,7 +220,8 @@ class Plotter():
         self._x_pos = 0
         self._data_idx = 0
         self._lastcolumn = False
-        
+        self._plot_offscale = False
+
         # This is created to facilitate fast clear of the plot Bitmap
         #self._transparent_array = array.array('B')
         #self._row_of_zeros = array.array('B', [0] * self._plot_width)
@@ -367,24 +370,25 @@ class Plotter():
         pass
 
     def _draw_vline(self, x1, y1, y2, colidx):
-        """Draw a vertical line at x1 from pixel one along from y1 to y2.
-           This currently clips at one end - TODO REVIEW!!!!"""
+        """Draw a clipped vertical line at x1 from pixel one along from y1 to y2.
+           """
+        # Same vertical position as previous point
         if y2 == y1:
-            self._displayio_plot[x1, y2] = colidx
+            if (y2 >= 0 and y2 <= self._plot_height_m1):
+                self._displayio_plot[x1, y2] = colidx
             return
-            
+
         if y2 > y1:
-            step = 1
+            step = 1  # y2 above y1, on screen this translates to being below
         else:
             step = -1
-        for line_y_pos in range(y1 + step,
-                                max(0, min(y2 + step,
-                                           self._plot_height - 1)),
+        for line_y_pos in range(max(0, min(y1 + step, self._plot_height_m1)),
+                                max(0, min(y2, self._plot_height_m1)) + step,
                                 step):
             self._displayio_plot[x1, line_y_pos] = colidx
 
     def _clear_plot_bitmap(self):
-        t1=time.monotonic()
+        t1 = time.monotonic()
         # This approach gave
         # "MemoryError: memory allocation failed, allocating 20100 bytes"
         #(tg_plot, plot) = self._make_empty_tg_plot_bitmap()
@@ -420,7 +424,8 @@ class Plotter():
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
                 else:
-                    self._displayio_plot[x_pos, y_pos] = colidx
+                    if y_pos >= 0 and y_pos <= self._plot_height_m1:
+                        self._displayio_plot[x_pos, y_pos] = colidx
                 data_idx += 1
                 if data_idx >= self._plot_width:
                     data_idx = 0
@@ -434,7 +439,8 @@ class Plotter():
                 self._draw_vline(x_pos, prev_y_pos, y_pos,
                                  self.TRANSPARENT_IDX)
             else:
-                self._displayio_plot[x_pos, y_pos] = self.TRANSPARENT_IDX   
+                if y_pos >= 0 and y_pos <= self._plot_height_m1:
+                    self._displayio_plot[x_pos, y_pos] = self.TRANSPARENT_IDX   
 
     # TODO - very similar code to _undraw_bitmap ...
     def _data_redraw(self, x1, x2, data_idx):
@@ -448,7 +454,8 @@ class Plotter():
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)                                     
                 else:
-                    self._displayio_plot[x_pos, y_pos] = colidx
+                    if y_pos >= 0 and y_pos <= self._plot_height_m1:
+                        self._displayio_plot[x_pos, y_pos] = colidx
                 data_idx += 1
                 if data_idx >= self._plot_width:
                     data_idx = 0
@@ -472,12 +479,24 @@ class Plotter():
 
         ##TODO REMOVE print("XD", x_pos, data_idx)
         for ch_idx, value in enumerate(values):    
+            onscale = True
+            # store value and update min/max as required
             self._data_value[ch_idx][data_idx] = value
+            if value < self._data_min:
+                self._data_min = value
+            if value > self._data_max:
+                self._data_max = value
+
             # last two parameters appear "swapped" - this deals with the
             # displayio screen y coordinate increasing downwards
             y_pos = round(mapf(value,
                                self._plot_min, self._plot_max,
-                               self._plot_height - 1, 0)) 
+                               self._plot_height_m1, 0))
+            
+            if y_pos < 0 or y_pos >= self._plot_height:
+                onscale = False
+                self._plot_offscale = True
+                
             self._data_y_pos[ch_idx][data_idx] = y_pos
 
             # TODO - clipping / rescaling
@@ -487,7 +506,8 @@ class Plotter():
                 self._draw_vline(x_pos, prev_y_pos, y_pos,
                                  self._channel_colidx[ch_idx])
             else:
-                self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
+                if onscale:
+                    self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
 
         # increment the data index wrapping around
         self._data_idx += 1
