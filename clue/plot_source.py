@@ -257,7 +257,7 @@ class IlluminatedColorPlotSource(PlotSource):
         self._channel = col_fl_lc
         super().__init__(1, "Ilum. color: " + self._channel.upper(),
                          min=0, max=8000,
-                         initial_min=100, initial_max=700,
+                         initial_min=0, initial_max=2000,
                          colors=(plot_colour,),
                          rate=50)
 

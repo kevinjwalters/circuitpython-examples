@@ -80,7 +80,7 @@ def format_width(nchars, value):
 
 
 class Plotter():
-    _DEFAULT_SCALE_MODE = {"lines": "pixel",
+    _DEFAULT_SCALE_MODE = {"lines": "scroll",
                            "dots": "screen",
                            "heatmap": "pixel"}
 
@@ -460,26 +460,10 @@ class Plotter():
                 if data_idx >= self._plot_width:
                     data_idx = 0
 
-    def data_add(self, values):
-        data_idx = self._data_idx
-
-        if self._lastcolumn and self._mode == "scroll":
-            # Clear and redraw the bitmap to scroll it leftward
-            #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
-            self._undraw_bitmap()
-            self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
-                              (data_idx + self._scroll_px) % self._plot_width)
-            self._x_pos = self._plot_width - self._scroll_px
-            self._lastcolumn = False
-
-        x_pos = self._x_pos
-
-        if self._values >= self._plot_width and self._mode == "wrap":
-            self._undraw_column(x_pos, data_idx)
-
-        ##TODO REMOVE print("XD", x_pos, data_idx)
+    def _data_store_draw(self, values, x_pos, data_idx):
+        offscale = False
+        rescale_not_needed = True
         for ch_idx, value in enumerate(values):    
-            onscale = True
             # store value and update min/max as required
             self._data_value[ch_idx][data_idx] = value
             if value < self._data_min:
@@ -494,20 +478,65 @@ class Plotter():
                                self._plot_height_m1, 0))
             
             if y_pos < 0 or y_pos >= self._plot_height:
-                onscale = False
-                self._plot_offscale = True
+                offscale = True
+                self._plot_offscale = offscale
+                if self._scale_mode == "pixel":
+                    rescale_not_needed = False
                 
-            self._data_y_pos[ch_idx][data_idx] = y_pos
+            if rescale_not_needed:
+                self._data_y_pos[ch_idx][data_idx] = y_pos
 
-            # TODO - clipping / rescaling
-            if self._type == "lines" and self._values != 0:
-                # Python supports negative array index
-                prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
-                self._draw_vline(x_pos, prev_y_pos, y_pos,
-                                 self._channel_colidx[ch_idx])
-            else:
-                if onscale:
-                    self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
+                if self._type == "lines" and self._values != 0:
+                    # Python supports negative array index
+                    prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
+                    self._draw_vline(x_pos, prev_y_pos, y_pos,
+                                     self._channel_colidx[ch_idx])
+                else:
+                    if not offscale:
+                        self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
+
+            return rescale_not_needed
+
+    def _auto_plot_range(self):
+        changed = False
+        range = self._data_max - self._data_min
+        headroom = range * 0.2
+        new_plot_min = max(self._data_min - headroom, self._abs_min)
+        new_plot_max = min(self._data_max + headroom, self._abs_max)
+
+        # set new range which will also redo y tick labels if necessary
+        self.y_range = (new_plot_min, new_plot_max)
+        self._offscale = False
+
+    def data_add(self, values):
+        data_idx = self._data_idx
+
+        ### TODO - ponder this
+        ###        as it will not catch the first reading being off scale
+        if self._x_pos == 0 and self._mode == "wrap" and self._plot_offscale:
+            self._auto_plot_range()
+
+        if self._lastcolumn and self._mode == "scroll":
+            # Clear and redraw the bitmap to scroll it leftward
+            #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
+            self._undraw_bitmap()
+            if self._plot_offscale:
+                self._auto_plot_range()
+            self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
+                              (data_idx + self._scroll_px) % self._plot_width)
+            self._x_pos = self._plot_width - self._scroll_px
+            self._lastcolumn = False
+
+        x_pos = self._x_pos
+
+        if self._values >= self._plot_width and self._mode == "wrap":
+            self._undraw_column(x_pos, data_idx)
+
+        # add the data and draw it unless a y axis is going to be rescaled
+        if not self._data_store_draw(values, x_pos, data_idx):
+            self._auto_plot_range()        # rescale y range
+            # draw with new range
+            self._data_store_draw(values, x_pos, data_idx)
 
         # increment the data index wrapping around
         self._data_idx += 1
@@ -515,7 +544,7 @@ class Plotter():
             self._data_idx = 0
 
         # increment x position dealing with wrap/scroll
-        new_x_pos = self._x_pos + 1
+        new_x_pos = x_pos + 1
         if new_x_pos >= self._plot_width:
             # fallen off edge so wrap or leave position
             # on last column for scroll
@@ -571,6 +600,15 @@ class Plotter():
 
         if changed:
             self.set_y_axis_tick_labels(self._plot_min, self._plot_max)
+
+    @property
+    def y_full_range(self):
+        return (self._plot_min, self._plot_max)
+        
+    @y_full_range.setter
+    def y_full_range(self, minmax):
+        self._abs_min = minmax[0]
+        self._abs_max = minmax[1]
 
     @property
     def y_axis_lab(self):
