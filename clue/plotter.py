@@ -232,22 +232,22 @@ class Plotter():
     def change_typemode(self, type, mode, scale_mode=None, clear=True):
         if type not in ("lines", "dots", "heatmap"):
             raise ValueError("type not lines or dots")
-        self._type = type
-
         if mode not in ("scroll", "wrap"):
             raise ValueError("mode not scroll or wrap")
-        self._mode = mode
-
         if scale_mode is None:
             scale_mode = self._DEFAULT_SCALE_MODE[type]
         elif scale_mode not in ("pixel", "screen", "time"):
             raise ValueError("scale_mode not pixel, screen or time")
-        self._scale_mode = scale_mode
 
         # Clearing everything on screen and stored in variables
-        # is simplest approach here
+        # is simplest approach here - clearing involves undrawing
+        # which uses the self._type so must not change that before this
         if clear:
             self.clear_all()
+
+        self._type = type
+        self._mode = mode
+        self._scale_mode = scale_mode
 
         if self._mode == "wrap":
             self._display_auto()
@@ -516,13 +516,17 @@ class Plotter():
         ###        as it will not catch the first reading being off scale
         if self._x_pos == 0 and self._mode == "wrap" and self._plot_offscale:
             self._auto_plot_range()
+            # TODO - also check self._data_y_pos for rescaling
 
         if self._lastcolumn and self._mode == "scroll":
             # Clear and redraw the bitmap to scroll it leftward
             #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
+            # TODO - is something in here "scrolling" the data in self._data_y_pos including any effects from changing scale
+            # TODO - also check self._data_y_pos for rescaling
             self._undraw_bitmap()
             if self._plot_offscale:
                 self._auto_plot_range()
+                # TODO - also check self._data_y_pos for rescaling
             self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
                               (data_idx + self._scroll_px) % self._plot_width)
             self._x_pos = self._plot_width - self._scroll_px
@@ -536,6 +540,7 @@ class Plotter():
         # add the data and draw it unless a y axis is going to be rescaled
         if not self._data_store_draw(values, x_pos, data_idx):
             self._auto_plot_range()        # rescale y range
+            # TODO - also check self._data_y_pos for rescaling
             # draw with new range
             self._data_store_draw(values, x_pos, data_idx)
 
