@@ -213,7 +213,8 @@ class PinPlotSource(PlotSource):
         if len(self._analogin) == 1:
             return self._analogin[0].value * self._conversion_factor
         else:
-            return [ana.value * self._conversion_factor for ana in self._analogin]
+            return tuple([ana.value * self._conversion_factor
+                          for ana in self._analogin])
 
     def pins(self):
         return self._pins
