@@ -104,7 +104,7 @@ class Plotter():
         # _display_refresh doesn't seem to work possibly if called very freq.
         # Trying False again - simple test of Label/Bitmap shows this is ok... odd...
         #self._output.auto_refresh = False
-        
+
         # DISABLING manual for now by not setting this to False
         self._output.auto_refresh = True
 
@@ -117,7 +117,7 @@ class Plotter():
         # as it is designed for constant frame rate updates and
         # blocks accordingly based on duration of a frame
         # there's currently no simple "refresh now"
-        # HACK needs more research 
+        # HACK needs more research
         if self._last_manual_refresh is not None:
             # using int() to round down
             tfps = int(1000.0 / (time.monotonic() - self._last_manual_refresh))
@@ -191,7 +191,7 @@ class Plotter():
         self._displayio_title = None
         self._displayio_y_labs = None
         self._displayio_y_axis_lab = None
-        self._last_manual_refresh = None 
+        self._last_manual_refresh = None
 
     def get_colors(self):
         return self.PLOT_COLORS
@@ -267,14 +267,14 @@ class Plotter():
         tg_plot_data.x = 39
         tg_plot_data.y = 30
         return (tg_plot_data, plot_bitmap)
-        
+
     def _make_empty_graph(self):
         ### TODO - cut size down here
         ### perhaps make grid in another method?
         grid_width  = self._plot_width + 1
         grid_height = self._plot_height
         #plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
-        
+
         GRID_DOT_SPACING = 8  ### TODO - move this.
 
         # horizontal lines
@@ -394,10 +394,10 @@ class Plotter():
         #(tg_plot, plot) = self._make_empty_tg_plot_bitmap()
         #self._displayio_plot = plot
         #self._displayio_graph[1] = tg_plot
-        
+
         #self._displayio_plot[:] = self._transparent_array
-        
-        # Probably a bit quicker to do 
+
+        # Probably a bit quicker to do
         # for val in self._displayio_plot: val=0
         offset = 0
         for yy in range(self._plot_height):
@@ -440,7 +440,7 @@ class Plotter():
                                  self.TRANSPARENT_IDX)
             else:
                 if y_pos >= 0 and y_pos <= self._plot_height_m1:
-                    self._displayio_plot[x_pos, y_pos] = self.TRANSPARENT_IDX   
+                    self._displayio_plot[x_pos, y_pos] = self.TRANSPARENT_IDX
 
     # TODO - very similar code to _undraw_bitmap ...
     def _data_redraw(self, x1, x2, data_idx):
@@ -452,7 +452,7 @@ class Plotter():
                 if self._type == "lines" and x_pos != 0:
                     # Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
-                    self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)                                     
+                    self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
                 else:
                     if y_pos >= 0 and y_pos <= self._plot_height_m1:
                         self._displayio_plot[x_pos, y_pos] = colidx
@@ -463,7 +463,8 @@ class Plotter():
     def _data_store_draw(self, values, x_pos, data_idx):
         offscale = False
         rescale_not_needed = True
-        for ch_idx, value in enumerate(values):    
+
+        for ch_idx, value in enumerate(values):
             # store value and update min/max as required
             self._data_value[ch_idx][data_idx] = value
             if value < self._data_min:
@@ -476,13 +477,13 @@ class Plotter():
             y_pos = round(mapf(value,
                                self._plot_min, self._plot_max,
                                self._plot_height_m1, 0))
-            
+
             if y_pos < 0 or y_pos >= self._plot_height:
                 offscale = True
                 self._plot_offscale = offscale
                 if self._scale_mode == "pixel":
                     rescale_not_needed = False
-                
+
             if rescale_not_needed:
                 self._data_y_pos[ch_idx][data_idx] = y_pos
 
@@ -495,7 +496,7 @@ class Plotter():
                     if not offscale:
                         self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
 
-            return rescale_not_needed
+        return rescale_not_needed
 
     def _auto_plot_range(self):
         changed = False
@@ -573,7 +574,7 @@ class Plotter():
     def title(self, value):
         self._title = value[:self._max_title_len]  # does not show truncation
         self._displayio_title.text = self._title
-        
+
     @property
     def channels(self):
         return self._channels
@@ -587,7 +588,7 @@ class Plotter():
     @property
     def y_range(self):
         return (self._plot_min, self._plot_max)
-        
+
     @y_range.setter
     def y_range(self, minmax):
         changed = False
@@ -604,7 +605,7 @@ class Plotter():
     @property
     def y_full_range(self):
         return (self._plot_min, self._plot_max)
-        
+
     @y_full_range.setter
     def y_full_range(self, minmax):
         self._abs_min = minmax[0]
@@ -613,7 +614,7 @@ class Plotter():
     @property
     def y_axis_lab(self):
         return self._y_axis_lab
-        
+
     @y_axis_lab.setter
     def y_axis_lab(self, text):
         self._y_axis_lab = text[:self._y_lab_width]
@@ -626,7 +627,7 @@ class Plotter():
     @property
     def channel_colidx(self):
         return self._channel_colidx
-        
+
     @channel_colidx.setter
     def channel_colidx(self, value):
         # tuple(0 ensures object has a local / read-only copy of data
