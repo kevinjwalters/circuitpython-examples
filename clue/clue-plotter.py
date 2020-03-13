@@ -108,10 +108,10 @@ def d_print(level, *args, **kwargs):
 sources = [#PinPlotSource(board.P0),
            #PinPlotSource(board.P1),
            #PinPlotSource(board.P2),
-           TemperaturePlotSource(clue, type="Celsius"),
-           TemperaturePlotSource(clue, type="Fahrenheit"),
-           PressurePlotSource(clue, type="Metric"),
-           PressurePlotSource(clue, type="Imperial"),
+           TemperaturePlotSource(clue, style="Celsius"),
+           TemperaturePlotSource(clue, style="Fahrenheit"),
+           PressurePlotSource(clue, style="Metric"),
+           PressurePlotSource(clue, style="Imperial"),
            HumidityPlotSource(clue),
            ColorPlotSource(clue),
            ProximityPlotSource(clue),
@@ -289,14 +289,14 @@ print("DONT FORGET pylint")
              # array.array('f', [0] * plot_width),
              # array.array('f', [0] * plot_width)]
 
-typemodes = (("lines", "scroll"),   # draws lines between points
-             ("lines", "wrap"),
-             ("dots", "scroll"),    # just points - slightly quicker
-             ("dots", "wrap"),
-             ("heatmap", "scroll"), # collects data for 1 second and displays min/avg/max
-             ("heatmap", "wrap"))
+stylemodes = (("lines", "scroll"),   # draws lines between points
+              ("lines", "wrap"),
+              ("dots", "scroll"),    # just points - slightly quicker
+              ("dots", "wrap"),
+              ("heatmap", "scroll"), # collects data for 1 second and displays min/avg/max
+              ("heatmap", "wrap"))
 
-current_tm_idx = 0
+current_sm_idx = 0
 
 
 def ready_plot_source(plttr, srcs, index=0):
@@ -313,7 +313,7 @@ def ready_plot_source(plttr, srcs, index=0):
     plttr.y_full_range = (source.min(), source.max())
     channels_from_source = source.values()
     plttr.channels = channels_from_source
-    
+
     # Use any requested colors that are found in palette
     # otherwise use defaults
     channel_colidx = []
@@ -323,7 +323,7 @@ def ready_plot_source(plttr, srcs, index=0):
             channel_colidx.append(palette.index(col))
         except:
             channel_colidx.append(channel_colidx_default[idx])
-    
+
     plttr.channel_colidx = channel_colidx
     source.start()
     return (source, channels_from_source)
@@ -351,8 +351,8 @@ MU_PLOTTER_OUTPUT = True
 initial_title = "CLUE Plotter"
 max_title_len = max(len(initial_title), max([len(str(so)) for so in sources]))
 plotter = Plotter(board.DISPLAY,
-                  type=typemodes[current_tm_idx][0],
-                  mode=typemodes[current_tm_idx][1],
+                  style=stylemodes[current_sm_idx][0],
+                  mode=stylemodes[current_sm_idx][1],
                   title=initial_title,
                   max_title_len=max_title_len,
                   mu_output=MU_PLOTTER_OUTPUT,
@@ -371,9 +371,9 @@ while True:
     while True:
         # read data
         all_data = source.data()
-            
+
         # store the data
-    
+
         # check for button presses
         if clue.button_a:  # change plot source
             release_time = wait_for_release(lambda: clue.button_a)
@@ -381,11 +381,11 @@ while True:
             ##switch_source = True
             break
 
-        if clue.button_b:  # change plot type and mode
+        if clue.button_b:  # change plot style and mode
             release_time = wait_for_release(lambda: clue.button_b)
-            current_tm_idx = (current_tm_idx + 1) % len(typemodes)
-            d_print(1, "Graph change", typemodes[current_tm_idx])
-            plotter.change_typemode(*typemodes[current_tm_idx])
+            current_sm_idx = (current_sm_idx + 1) % len(stylemodes)
+            d_print(1, "Graph change", stylemodes[current_sm_idx])
+            plotter.change_stylemode(*stylemodes[current_sm_idx])
 
         # display it
         if channels == 1:

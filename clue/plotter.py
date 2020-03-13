@@ -136,7 +136,7 @@ class Plotter():
         return updated
 
     def __init__(self, output,
-                 type="lines", mode="scroll", scale_mode=None,
+                 style="lines", mode="scroll", scale_mode=None,
                  screen_width=240, screen_height=240,
                  plot_width=200, plot_height=201,
                  x_divs=4, y_divs=4,
@@ -149,7 +149,7 @@ class Plotter():
                  debug=0):
         """scroll_px of greater than 1 gives a jump scroll."""
         self._output = output
-        self.change_typemode(type, mode, scale_mode=scale_mode, clear=False)
+        self.change_stylemode(style, mode, scale_mode=scale_mode, clear=False)
         self._screen_width = screen_width
         self._screen_height = screen_height
         self._plot_width = plot_width
@@ -163,7 +163,15 @@ class Plotter():
         self._title = title
         self._max_title_len = max_title_len
 
-        # Initialise the arrays which hold data plus associated indexes
+        # These arrays are the storage for a circular buffer
+        self._data_y_pos = []
+        self._data_value = []
+        for _ in range(self._max_channels):
+            # 'i' is 32 bit signed integer
+            self._data_y_pos.append(array.array('i', [0] * self._plot_width))
+            self._data_value.append(array.array('f', [0.0] * self._plot_width))
+        # Clear the values which indicate which values from those arrays
+        # are in use
         self.clear_data()
 
         self._mu_output = mu_output
@@ -206,20 +214,14 @@ class Plotter():
         self._data_min = self.POS_INF
         self._data_max = self.NEG_INF
 
-        self._data_y_pos = []
-        self._data_value = []
-        for _ in range(self._max_channels):
-            # 'i' is 32 bit signed integer
-            self._data_y_pos.append(array.array('i', [0] * self._plot_width))
-            self._data_value.append(array.array('f', [0.0] * self._plot_width))
-
         # When in use the arrays in here are variable length
         self._datastats = [[] * self._max_channels]
 
-        self._values = 0
+        self._values = 0  # total data processed
+        self._data_values = 0  # valid values in data_y_pos and data_value
         self._x_pos = 0
         self._data_idx = 0
-        self._lastcolumn = False
+        self._offscreen = False
         self._plot_offscale = False
 
         # This is created to facilitate fast clear of the plot Bitmap
@@ -228,24 +230,43 @@ class Plotter():
         #for row in range(self._plot_height):
         #    self._transparent_array.extend(row_of_zeros)
 
+    def _recalc_y_pos(self):
+        """Recalculates _data_y_pos based on _data_value for changes in y scale."""
+        # Check if nothing to do - important since _plot_min _plot_max not yet set
+        if self._data_values == 0:
+            return
+
+        # assumes data is populated from data_idx of 0 onwards
+        for ch_idx in range(self._channels):
+            # intentional use of negative array indexing
+            for data_idx in range(self._data_idx - 1,
+                                  self._data_idx - 1 - self._data_values,
+                                  -1):
+                self._data_y_pos[ch_idx][data_idx] = round(mapf(self._data_value[ch_idx][data_idx],
+                                                                self._plot_min,
+                                                                self._plot_max,
+                                                                self._plot_height_m1,
+                                                                0))
+
+
     # Simple implementation here is to clear the screen on change...
-    def change_typemode(self, type, mode, scale_mode=None, clear=True):
-        if type not in ("lines", "dots", "heatmap"):
-            raise ValueError("type not lines or dots")
+    def change_stylemode(self, style, mode, scale_mode=None, clear=True):
+        if style not in ("lines", "dots", "heatmap"):
+            raise ValueError("style not lines or dots")
         if mode not in ("scroll", "wrap"):
             raise ValueError("mode not scroll or wrap")
         if scale_mode is None:
-            scale_mode = self._DEFAULT_SCALE_MODE[type]
+            scale_mode = self._DEFAULT_SCALE_MODE[style]
         elif scale_mode not in ("pixel", "screen", "time"):
             raise ValueError("scale_mode not pixel, screen or time")
 
         # Clearing everything on screen and stored in variables
         # is simplest approach here - clearing involves undrawing
-        # which uses the self._type so must not change that before this
+        # which uses the self._style so must not change that before this
         if clear:
             self.clear_all()
 
-        self._type = type
+        self._style = style
         self._mode = mode
         self._scale_mode = scale_mode
 
@@ -374,7 +395,7 @@ class Plotter():
            """
         # Same vertical position as previous point
         if y2 == y1:
-            if (y2 >= 0 and y2 <= self._plot_height_m1):
+            if 0 <= y2 <= self._plot_height_m1:
                 self._displayio_plot[x1, y2] = colidx
             return
 
@@ -394,12 +415,8 @@ class Plotter():
         #(tg_plot, plot) = self._make_empty_tg_plot_bitmap()
         #self._displayio_plot = plot
         #self._displayio_graph[1] = tg_plot
-
         #self._displayio_plot[:] = self._transparent_array
 
-        # Probably a bit quicker to do
-        # for val in self._displayio_plot: val=0
-        offset = 0
         for yy in range(self._plot_height):
             for xx in range(self._plot_width):
                 self._displayio_plot[xx, yy] = self.TRANSPARENT_IDX
@@ -419,7 +436,7 @@ class Plotter():
             colidx = self.TRANSPARENT_IDX
             for x_pos in range(min(self._plot_width, self._values)):
                 y_pos = self._data_y_pos[ch_idx][data_idx]
-                if self._type == "lines" and x_pos != 0:
+                if self._style == "lines" and x_pos != 0:
                     # Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
@@ -433,7 +450,7 @@ class Plotter():
     def _undraw_column(self, x_pos, data_idx):
         for ch_idx in range(self._channels):
             y_pos = self._data_y_pos[ch_idx][data_idx]
-            if self._type == "lines" and x_pos != 0:
+            if self._style == "lines" and x_pos != 0:
                 # Python supports negative array index
                 prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                 self._draw_vline(x_pos, prev_y_pos, y_pos,
@@ -449,7 +466,7 @@ class Plotter():
             colidx = self._channel_colidx[ch_idx]
             for x_pos in range(x1, x2 + 1):
                 y_pos = self._data_y_pos[ch_idx][data_idx]
-                if self._type == "lines" and x_pos != 0:
+                if self._style == "lines" and x_pos != 0:
                     # Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
@@ -487,7 +504,7 @@ class Plotter():
             if rescale_not_needed:
                 self._data_y_pos[ch_idx][data_idx] = y_pos
 
-                if self._type == "lines" and self._values != 0:
+                if self._style == "lines" and self._values != 0:
                     # Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos,
@@ -499,15 +516,19 @@ class Plotter():
         return rescale_not_needed
 
     def _auto_plot_range(self):
-        changed = False
-        range = self._data_max - self._data_min
-        headroom = range * 0.2
+        plot_range = self._data_max - self._data_min
+        headroom = plot_range * 0.2
         new_plot_min = max(self._data_min - headroom, self._abs_min)
         new_plot_max = min(self._data_max + headroom, self._abs_max)
 
         # set new range which will also redo y tick labels if necessary
         self.y_range = (new_plot_min, new_plot_max)
         self._offscale = False
+
+### TODO - PROB. NOT NEEDED.
+##    def _data_unshift(self._scroll_px)
+##        """Remove data from circular buffer data arrays."
+##        self._data_values = self._plot_width - self._scroll_px
 
     def data_add(self, values):
         data_idx = self._data_idx
@@ -518,19 +539,23 @@ class Plotter():
             self._auto_plot_range()
             # TODO - also check self._data_y_pos for rescaling
 
-        if self._lastcolumn and self._mode == "scroll":
+        if self._offscreen and self._mode == "scroll":
             # Clear and redraw the bitmap to scroll it leftward
             #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
             # TODO - is something in here "scrolling" the data in self._data_y_pos including any effects from changing scale
             # TODO - also check self._data_y_pos for rescaling
+            print("SCROLL", self._data_idx, self._values,
+                  self._data_values, self._x_pos)
             self._undraw_bitmap()
+            self._data_values = self._plot_width - self._scroll_px
             if self._plot_offscale:
                 self._auto_plot_range()
-                # TODO - also check self._data_y_pos for rescaling
             self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
                               (data_idx + self._scroll_px) % self._plot_width)
+
             self._x_pos = self._plot_width - self._scroll_px
-            self._lastcolumn = False
+
+            self._offscreen = False
 
         x_pos = self._x_pos
 
@@ -558,9 +583,12 @@ class Plotter():
                 self._x_pos = 0
             else:
                 self._x_pos = new_x_pos  # this is off screen
-                self._lastcolumn = True
+                self._offscreen = True
         else:
             self._x_pos = new_x_pos
+
+        if self._data_values < self._plot_width:
+            self._data_values += 1
 
         self._values += 1
 
@@ -606,6 +634,7 @@ class Plotter():
 
         if changed:
             self.set_y_axis_tick_labels(self._plot_min, self._plot_max)
+            self._recalc_y_pos()  ## calculates new y positions
 
     @property
     def y_full_range(self):
