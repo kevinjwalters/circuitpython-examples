@@ -120,21 +120,21 @@ class TemperaturePlotSource(PlotSource):
     def _convert(self, value):
         return value * self._scale + self._offset
 
-    def __init__(self, clue, type="Celsius"):
+    def __init__(self, clue, mode="Celsius"):
         self._clue = clue
-        if type[0].lower() == "f":
-            type_name = "Fahrenheit"
+        if mode[0].lower() == "f":
+            mode_name = "Fahrenheit"
             self._scale = 1.8
             self._offset = 32.0
-        elif type[0].lower == "k":
-            type_name = "Kelvin"
+        elif mode[0].lower == "k":
+            mode_name = "Kelvin"
             self._scale = 1.0
             self._offset = -273.15
         else:
-            type_name = "Celsius"
+            mode_name = "Celsius"
             self._scale = 1.0
             self._offset = 0.0
-        super().__init__(1, "Temperature", units="\u00b0" + type_name[0],
+        super().__init__(1, "Temperature", units="\u00b0" + mode_name[0],
                          min=self._convert(0),
                          max=self._convert(100),
                          initial_min=self._convert(10),
@@ -150,9 +150,9 @@ class PressurePlotSource(PlotSource):
     def _convert(self, value):
         return value * self._scale
 
-    def __init__(self, clue, type="M"):
+    def __init__(self, clue, mode="M"):
         self._clue = clue
-        if type[0].lower() == "i":
+        if mode[0].lower() == "i":
             self._scale = 29.92 / 1013.25
             units = "inHg"
         else:
@@ -241,9 +241,9 @@ class ColorPlotSource(PlotSource):
 
 
 class IlluminatedColorPlotSource(PlotSource):
-    def __init__(self, clue, colour):
+    def __init__(self, clue, mode="Clear"):
         self._clue = clue
-        col_fl_lc = colour[0].lower()
+        col_fl_lc = mode[0].lower()
         if col_fl_lc == "r":
             plot_colour = self.RGB_COLORS[0]
         elif col_fl_lc == "g":

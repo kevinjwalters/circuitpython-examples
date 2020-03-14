@@ -397,6 +397,7 @@ class Plotter():
         """Draw a clipped vertical line at x1 from pixel one along from y1 to y2.
            """
         # Same vertical position as previous point
+        print("VLINE", x1, y1, y2, colidx)
         if y2 == y1:
             if 0 <= y2 <= self._plot_height_m1:
                 self._displayio_plot[x1, y2] = colidx
@@ -430,21 +431,19 @@ class Plotter():
     # This is almost always going to be quicker
     # than the slow _clear_plot_bitmap
     def _undraw_bitmap(self):
-        if self._values < self._plot_width:
-            data_idx = 0
-        else:
-            data_idx = self._data_idx
+        x_cols = self._data_values
+        data_idx = (self._data_idx - x_cols) % self._plot_width
 
         for ch_idx in range(self._channels):
             colidx = self.TRANSPARENT_IDX
-            for x_pos in range(min(self._plot_width, self._values)):
+            for x_pos in range(x_cols):
                 y_pos = self._data_y_pos[ch_idx][data_idx]
                 if self._style == "lines" and x_pos != 0:
                     # Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
                 else:
-                    if y_pos >= 0 and y_pos <= self._plot_height_m1:
+                    if 0 <= y_pos <= self._plot_height_m1:
                         self._displayio_plot[x_pos, y_pos] = colidx
                 data_idx += 1
                 if data_idx >= self._plot_width:

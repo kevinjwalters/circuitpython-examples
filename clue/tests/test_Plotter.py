@@ -37,22 +37,19 @@ sys.modules['adafruit_display_text.label'] = MagicMock()
 # Borrowing the dhalbert/tannewt technique from adafruit/Adafruit_CircuitPython_Motor
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# import what we are testing
 from plotter import Plotter
 
 import terminalio  # mocked
-
-def t_f_gbb():
-    return (6, 14)
-
 terminalio.FONT = Mock()
-terminalio.FONT.get_bounding_box = t_f_gbb
+terminalio.FONT.get_bounding_box = Mock(return_value=(6, 14))
 
 
 class Test_Plotter(unittest.TestCase):
 
     def make_a_Plotter(self, style, mode):
         mocked_display = Mock()
-        
+
         plotter = Plotter(mocked_display,
                   style=style,
                   mode=mode,
@@ -60,7 +57,7 @@ class Test_Plotter(unittest.TestCase):
                   max_title_len=99,
                   mu_output=False,
                   debug=0)
-        
+
         return plotter
 
     def ready_plot_source(self, plttr, source):
@@ -77,49 +74,96 @@ class Test_Plotter(unittest.TestCase):
         source.start()
         return (source, channels_from_source)
 
-    def make_a_PlotSource(self):
+    def make_a_PlotSource(self, channels = 1):
         ps = Mock()
         ps.initial_min = Mock(return_value=0)
         ps.initial_max = Mock(return_value=100)
         ps.min = Mock(return_value=0.0)
         ps.max = Mock(return_value=100.0)
-        ps.values = Mock(return_value=1)
-        ps.data = Mock(side_effect=list(range(10,90)) * 100)
+        if channels == 1:
+            ps.values = Mock(return_value=1)
+            ps.data = Mock(side_effect=list(range(10,90)) * 100)
+        elif channels == 3:
+            ps.values = Mock(return_value=3)
+            ps.data = Mock(side_effect=list(zip(list(range(10,90)),
+                                           list(range(15,95)),
+                                           list(range(40,60)) * 4)) * 100)
         return ps
 
-    def test_scrolling(self):
+    def test_clear_after_scrolling_one_channel(self):
         plotter = self.make_a_Plotter("lines", "scroll")
         (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_source1 = self.make_a_PlotSource()
         self.ready_plot_source(plotter, test_source1)
-        
+
         print("")
         unique, counts = numpy.unique(plot, return_counts=True)
         print(unique, counts)
-        
+        self.assertTrue(numpy.alltrue(unique == [0]),
+                        "Checking all pixels start as 0")
+
         # Fill screen
         for d_idx in range(200):
             plotter.data_add((test_source1.data(),))
 
         unique, counts = numpy.unique(plot, return_counts=True)
         print(unique, counts)
-        
+        self.assertTrue(numpy.alltrue(unique == [0, 1]),
+                        "Checking pixels are now a mix of 0 and 1")
+
         # Force a single scroll of the data
         for d_idx in range(10):
             plotter.data_add((test_source1.data(),))
-        
-        # This should clear all data
+
+        # This should clear all data and the screen
+        if verbose:
+            print("change_stylemode() to a new mode which will clear screen")
         plotter.change_stylemode("lines", "scroll")
         unique, counts = numpy.unique(plot, return_counts=True)
         print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0]),
                         "Checking all pixels are now 0")
-        
+
         plotter.display_off()
-        
-        woohoo = True  # interested in getting to here
-        self.assertTrue(woohoo)
+
+    def test_clear_after_scrolling_three_channels(self):
+        plotter = self.make_a_Plotter("lines", "scroll")
+        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        plotter.display_on(tg_and_plot=(tg, plot))
+        test_triplesource1 = self.make_a_PlotSource(channels=3)
+
+        self.ready_plot_source(plotter, test_triplesource1)
+
+        print("")
+        unique, counts = numpy.unique(plot, return_counts=True)
+        print(unique, counts)
+        self.assertTrue(numpy.alltrue(unique == [0]),
+                        "Checking all pixels start as 0")
+
+        # Fill screen
+        for d_idx in range(200):
+            plotter.data_add(test_triplesource1.data())
+
+        unique, counts = numpy.unique(plot, return_counts=True)
+        print(unique, counts)
+        self.assertTrue(numpy.alltrue(unique == [0, 1, 2, 3]),
+                        "Checking pixels are now a mix of 0 and 1")
+
+        # Force a single scroll of the data
+        for d_idx in range(10):
+            plotter.data_add(test_triplesource1.data())
+
+        # This should clear all data and the screen
+        if verbose:
+            print("change_stylemode() to a new mode which will clear screen")
+        plotter.change_stylemode("lines", "scroll")
+        unique, counts = numpy.unique(plot, return_counts=True)
+        print(unique, counts)
+        self.assertTrue(numpy.alltrue(unique == [0]),
+                        "Checking all pixels are now 0")
+
+        plotter.display_off()
 
 
 if __name__ == '__main__':

@@ -108,17 +108,17 @@ def d_print(level, *args, **kwargs):
 sources = [#PinPlotSource(board.P0),
            #PinPlotSource(board.P1),
            #PinPlotSource(board.P2),
-           TemperaturePlotSource(clue, style="Celsius"),
-           TemperaturePlotSource(clue, style="Fahrenheit"),
-           PressurePlotSource(clue, style="Metric"),
-           PressurePlotSource(clue, style="Imperial"),
+           TemperaturePlotSource(clue, mode="Celsius"),
+           TemperaturePlotSource(clue, mode="Fahrenheit"),
+           PressurePlotSource(clue, mode="Metric"),
+           PressurePlotSource(clue, mode="Imperial"),
            HumidityPlotSource(clue),
            ColorPlotSource(clue),
            ProximityPlotSource(clue),
-           IlluminatedColorPlotSource(clue, "Red"),
-           IlluminatedColorPlotSource(clue, "Green"),
-           IlluminatedColorPlotSource(clue, "Blue"),
-           IlluminatedColorPlotSource(clue, "Clear"),
+           IlluminatedColorPlotSource(clue, mode="Red"),
+           IlluminatedColorPlotSource(clue, mode="Green"),
+           IlluminatedColorPlotSource(clue, mode="Blue"),
+           IlluminatedColorPlotSource(clue, mode="Clear"),
            VolumePlotSource(clue),
            AccelerometerPlotSource(clue),
            GyroPlotSource(clue),
@@ -130,7 +130,7 @@ sources = [#PinPlotSource(board.P0),
 #source = PinPlotSource(board.P2)
 #source = ColorPlotSource(clue)
 #source = ColorReflectedGreenPlotSource(clue)
-current_source_idx = 0
+current_source_idx = 14
 ##source = sources[current_source_idx]   ### TODO - review where this is set
 
 # display = board.DISPLAY
