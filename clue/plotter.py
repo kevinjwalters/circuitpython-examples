@@ -163,7 +163,8 @@ class Plotter():
         self._title = title
         self._max_title_len = max_title_len
 
-        # These arrays are the storage for a circular buffer
+        # These arrays are used to provide a circular buffer
+        # with _data_values valid values
         self._data_y_pos = []
         self._data_value = []
         for _ in range(self._max_channels):
@@ -236,7 +237,6 @@ class Plotter():
         if self._data_values == 0:
             return
 
-        # assumes data is populated from data_idx of 0 onwards
         for ch_idx in range(self._channels):
             # intentional use of negative array indexing
             for data_idx in range(self._data_idx - 1,
@@ -397,16 +397,15 @@ class Plotter():
         """Draw a clipped vertical line at x1 from pixel one along from y1 to y2.
            """
         # Same vertical position as previous point
-        print("VLINE", x1, y1, y2, colidx)
+        # print("VLINE", x1, y1, y2, colidx)
         if y2 == y1:
             if 0 <= y2 <= self._plot_height_m1:
                 self._displayio_plot[x1, y2] = colidx
             return
 
-        if y2 > y1:
-            step = 1  # y2 above y1, on screen this translates to being below
-        else:
-            step = -1
+        # y2 above y1, on screen this translates to being below
+        step = 1 if y2 > y1 else -1
+
         for line_y_pos in range(max(0, min(y1 + step, self._plot_height_m1)),
                                 max(0, min(y2, self._plot_height_m1)) + step,
                                 step):
@@ -432,10 +431,11 @@ class Plotter():
     # than the slow _clear_plot_bitmap
     def _undraw_bitmap(self):
         x_cols = self._data_values
-        data_idx = (self._data_idx - x_cols) % self._plot_width
-
+        x_data_idx = (self._data_idx - x_cols) % self._plot_width
+        
+        colidx = self.TRANSPARENT_IDX
         for ch_idx in range(self._channels):
-            colidx = self.TRANSPARENT_IDX
+            data_idx = x_data_idx
             for x_pos in range(x_cols):
                 y_pos = self._data_y_pos[ch_idx][data_idx]
                 if self._style == "lines" and x_pos != 0:
@@ -458,14 +458,15 @@ class Plotter():
                 self._draw_vline(x_pos, prev_y_pos, y_pos,
                                  self.TRANSPARENT_IDX)
             else:
-                if y_pos >= 0 and y_pos <= self._plot_height_m1:
+                if 0 <= y_pos <= self._plot_height_m1:
                     self._displayio_plot[x_pos, y_pos] = self.TRANSPARENT_IDX
 
     # TODO - very similar code to _undraw_bitmap ...
-    def _data_redraw(self, x1, x2, data_idx):
+    def _data_redraw(self, x1, x2, x1_data_idx):
         """Redraw data from x1 to x2 inclusive."""
         for ch_idx in range(self._channels):
             colidx = self._channel_colidx[ch_idx]
+            data_idx = x1_data_idx
             for x_pos in range(x1, x2 + 1):
                 y_pos = self._data_y_pos[ch_idx][data_idx]
                 if self._style == "lines" and x_pos != 0:

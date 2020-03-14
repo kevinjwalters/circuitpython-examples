@@ -23,6 +23,7 @@
 import unittest
 from unittest.mock import Mock, MagicMock, call
 
+import array
 import numpy
 import os
 verbose = int(os.getenv('TESTVERBOSE', '2'))
@@ -47,12 +48,15 @@ terminalio.FONT.get_bounding_box = Mock(return_value=(6, 14))
 
 class Test_Plotter(unittest.TestCase):
 
+    _SCROLL_PX = 25
+
     def make_a_Plotter(self, style, mode):
         mocked_display = Mock()
 
         plotter = Plotter(mocked_display,
                   style=style,
                   mode=mode,
+                  scroll_px=self._SCROLL_PX,
                   title="Debugging",
                   max_title_len=99,
                   mu_output=False,
@@ -76,30 +80,30 @@ class Test_Plotter(unittest.TestCase):
 
     def make_a_PlotSource(self, channels = 1):
         ps = Mock()
-        ps.initial_min = Mock(return_value=0)
-        ps.initial_max = Mock(return_value=100)
-        ps.min = Mock(return_value=0.0)
+        ps.initial_min = Mock(return_value=-100.0)
+        ps.initial_max = Mock(return_value=100.0)
+        ps.min = Mock(return_value=-100.0)
         ps.max = Mock(return_value=100.0)
         if channels == 1:
-            ps.values = Mock(return_value=1)
+            ps.values = Mock(return_value=channels)
             ps.data = Mock(side_effect=list(range(10,90)) * 100)
         elif channels == 3:
-            ps.values = Mock(return_value=3)
+            ps.values = Mock(return_value=channels)
             ps.data = Mock(side_effect=list(zip(list(range(10,90)),
                                            list(range(15,95)),
                                            list(range(40,60)) * 4)) * 100)
         return ps
 
     def test_clear_after_scrolling_one_channel(self):
+        """A specific test to check screen clears after a scroll to help
+           investigate a bug with that failing to happen in most cases."""
         plotter = self.make_a_Plotter("lines", "scroll")
         (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_source1 = self.make_a_PlotSource()
         self.ready_plot_source(plotter, test_source1)
 
-        print("")
         unique, counts = numpy.unique(plot, return_counts=True)
-        print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0]),
                         "Checking all pixels start as 0")
 
@@ -108,7 +112,6 @@ class Test_Plotter(unittest.TestCase):
             plotter.data_add((test_source1.data(),))
 
         unique, counts = numpy.unique(plot, return_counts=True)
-        print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0, 1]),
                         "Checking pixels are now a mix of 0 and 1")
 
@@ -119,15 +122,105 @@ class Test_Plotter(unittest.TestCase):
         # This should clear all data and the screen
         if verbose:
             print("change_stylemode() to a new mode which will clear screen")
-        plotter.change_stylemode("lines", "scroll")
+        plotter.change_stylemode("dots", "wrap")
         unique, counts = numpy.unique(plot, return_counts=True)
-        print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0]),
                         "Checking all pixels are now 0")
 
         plotter.display_off()
 
+    def test_check_internal_data_three_channels(self):
+        plotter = self.make_a_Plotter("lines", "scroll")
+        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        plotter.display_on(tg_and_plot=(tg, plot))
+        test_triplesource1 = self.make_a_PlotSource(channels=3)
+
+        self.ready_plot_source(plotter, test_triplesource1)
+    
+        unique, counts = numpy.unique(plot, return_counts=True)   
+        self.assertTrue(numpy.alltrue(unique == [0]),
+                        "Checking all pixels start as 0")
+
+        # Three data samples
+        all_data = []
+        for d_idx in range(3):
+            all_data.append(test_triplesource1.data())
+            plotter.data_add(all_data[-1])
+        
+        # all_data is now [(10, 15, 40), (11, 16, 41), (12, 17, 42)]
+        self.assertEqual(plotter._data_y_pos[0][0:3],
+                         array.array('i', [90, 89, 88]),
+                         "channel 0 plotted y positions")
+        self.assertEqual(plotter._data_y_pos[1][0:3],
+                         array.array('i', [85, 84, 83]),
+                         "channel 1 plotted y positions")
+        self.assertEqual(plotter._data_y_pos[2][0:3],
+                         array.array('i', [60, 59, 58]),
+                         "channel 2 plotted y positions")
+
+        # Fill rest of screen
+        for d_idx in range(197):
+            all_data.append(test_triplesource1.data())
+            plotter.data_add(all_data[-1])
+
+        # Three values more values to force a scroll
+        for d_idx in range(3):
+            all_data.append(test_triplesource1.data())
+            plotter.data_add(all_data[-1])
+
+        # all_data[-4] is (49, 54, 59)
+        # all_data[-3:0] is [(50, 55, 40) (51, 56, 41) (52, 57, 42)]
+        st_x_pos = 200 - self._SCROLL_PX
+        d_idx = plotter._data_idx - 3
+
+        self.assertTrue(3 < self._SCROLL_PX, "Ensure no recent scrolling")
+        self.assertEqual(plotter._data_idx, 3)
+        self.assertEqual(plotter._x_pos, st_x_pos + 3)
+        self.assertEqual(plotter._data_values, st_x_pos + 3)
+        self.assertEqual(plotter._values, len(all_data))
+
+        ch0_ypos = [50, 49, 48]
+        self.assertEqual(plotter._data_y_pos[0][d_idx:d_idx+3],
+                         array.array('i', ch0_ypos),
+                         "channel 0 plotted y positions")
+        ch1_ypos = [45, 44, 43]
+        self.assertEqual(plotter._data_y_pos[1][d_idx:d_idx+3],
+                         array.array('i', ch1_ypos),
+                         "channel 1 plotted y positions")
+        ch2_ypos = [60, 59, 58]
+        self.assertEqual(plotter._data_y_pos[2][d_idx:d_idx+3],
+                         array.array('i', ch2_ypos),
+                         "channel 2 plotted y positions")
+
+        # Check for plot points - fortunately none overlap
+        total_pixel_matches = 0
+        for ch_idx, ch_ypos in enumerate((ch0_ypos, ch1_ypos, ch2_ypos)):
+            expected = plotter.channel_colidx[ch_idx]
+            for idx, y_pos in enumerate(ch_ypos):
+                actual = plot[st_x_pos+idx, y_pos]
+                if actual == expected:
+                    total_pixel_matches += 1
+                else:
+                    print("Wrong pixel value for channel",
+                          "{:d}, expected {:d},".format(ch_idx, expected),
+                          "actual {:d} at {:d}, {:d}".format(idx, actual,
+                                                           st_x_pos+idx, y_pos))
+        # Only 7 out of 9 will match because channel 2 put a vertical
+        # line at x position 175 over-writing ch0 and ch1
+        self.assertEqual(total_pixel_matches, 7, "plotted pixels check")
+        # Check for that line from pixel positions 42 to 60
+        for y_pos in range(42, 60 + 1):
+            self.assertEqual(plot[st_x_pos, y_pos],
+                             plotter.channel_colidx[2],
+                             "channel 2 (over-writing) vertical line")
+
+        plotter.display_off()
+
     def test_clear_after_scrolling_three_channels(self):
+        """A specific test to check screen clears after a scroll with
+           multiple channels being plotted (three) to help
+           investigate a bug with that failing to happen in most cases
+           for the second and third channels."""
         plotter = self.make_a_Plotter("lines", "scroll")
         (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
@@ -148,8 +241,7 @@ class Test_Plotter(unittest.TestCase):
         unique, counts = numpy.unique(plot, return_counts=True)
         print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0, 1, 2, 3]),
-                        "Checking pixels are now a mix of 0 and 1")
-
+                        "Checking pixels are now a mix of 0, 1, 2, 3")
         # Force a single scroll of the data
         for d_idx in range(10):
             plotter.data_add(test_triplesource1.data())
@@ -157,7 +249,7 @@ class Test_Plotter(unittest.TestCase):
         # This should clear all data and the screen
         if verbose:
             print("change_stylemode() to a new mode which will clear screen")
-        plotter.change_stylemode("lines", "scroll")
+        plotter.change_stylemode("dots", "wrap")
         unique, counts = numpy.unique(plot, return_counts=True)
         print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0]),

@@ -130,7 +130,7 @@ sources = [#PinPlotSource(board.P0),
 #source = PinPlotSource(board.P2)
 #source = ColorPlotSource(clue)
 #source = ColorReflectedGreenPlotSource(clue)
-current_source_idx = 14
+current_source_idx = 0
 ##source = sources[current_source_idx]   ### TODO - review where this is set
 
 # display = board.DISPLAY
