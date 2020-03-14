@@ -289,7 +289,7 @@ class Plotter():
         tg_plot_data.y = 30
         return (tg_plot_data, plot_bitmap)
 
-    def _make_empty_graph(self):
+    def _make_empty_graph(self, tg_and_plot=None):
         ### TODO - cut size down here
         ### perhaps make grid in another method?
         grid_width  = self._plot_width + 1
@@ -362,7 +362,10 @@ class Plotter():
         g_background.append(self._displayio_y_axis_lab)
         g_background.append(self._displayio_title)
 
-        (tg_plot, plot) = self._make_empty_tg_plot_bitmap()
+        if tg_and_plot is not None:
+            (tg_plot, plot) = tg_and_plot
+        else:
+            (tg_plot, plot) = self._make_empty_tg_plot_bitmap()
 
         self._displayio_plot = plot
 
@@ -381,9 +384,9 @@ class Plotter():
             text_value = format_width(self._y_lab_width, value)
             tick_label.text = text_value[:self._y_lab_width]
 
-    def display_on(self):
+    def display_on(self, tg_and_plot=None):
         if self._displayio_graph is None:
-            self._displayio_graph = self._make_empty_graph()
+            self._displayio_graph = self._make_empty_graph(tg_and_plot=tg_and_plot)
 
         self._output.show(self._displayio_graph)
 
@@ -649,6 +652,8 @@ class Plotter():
     def y_axis_lab(self):
         return self._y_axis_lab
 
+    # TODO - deal with unicode degree symbol by shifting lowercase o upward
+    # or remove it from plot_source Temps
     @y_axis_lab.setter
     def y_axis_lab(self, text):
         self._y_axis_lab = text[:self._y_lab_width]
