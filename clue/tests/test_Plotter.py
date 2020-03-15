@@ -26,7 +26,7 @@ from unittest.mock import Mock, MagicMock, call
 import array
 import numpy
 import os
-verbose = int(os.getenv('TESTVERBOSE', '2'))
+verbose = int(os.getenv('TESTVERBOSE', '0'))
 
 import sys
 # Mocking libraries which are about to be import'd by Plotter
@@ -142,11 +142,19 @@ class Test_Plotter(unittest.TestCase):
             if count > 0:
                 non_zero_rows.append(y_pos)
         
-        self.assertTrue(9 not in non_zero_rows,
-                        "Check nothing is above 90 plotted at 10")
-        self.assertEqual(non_zero_rows, [99],
-                        "Only pixels plotted should be from value 1 being plotted at 99")
+        if verbose:
+            print("y=99", plot[:, 99])
+            print("y=100", plot[:, 100])
 
+        self.assertTrue(9 not in non_zero_rows,
+                        "Check nothing is just above 90 which plots at 10")
+        self.assertEqual(non_zero_rows, [99, 100],
+                        "Only pixels left plotted should be from values 0 and 1 being plotted at 99 and 100")
+        self.assertTrue(numpy.alltrue(plot[:, 99] == [1] * 190 + [0] * 10),
+                        "Checking row 99 precisely")
+        self.assertTrue(numpy.alltrue(plot[:, 100] == [0] * 190 + [1] * 10),
+                        "Checking row 100 precisely")
+                
         plotter.display_off()
 
     def test_clear_after_scrolling_one_channel(self):
@@ -169,10 +177,15 @@ class Test_Plotter(unittest.TestCase):
         unique, counts = numpy.unique(plot, return_counts=True)
         self.assertTrue(numpy.alltrue(unique == [0, 1]),
                         "Checking pixels are now a mix of 0 and 1")
+        self.assertEqual(plotter._values, 200)
+        self.assertEqual(plotter._data_values, 200)
 
         # Force a single scroll of the data
         for d_idx in range(10):
             plotter.data_add((test_source1.data(),))
+
+        self.assertEqual(plotter._values, 200 + 10)
+        self.assertEqual(plotter._data_values, 200 + 10 - self._SCROLL_PX)
 
         # This should clear all data and the screen
         if verbose:
@@ -185,8 +198,9 @@ class Test_Plotter(unittest.TestCase):
         plotter.display_off()
 
     def test_check_internal_data_three_channels(self):
+        width = 200
         plotter = self.make_a_Plotter("lines", "scroll")
-        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        (tg, plot) = (Mock(), numpy.zeros((width, 201), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_triplesource1 = self.make_a_PlotSource(channels=3)
 
@@ -225,26 +239,32 @@ class Test_Plotter(unittest.TestCase):
 
         # all_data[-4] is (49, 54, 59)
         # all_data[-3:0] is [(50, 55, 40) (51, 56, 41) (52, 57, 42)]
-        st_x_pos = 200 - self._SCROLL_PX
+        expected_data_size = width - self._SCROLL_PX + 3
+        st_x_pos = width - self._SCROLL_PX
         d_idx = plotter._data_idx - 3
 
         self.assertTrue(3 < self._SCROLL_PX, "Ensure no recent scrolling")
-        self.assertEqual(plotter._data_idx, 3)
+        # the data_idx here is 2 because the size is now plot_width + 1
+        self.assertEqual(plotter._data_idx, 2)
         self.assertEqual(plotter._x_pos, st_x_pos + 3)
-        self.assertEqual(plotter._data_values, st_x_pos + 3)
+        self.assertEqual(plotter._data_values, expected_data_size)
         self.assertEqual(plotter._values, len(all_data))
 
+        if verbose >= 2:
+            print("YP",d_idx, plotter._data_y_pos[0][d_idx:d_idx+3])
+            print("Y POS", [str(plotter._data_y_pos[ch_idx][d_idx:d_idx+3])
+                            for ch_idx in [0, 1, 2]])
         ch0_ypos = [50, 49, 48]
-        self.assertEqual(plotter._data_y_pos[0][d_idx:d_idx+3],
-                         array.array('i', ch0_ypos),
+        self.assertEqual([plotter._data_y_pos[0][idx] for idx in range(d_idx, d_idx + 3)],
+                         ch0_ypos,
                          "channel 0 plotted y positions")
         ch1_ypos = [45, 44, 43]
-        self.assertEqual(plotter._data_y_pos[1][d_idx:d_idx+3],
-                         array.array('i', ch1_ypos),
+        self.assertEqual([plotter._data_y_pos[1][idx] for idx in range(d_idx, d_idx + 3)],
+                         ch1_ypos,
                          "channel 1 plotted y positions")
         ch2_ypos = [60, 59, 58]
-        self.assertEqual(plotter._data_y_pos[2][d_idx:d_idx+3],
-                         array.array('i', ch2_ypos),
+        self.assertEqual([plotter._data_y_pos[2][idx] for idx in range(d_idx, d_idx + 3)],
+                         ch2_ypos,
                          "channel 2 plotted y positions")
 
         # Check for plot points - fortunately none overlap

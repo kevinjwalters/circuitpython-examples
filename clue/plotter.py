@@ -164,13 +164,16 @@ class Plotter():
         self._max_title_len = max_title_len
 
         # These arrays are used to provide a circular buffer
-        # with _data_values valid values
+        # with _data_values valid values - this needs to be sized
+        # one larger than screen width to retrieve prior y position
+        # for line undrawing in wrap mode
+        self._data_size = self._plot_width + 1
         self._data_y_pos = []
         self._data_value = []
         for _ in range(self._max_channels):
             # 'i' is 32 bit signed integer
-            self._data_y_pos.append(array.array('i', [0] * self._plot_width))
-            self._data_value.append(array.array('f', [0.0] * self._plot_width))
+            self._data_y_pos.append(array.array('i', [0] * self._data_size))
+            self._data_value.append(array.array('f', [0.0] * self._data_size))
         # Clear the values which indicate which values from those arrays
         # are in use
         self.clear_data()
@@ -276,6 +279,7 @@ class Plotter():
             self._display_manual()
 
     def _make_empty_tg_plot_bitmap(self):
+        ### TODO review 9 here as this value is bitpacked
         plot_bitmap = displayio.Bitmap(self._plot_width, self._plot_height, 9)
         # Create a colour palette for plot dots/lines
         plot_palette = displayio.Palette(9)
@@ -420,6 +424,7 @@ class Plotter():
         #self._displayio_graph[1] = tg_plot
         #self._displayio_plot[:] = self._transparent_array
 
+        # probably a fraction quicker with a single for loop?
         for yy in range(self._plot_height):
             for xx in range(self._plot_width):
                 self._displayio_plot[xx, yy] = self.TRANSPARENT_IDX
@@ -430,8 +435,8 @@ class Plotter():
     # This is almost always going to be quicker
     # than the slow _clear_plot_bitmap
     def _undraw_bitmap(self):
-        x_cols = self._data_values
-        x_data_idx = (self._data_idx - x_cols) % self._plot_width
+        x_cols = min(self._data_values, self._plot_width)
+        x_data_idx = (self._data_idx - x_cols) % self._data_size
         
         colidx = self.TRANSPARENT_IDX
         for ch_idx in range(self._channels):
@@ -441,12 +446,13 @@ class Plotter():
                 if self._style == "lines" and x_pos != 0:
                     # Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
+                    print("UB UNDRAW LINE", x_pos, prev_y_pos, y_pos, colidx)
                     self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
                 else:
                     if 0 <= y_pos <= self._plot_height_m1:
                         self._displayio_plot[x_pos, y_pos] = colidx
                 data_idx += 1
-                if data_idx >= self._plot_width:
+                if data_idx >= self._data_size:
                     data_idx = 0
 
     def _undraw_column(self, x_pos, data_idx):
@@ -456,7 +462,6 @@ class Plotter():
             if self._style == "lines" and x_pos != 0:
                 # Python supports negative array index
                 prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
-                print("UNDRAW LINE", x_pos, prev_y_pos, y_pos, colidx)
                 self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
             else:
                 if 0 <= y_pos <= self._plot_height_m1:
@@ -478,7 +483,7 @@ class Plotter():
                     if y_pos >= 0 and y_pos <= self._plot_height_m1:
                         self._displayio_plot[x_pos, y_pos] = colidx
                 data_idx += 1
-                if data_idx >= self._plot_width:
+                if data_idx >= self._data_size:
                     data_idx = 0
 
     def _data_store_draw(self, values, x_pos, data_idx):
@@ -508,7 +513,7 @@ class Plotter():
             if rescale_not_needed:
                 self._data_y_pos[ch_idx][data_idx] = y_pos
 
-                if self._style == "lines" and self._values != 0:
+                if self._style == "lines" and self._x_pos != 0:
                     # Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos,
@@ -546,22 +551,22 @@ class Plotter():
         if self._offscreen and self._mode == "scroll":
             # Clear and redraw the bitmap to scroll it leftward
             #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
-            print("SCROLL", self._data_idx, self._values,
-                  self._data_values, self._x_pos)
             self._undraw_bitmap()
-            self._data_values = self._plot_width - self._scroll_px
             if self._plot_offscale:
-                self._auto_plot_range()
+                self._auto_plot_range()  # TODO - look at making this more efficient as we are about to dump self._scroll_px values
+            sc_data_idx = ((data_idx + self._scroll_px - self._plot_width)
+                           % self._data_size)
+            self._data_values -= self._scroll_px
             self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
-                              (data_idx + self._scroll_px) % self._plot_width)
+                              sc_data_idx)
 
             self._x_pos = self._plot_width - self._scroll_px
             self._offscreen = False
 
-        elif (self._data_values == self._plot_width
+        elif (self._data_values >= self._plot_width
               and self._values >= self._plot_width and self._mode == "wrap"):
-            self._undraw_column(self._x_pos, data_idx)
-            
+            self._undraw_column(self._x_pos, data_idx - self._plot_width)
+
         x_pos = self._x_pos
 
         # add the data and draw it unless a y axis is going to be rescaled
@@ -575,7 +580,7 @@ class Plotter():
 
         # increment the data index wrapping around
         self._data_idx += 1
-        if self._data_idx >= self._plot_width:
+        if self._data_idx >= self._data_size:
             self._data_idx = 0
 
         # increment x position dealing with wrap/scroll
@@ -591,7 +596,7 @@ class Plotter():
         else:
             self._x_pos = new_x_pos
 
-        if self._data_values < self._plot_width:
+        if self._data_values < self._data_size:
             self._data_values += 1
 
         self._values += 1
