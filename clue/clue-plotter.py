@@ -143,10 +143,7 @@ def wait_for_release(func):
        pass
    return (time.monotonic() - t1)
 
-
 MU_PLOTTER_OUTPUT = True
-
-
 
 initial_title = "CLUE Plotter"
 max_title_len = max(len(initial_title), max([len(str(so)) for so in sources]))
@@ -173,8 +170,6 @@ while True:
     while True:
         # read data
         all_data = source.data()
-
-        # store the data
 
         # check for button presses
         if clue.button_a:  # change plot source

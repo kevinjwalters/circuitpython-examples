@@ -450,16 +450,17 @@ class Plotter():
                     data_idx = 0
 
     def _undraw_column(self, x_pos, data_idx):
+        colidx = self.TRANSPARENT_IDX
         for ch_idx in range(self._channels):
             y_pos = self._data_y_pos[ch_idx][data_idx]
             if self._style == "lines" and x_pos != 0:
                 # Python supports negative array index
                 prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
-                self._draw_vline(x_pos, prev_y_pos, y_pos,
-                                 self.TRANSPARENT_IDX)
+                print("UNDRAW LINE", x_pos, prev_y_pos, y_pos, colidx)
+                self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
             else:
                 if 0 <= y_pos <= self._plot_height_m1:
-                    self._displayio_plot[x_pos, y_pos] = self.TRANSPARENT_IDX
+                    self._displayio_plot[x_pos, y_pos] = colidx
 
     # TODO - very similar code to _undraw_bitmap ...
     def _data_redraw(self, x1, x2, x1_data_idx):
@@ -535,7 +536,7 @@ class Plotter():
 
     def data_add(self, values):
         data_idx = self._data_idx
-
+        
         ### TODO - ponder this
         ###        as it will not catch the first reading being off scale
         if self._x_pos == 0 and self._mode == "wrap" and self._plot_offscale:
@@ -545,8 +546,6 @@ class Plotter():
         if self._offscreen and self._mode == "scroll":
             # Clear and redraw the bitmap to scroll it leftward
             #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
-            # TODO - is something in here "scrolling" the data in self._data_y_pos including any effects from changing scale
-            # TODO - also check self._data_y_pos for rescaling
             print("SCROLL", self._data_idx, self._values,
                   self._data_values, self._x_pos)
             self._undraw_bitmap()
@@ -557,16 +556,18 @@ class Plotter():
                               (data_idx + self._scroll_px) % self._plot_width)
 
             self._x_pos = self._plot_width - self._scroll_px
-
             self._offscreen = False
 
+        elif (self._data_values == self._plot_width
+              and self._values >= self._plot_width and self._mode == "wrap"):
+            self._undraw_column(self._x_pos, data_idx)
+            
         x_pos = self._x_pos
-
-        if self._values >= self._plot_width and self._mode == "wrap":
-            self._undraw_column(x_pos, data_idx)
 
         # add the data and draw it unless a y axis is going to be rescaled
         if not self._data_store_draw(values, x_pos, data_idx):
+            # TODO - this auto_plot_range needs some sort of hint not to redraw
+            # an erased column from previous self._undraw_column()
             self._auto_plot_range()        # rescale y range
             # TODO - also check self._data_y_pos for rescaling
             # draw with new range
