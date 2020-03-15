@@ -446,7 +446,6 @@ class Plotter():
                 if self._style == "lines" and x_pos != 0:
                     # Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
-                    print("UB UNDRAW LINE", x_pos, prev_y_pos, y_pos, colidx)
                     self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
                 else:
                     if 0 <= y_pos <= self._plot_height_m1:

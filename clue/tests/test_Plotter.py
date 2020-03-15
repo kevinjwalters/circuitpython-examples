@@ -26,7 +26,7 @@ from unittest.mock import Mock, MagicMock, call
 import array
 import numpy
 import os
-verbose = int(os.getenv('TESTVERBOSE', '0'))
+verbose = int(os.getenv('TESTVERBOSE', '2'))
 
 import sys
 # Mocking libraries which are about to be import'd by Plotter
@@ -141,8 +141,8 @@ class Test_Plotter(unittest.TestCase):
                     count += 1
             if count > 0:
                 non_zero_rows.append(y_pos)
-        
-        if verbose:
+
+        if verbose >= 4:
             print("y=99", plot[:, 99])
             print("y=100", plot[:, 100])
 
@@ -154,7 +154,7 @@ class Test_Plotter(unittest.TestCase):
                         "Checking row 99 precisely")
         self.assertTrue(numpy.alltrue(plot[:, 100] == [0] * 190 + [1] * 10),
                         "Checking row 100 precisely")
-                
+
         plotter.display_off()
 
     def test_clear_after_scrolling_one_channel(self):
@@ -188,7 +188,7 @@ class Test_Plotter(unittest.TestCase):
         self.assertEqual(plotter._data_values, 200 + 10 - self._SCROLL_PX)
 
         # This should clear all data and the screen
-        if verbose:
+        if verbose >= 3:
             print("change_stylemode() to a new mode which will clear screen")
         plotter.change_stylemode("dots", "wrap")
         unique, counts = numpy.unique(plot, return_counts=True)
@@ -205,8 +205,8 @@ class Test_Plotter(unittest.TestCase):
         test_triplesource1 = self.make_a_PlotSource(channels=3)
 
         self.ready_plot_source(plotter, test_triplesource1)
-    
-        unique, counts = numpy.unique(plot, return_counts=True)   
+
+        unique, counts = numpy.unique(plot, return_counts=True)
         self.assertTrue(numpy.alltrue(unique == [0]),
                         "Checking all pixels start as 0")
 
@@ -215,7 +215,7 @@ class Test_Plotter(unittest.TestCase):
         for d_idx in range(3):
             all_data.append(test_triplesource1.data())
             plotter.data_add(all_data[-1])
-        
+
         # all_data is now [(10, 15, 40), (11, 16, 41), (12, 17, 42)]
         self.assertEqual(plotter._data_y_pos[0][0:3],
                          array.array('i', [90, 89, 88]),
@@ -250,7 +250,7 @@ class Test_Plotter(unittest.TestCase):
         self.assertEqual(plotter._data_values, expected_data_size)
         self.assertEqual(plotter._values, len(all_data))
 
-        if verbose >= 2:
+        if verbose >= 4:
             print("YP",d_idx, plotter._data_y_pos[0][d_idx:d_idx+3])
             print("Y POS", [str(plotter._data_y_pos[ch_idx][d_idx:d_idx+3])
                             for ch_idx in [0, 1, 2]])
@@ -276,10 +276,13 @@ class Test_Plotter(unittest.TestCase):
                 if actual == expected:
                     total_pixel_matches += 1
                 else:
-                    print("Wrong pixel value for channel",
-                          "{:d}, expected {:d},".format(ch_idx, expected),
-                          "actual {:d} at {:d}, {:d}".format(idx, actual,
-                                                           st_x_pos+idx, y_pos))
+                    if verbose >= 4:
+                        print("Pixel value for channel",
+                              "{:d}, naive expectation {:d},".format(ch_idx,
+                                                                     expected),
+                              "actual {:d} at {:d}, {:d}".format(idx, actual,
+                                                                 st_x_pos+idx,
+                                                                 y_pos))
         # Only 7 out of 9 will match because channel 2 put a vertical
         # line at x position 175 over-writing ch0 and ch1
         self.assertEqual(total_pixel_matches, 7, "plotted pixels check")
@@ -303,9 +306,7 @@ class Test_Plotter(unittest.TestCase):
 
         self.ready_plot_source(plotter, test_triplesource1)
 
-        print("")
         unique, counts = numpy.unique(plot, return_counts=True)
-        print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0]),
                         "Checking all pixels start as 0")
 
@@ -314,7 +315,6 @@ class Test_Plotter(unittest.TestCase):
             plotter.data_add(test_triplesource1.data())
 
         unique, counts = numpy.unique(plot, return_counts=True)
-        print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0, 1, 2, 3]),
                         "Checking pixels are now a mix of 0, 1, 2, 3")
         # Force a single scroll of the data
@@ -322,11 +322,10 @@ class Test_Plotter(unittest.TestCase):
             plotter.data_add(test_triplesource1.data())
 
         # This should clear all data and the screen
-        if verbose:
+        if verbose >= 3:
             print("change_stylemode() to a new mode which will clear screen")
         plotter.change_stylemode("dots", "wrap")
         unique, counts = numpy.unique(plot, return_counts=True)
-        print(unique, counts)
         self.assertTrue(numpy.alltrue(unique == [0]),
                         "Checking all pixels are now 0")
 
