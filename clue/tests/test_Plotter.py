@@ -94,6 +94,61 @@ class Test_Plotter(unittest.TestCase):
                                            list(range(40,60)) * 4)) * 100)
         return ps
 
+    def make_a_PlotSource_onespike(self):
+        ps = Mock()
+        ps.initial_min = Mock(return_value=-100.0)
+        ps.initial_max = Mock(return_value=100.0)
+        ps.min = Mock(return_value=-100.0)
+        ps.max = Mock(return_value=100.0)
+
+        ps.values = Mock(return_value=1)
+        ps.data = Mock(side_effect=[0]*95 + [5,10,20,50,80,90,70,30,20,10]
+                                   + [0] * 95 + [1] * 1000)
+
+        return ps
+
+
+    def test_spike_after_wrap_and_overwrite_one_channel(self):
+        """A specific test to check that a spike that appears in wrap mode is
+           correctly cleared by subsequent flat data."""
+        plotter = self.make_a_Plotter("lines", "wrap")
+        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        plotter.display_on(tg_and_plot=(tg, plot))
+        test_source1 = self.make_a_PlotSource_onespike()
+        self.ready_plot_source(plotter, test_source1)
+
+        unique, counts = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique == [0]),
+                        "Checking all pixels start as 0")
+
+        # Fill screen
+        for d_idx in range(200):
+            plotter.data_add((test_source1.data(),))
+
+        unique, counts = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique == [0, 1]),
+                        "Checking pixels are now a mix of 0 and 1")
+
+        # Rewrite whole screen with new data as we are in wrap mode
+        for d_idx in range(190):
+            plotter.data_add((test_source1.data(),))
+
+        non_zero_rows = []
+        for y_pos in range(0, 201):
+            count = 0
+            for x_pos in range(0, 200):
+                if plot[x_pos, y_pos] != 0:
+                    count += 1
+            if count > 0:
+                non_zero_rows.append(y_pos)
+        
+        self.assertTrue(9 not in non_zero_rows,
+                        "Check nothing is above 90 plotted at 10")
+        self.assertEqual(non_zero_rows, [99],
+                        "Only pixels plotted should be from value 1 being plotted at 99")
+
+        plotter.display_off()
+
     def test_clear_after_scrolling_one_channel(self):
         """A specific test to check screen clears after a scroll to help
            investigate a bug with that failing to happen in most cases."""
