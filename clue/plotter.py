@@ -203,6 +203,7 @@ class Plotter():
         self._displayio_graph = None
         self._displayio_plot = None
         self._displayio_title = None
+        self._displayio_info = None
         self._displayio_y_labs = None
         self._displayio_y_axis_lab = None
         self._last_manual_refresh = None
@@ -374,12 +375,13 @@ class Plotter():
 
         self._displayio_plot = plot
 
-        # Create a Group
-        main_group = displayio.Group(max_size=2)
-
-        # Add the TileGrid to the Group
+        # Create the main Group for display with one spare slot for
+        # popup informational text
+        main_group = displayio.Group(max_size=3)
         main_group.append(g_background)
         main_group.append(tg_plot)
+        self._displayio_info = None
+
         return main_group
 
     def set_y_axis_tick_labels(self, y_min, y_max):
@@ -447,7 +449,7 @@ class Plotter():
             x_data_idx = (self._data_idx - self._x_pos) % self._data_size
         else:
             x_data_idx = (self._data_idx - x_cols) % self._data_size
-       
+
         colidx = self.TRANSPARENT_IDX
         for ch_idx in range(self._channels):
             data_idx = x_data_idx
@@ -456,7 +458,7 @@ class Plotter():
                 if wrapMode and x_pos == self._x_pos:
                     data_idx = (data_idx + self._data_size - self._plot_width) % self._data_size
                     # TODO - inhibit line drawing in BOTH VERSIONS
-     
+
                 y_pos = self._data_y_pos[ch_idx][data_idx]
                 if self._style == "lines" and x_pos != 0:
                     # Python supports negative array index
@@ -536,8 +538,8 @@ class Plotter():
                 if data_idx >= self._data_size:
                     data_idx = 0
 
-        self._plot_dirty = True       
-        
+        self._plot_dirty = True
+
     def _data_store_draw(self, values, x_pos, data_idx):
         offscale = False
         rescale_not_needed = True
@@ -574,7 +576,7 @@ class Plotter():
                 else:
                     if not offscale:
                         self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
-                        self._plot_dirty = True       
+                        self._plot_dirty = True
 
         return rescale_not_needed
 
@@ -673,6 +675,35 @@ class Plotter():
         self._displayio_title.text = self._title
 
     @property
+    def info(self):
+        if self._displayio_info is None:
+            return None
+        return self._displayio_info.text
+
+    @info.setter
+    def info(self, value):
+        if self._displayio_info is not None:
+            self._displayio_graph.pop()
+
+        if value is not None and value != "":
+            self._displayio_info = Label(self._font, text=value,
+                              scale=3,
+                              background_color=0x000080,
+                              color=0xc0c000)
+            font_w, font_h = self._font.get_bounding_box()
+            max_word_chars = max([len(word) for word in value.split("\n")])
+            self._displayio_info.x = (self._screen_width
+                                      - 3 * font_w * max_word_chars) // 2
+            self._displayio_info.y = self._screen_height // 2
+            self._displayio_graph.append(self._displayio_info)
+
+        else:
+            self._displayio_info = None
+
+        if self._mode == "scroll":
+            self._display_refresh()
+
+    @property
     def channels(self):
         return self._channels
 
@@ -706,7 +737,7 @@ class Plotter():
                     self._suppress_one_redraw = False
                 else:
                     self._data_redraw_all()
-                          
+
     @property
     def y_full_range(self):
         return (self._plot_min, self._plot_max)

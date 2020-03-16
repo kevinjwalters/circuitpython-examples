@@ -184,10 +184,13 @@ while True:
             break
 
         if clue.button_b:  # change plot style and mode
-            release_time = wait_for_release(lambda: clue.button_b)
             current_sm_idx = (current_sm_idx + 1) % len(stylemodes)
-            d_print(1, "Graph change", stylemodes[current_sm_idx])
-            plotter.change_stylemode(*stylemodes[current_sm_idx])
+            (new_style, new_mode) = stylemodes[current_sm_idx]
+            plotter.info = new_style + "\n" + new_mode
+            release_time = wait_for_release(lambda: clue.button_b)
+            plotter.info = ""
+            d_print(1, "Graph change", new_style, new_mode)
+            plotter.change_stylemode(new_style, new_mode)
 
         # display it
         if channels == 1:
