@@ -1,4 +1,4 @@
-### clue-plotter v1.6
+### clue-plotter v1.7
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -92,9 +92,11 @@ current_source_idx = 0
 stylemodes = (("lines", "scroll"),   # draws lines between points
               ("lines", "wrap"),
               ("dots", "scroll"),    # just points - slightly quicker
-              ("dots", "wrap"),
-              ("heatmap", "scroll"), # collects data for 1 second and displays min/avg/max
-              ("heatmap", "wrap"))
+              ("dots", "wrap")
+             )
+## Not implemented yet
+##              ("heatmap", "scroll"), # collects data for 1 second and displays min/avg/max
+##              ("heatmap", "wrap"))
 
 current_sm_idx = 0
 
@@ -143,7 +145,10 @@ def wait_for_release(func):
        pass
    return (time.monotonic() - t1)
 
-MU_PLOTTER_OUTPUT = True
+
+# TODO - add user interface to change colours
+# TODO - add user interface to toggle MU output
+MU_PLOTTER_OUTPUT = False
 
 initial_title = "CLUE Plotter"
 max_title_len = max(len(initial_title), max([len(str(so)) for so in sources]))

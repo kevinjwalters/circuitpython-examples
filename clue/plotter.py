@@ -140,7 +140,7 @@ class Plotter():
                  screen_width=240, screen_height=240,
                  plot_width=200, plot_height=201,
                  x_divs=4, y_divs=4,
-                 scroll_px=25,
+                 scroll_px=50,
                  max_channels=3,
                  est_rate=50,
                  title="CLUE Plotter",
@@ -176,7 +176,7 @@ class Plotter():
             self._data_value.append(array.array('f', [0.0] * self._data_size))
         # Clear the values which indicate which values from those arrays
         # are in use
-        self.clear_data()
+        self._init_data()
 
         self._mu_output = mu_output
         self._debug = debug
@@ -191,7 +191,9 @@ class Plotter():
         # The current plot min/max
         self._plot_min = None
         self._plot_max = None
-        self._plot_offscale = False
+        # Two flags indicating data has gone off scale and something's been plotted
+        self._plot_dirty = False
+        self._suppress_one_redraw = False
 
         self._font = terminalio.FONT
         self._y_axis_lab = ""
@@ -211,9 +213,9 @@ class Plotter():
     def clear_all(self):
         if self._values != 0:
             self._undraw_bitmap()
-        self.clear_data()
+        self._init_data()
 
-    def clear_data(self):
+    def _init_data(self):
         # Allocate arrays for each possible channel with plot_width elements
         self._data_min = self.POS_INF
         self._data_max = self.NEG_INF
@@ -251,7 +253,6 @@ class Plotter():
                                                                 self._plot_height_m1,
                                                                 0))
 
-
     # Simple implementation here is to clear the screen on change...
     def change_stylemode(self, style, mode, scale_mode=None, clear=True):
         if style not in ("lines", "dots", "heatmap"):
@@ -263,9 +264,9 @@ class Plotter():
         elif scale_mode not in ("pixel", "screen", "time"):
             raise ValueError("scale_mode not pixel, screen or time")
 
-        # Clearing everything on screen and stored in variables
+        # Clearing everything on screen and everything stored in variables
         # is simplest approach here - clearing involves undrawing
-        # which uses the self._style so must not change that before this
+        # which uses the self._style so must not change that beforehand
         if clear:
             self.clear_all()
 
@@ -416,6 +417,8 @@ class Plotter():
             self._displayio_plot[x1, line_y_pos] = colidx
 
     def _clear_plot_bitmap(self):
+        if not self._plot_dirty:
+            return
         t1 = time.monotonic()
         # This approach gave
         # "MemoryError: memory allocation failed, allocating 20100 bytes"
@@ -431,17 +434,29 @@ class Plotter():
 
         if self._debug >= 4:
             print("Clear plot bitmap", time.monotonic() - t1)
+        self._plot_dirty = False
 
     # This is almost always going to be quicker
     # than the slow _clear_plot_bitmap
     def _undraw_bitmap(self):
+        if not self._plot_dirty:
+            return
         x_cols = min(self._data_values, self._plot_width)
-        x_data_idx = (self._data_idx - x_cols) % self._data_size
-        
+        wrapMode = self._mode == "wrap"
+        if wrapMode:
+            x_data_idx = (self._data_idx - self._x_pos) % self._data_size
+        else:
+            x_data_idx = (self._data_idx - x_cols) % self._data_size
+       
         colidx = self.TRANSPARENT_IDX
         for ch_idx in range(self._channels):
             data_idx = x_data_idx
             for x_pos in range(x_cols):
+                # "jump" the gap in the circular buffer for wrap mode
+                if wrapMode and x_pos == self._x_pos:
+                    data_idx = (data_idx + self._data_size - self._plot_width) % self._data_size
+                    # TODO - inhibit line drawing in BOTH VERSIONS
+     
                 y_pos = self._data_y_pos[ch_idx][data_idx]
                 if self._style == "lines" and x_pos != 0:
                     # Python supports negative array index
@@ -453,6 +468,8 @@ class Plotter():
                 data_idx += 1
                 if data_idx >= self._data_size:
                     data_idx = 0
+
+        self._plot_dirty = False
 
     def _undraw_column(self, x_pos, data_idx):
         colidx = self.TRANSPARENT_IDX
@@ -466,7 +483,41 @@ class Plotter():
                 if 0 <= y_pos <= self._plot_height_m1:
                     self._displayio_plot[x_pos, y_pos] = colidx
 
-    # TODO - very similar code to _undraw_bitmap ...
+    # TODO - This is a cut and paste from _undraw_bitmap()
+    # TODO - time to clean this up and review _data_redraw()
+    def _data_redraw_all(self):
+        x_cols = min(self._data_values, self._plot_width)
+        wrapMode = self._mode == "wrap"
+        if wrapMode:
+            x_data_idx = (self._data_idx - self._x_pos) % self._data_size
+        else:
+            x_data_idx = (self._data_idx - x_cols) % self._data_size
+
+        for ch_idx in range(self._channels):
+            colidx = self._channel_colidx[ch_idx]
+            data_idx = x_data_idx
+            for x_pos in range(x_cols):
+                # "jump" the gap in the circular buffer for wrap mode
+                if wrapMode and x_pos == self._x_pos:
+                    data_idx = (data_idx + self._data_size - self._plot_width) % self._data_size
+                    # TODO - inhibit line drawing in BOTH VERSIONS
+
+                y_pos = self._data_y_pos[ch_idx][data_idx]
+                if self._style == "lines" and x_pos != 0:
+                    # Python supports negative array index
+                    prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
+                    self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
+                else:
+                    if 0 <= y_pos <= self._plot_height_m1:
+                        self._displayio_plot[x_pos, y_pos] = colidx
+                data_idx += 1
+                if data_idx >= self._data_size:
+                    data_idx = 0
+
+        self._plot_dirty = True
+
+    # TODO - very similar code to _undraw_bitmap although that is now
+    # more sophisticated as it support wrap mode
     def _data_redraw(self, x1, x2, x1_data_idx):
         """Redraw data from x1 to x2 inclusive."""
         for ch_idx in range(self._channels):
@@ -485,6 +536,8 @@ class Plotter():
                 if data_idx >= self._data_size:
                     data_idx = 0
 
+        self._plot_dirty = True       
+        
     def _data_store_draw(self, values, x_pos, data_idx):
         offscale = False
         rescale_not_needed = True
@@ -517,9 +570,11 @@ class Plotter():
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos,
                                      self._channel_colidx[ch_idx])
+                    self._plot_dirty = True  # bit wrong if whole line is off screen
                 else:
                     if not offscale:
                         self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
+                        self._plot_dirty = True       
 
         return rescale_not_needed
 
@@ -531,7 +586,7 @@ class Plotter():
 
         # set new range which will also redo y tick labels if necessary
         self.y_range = (new_plot_min, new_plot_max)
-        self._offscale = False
+        self._plot_offscale = False
 
 ### TODO - PROB. NOT NEEDED.
 ##    def _data_unshift(self._scroll_px)
@@ -540,19 +595,20 @@ class Plotter():
 
     def data_add(self, values):
         data_idx = self._data_idx
-        
+
         ### TODO - ponder this
-        ###        as it will not catch the first reading being off scale
+        ###        as it will not catch anything in values being off the scale
+        ###        just historical points
         if self._x_pos == 0 and self._mode == "wrap" and self._plot_offscale:
             self._auto_plot_range()
-            # TODO - also check self._data_y_pos for rescaling
 
         if self._offscreen and self._mode == "scroll":
             # Clear and redraw the bitmap to scroll it leftward
             #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
             self._undraw_bitmap()
             if self._plot_offscale:
-                self._auto_plot_range()  # TODO - look at making this more efficient as we are about to dump self._scroll_px values
+                self._suppress_one_redraw = True
+                self._auto_plot_range()
             sc_data_idx = ((data_idx + self._scroll_px - self._plot_width)
                            % self._data_size)
             self._data_values -= self._scroll_px
@@ -642,8 +698,15 @@ class Plotter():
 
         if changed:
             self.set_y_axis_tick_labels(self._plot_min, self._plot_max)
+            if self._values:
+                self._undraw_bitmap()
             self._recalc_y_pos()  ## calculates new y positions
-
+            if self._values:
+                if self._suppress_one_redraw:
+                    self._suppress_one_redraw = False
+                else:
+                    self._data_redraw_all()
+                          
     @property
     def y_full_range(self):
         return (self._plot_min, self._plot_max)

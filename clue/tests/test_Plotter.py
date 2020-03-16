@@ -46,6 +46,8 @@ terminalio.FONT = Mock()
 terminalio.FONT.get_bounding_box = Mock(return_value=(6, 14))
 
 
+# TODO use setup() and tearDown() - https://docs.python.org/3/library/unittest.html#unittest.TestCase.tearDown
+
 class Test_Plotter(unittest.TestCase):
 
     _SCROLL_PX = 25
@@ -107,7 +109,18 @@ class Test_Plotter(unittest.TestCase):
 
         return ps
 
+    def make_a_PlotSource_bilevel(self, first_v=60, second_v=700):
+        ps = Mock()
+        ps.initial_min = Mock(return_value=-100.0)
+        ps.initial_max = Mock(return_value=100.0)
+        ps.min = Mock(return_value=-1000.0)
+        ps.max = Mock(return_value=1000.0)
 
+        ps.values = Mock(return_value=1)
+        ps.data = Mock(side_effect=[first_v] * 199 + [second_v] * 1001)
+
+        return ps
+        
     def test_spike_after_wrap_and_overwrite_one_channel(self):
         """A specific test to check that a spike that appears in wrap mode is
            correctly cleared by subsequent flat data."""
@@ -156,6 +169,36 @@ class Test_Plotter(unittest.TestCase):
                         "Checking row 100 precisely")
 
         plotter.display_off()
+
+
+    def test_clearmode_from_lines_wrap_to_dots_scroll(self):
+        """A specific test to check that a spike that appears in lines wrap mode is
+           correctly cleared by a change to dots scroll."""
+        plotter = self.make_a_Plotter("lines", "wrap")
+        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        plotter.display_on(tg_and_plot=(tg, plot))
+        test_source1 = self.make_a_PlotSource_onespike()
+        self.ready_plot_source(plotter, test_source1)
+
+        unique, counts = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique == [0]),
+                        "Checking all pixels start as 0")
+
+        # Fill screen then wrap to write another 20 values
+        for d_idx in range(200 + 20):
+            plotter.data_add((test_source1.data(),))
+
+        unique, counts = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique == [0, 1]),
+                        "Checking pixels are now a mix of 0 and 1")
+
+        plotter.change_stylemode("dots", "scroll")
+        unique, counts = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique == [0]),
+                        "Checking all pixels are now 0 after change_stylemode")
+
+        plotter.display_off()
+
 
     def test_clear_after_scrolling_one_channel(self):
         """A specific test to check screen clears after a scroll to help
@@ -328,6 +371,57 @@ class Test_Plotter(unittest.TestCase):
         unique, counts = numpy.unique(plot, return_counts=True)
         self.assertTrue(numpy.alltrue(unique == [0]),
                         "Checking all pixels are now 0")
+
+        plotter.display_off()
+
+    def test_auto_rescale_wrap_mode(self):
+        """Ensure the auto-scaling is working and not leaving any remnants of previous plot."""
+        plotter = self.make_a_Plotter("lines", "wrap")
+        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        plotter.display_on(tg_and_plot=(tg, plot))
+        test_source1 = self.make_a_PlotSource_bilevel(first_v=60, second_v=900)
+
+        self.ready_plot_source(plotter, test_source1)
+
+        unique, counts = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique == [0]),
+                        "Checking all pixels start as 0")
+
+        # Fill screen with first 200
+        for d_idx in range(200):
+            plotter.data_add((test_source1.data(),))
+
+        non_zero_rows = []
+        for y_pos in range(0, 201):
+            count = 0
+            for x_pos in range(0, 200):
+                if plot[x_pos, y_pos] != 0:
+                    count += 1
+            if count > 0:
+                non_zero_rows.append(y_pos)
+
+        self.assertEqual(non_zero_rows, list(range(0, 40 + 1)),
+                        "From value 60 being plotted at 40 but also upward line at end")
+
+        # Rewrite screen with next 200 but these should force an internal
+        # rescaling of y axis
+        for d_idx in range(200):
+            plotter.data_add((test_source1.data(),))
+
+        self.assertEqual(plotter.y_range, (-108.0, 1000.0),
+                         "Check rescaled y range")
+
+        non_zero_rows = []
+        for y_pos in range(0, 201):
+            count = 0
+            for x_pos in range(0, 200):
+                if plot[x_pos, y_pos] != 0:
+                    count += 1
+            if count > 0:
+                non_zero_rows.append(y_pos)
+
+        self.assertEqual(non_zero_rows, [18],
+                        "Only pixels now should be from value 900 being plotted at 18")
 
         plotter.display_off()
 
