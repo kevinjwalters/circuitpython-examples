@@ -300,33 +300,33 @@ class Plotter():
         ### perhaps make grid in another method?
         grid_width  = self._plot_width + 1
         grid_height = self._plot_height
-        #plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
+        plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
 
         GRID_DOT_SPACING = 8  ### TODO - move this.
 
         # horizontal lines
-        #for x in range(0, grid_width, GRID_DOT_SPACING):
-        #    for y in range(0, grid_height, 50):   ### TODO calc these 50 values or this range
-        #        plot_grid[x, y] = 1
+        for x in range(0, grid_width, GRID_DOT_SPACING):
+            for y in range(0, grid_height, 50):   ### TODO calc these 50 values or this range
+                plot_grid[x, y] = 1
 
         # vertical lines
-        #for x in range(0, grid_width, 50):
-        #    for y in range(0, grid_height, GRID_DOT_SPACING):
-        #        plot_grid[x, y] = 1
+        for x in range(0, grid_width, 50):
+            for y in range(0, grid_height, GRID_DOT_SPACING):
+                plot_grid[x, y] = 1
 
         # grid colours
-        #grid_palette = displayio.Palette(2)
-        #grid_palette.make_transparent(0)
-        #grid_palette[0] = 0x000000
-        #grid_palette[1] = 0x308030
+        grid_palette = displayio.Palette(2)
+        grid_palette.make_transparent(0)
+        grid_palette[0] = 0x000000
+        grid_palette[1] = 0x308030
 
         # consider enlarging this for different intensities of the channel plots
 
         # Create a TileGrid using the Bitmap and Palette
-        #tg_plot_grid = displayio.TileGrid(plot_grid,
-        #                                  pixel_shader=grid_palette)
-        #tg_plot_grid.x = 39
-        #tg_plot_grid.y = 30
+        tg_plot_grid = displayio.TileGrid(plot_grid,
+                                          pixel_shader=grid_palette)
+        tg_plot_grid.x = 39
+        tg_plot_grid.y = 30
 
         font_w, font_h = self._font.get_bounding_box()
 
@@ -362,7 +362,7 @@ class Plotter():
 
         # three items (grid, axis label, title) plus the y tick labels
         g_background = displayio.Group(max_size=3+len(plot_y_labels))
-        #temp# g_background.append(tg_plot_grid)
+        g_background.append(tg_plot_grid)
         for label in self._displayio_y_labs:
             g_background.append(label)
         g_background.append(self._displayio_y_axis_lab)
@@ -768,5 +768,13 @@ class Plotter():
 
     @channel_colidx.setter
     def channel_colidx(self, value):
-        # tuple(0 ensures object has a local / read-only copy of data
+        # tuple() ensures object has a local / read-only copy of data
         self._channel_colidx = tuple(value)
+
+    @property
+    def mu_output(self):
+        return self._mu_output
+
+    @mu_output.setter
+    def mu_output(self, value):
+        self._mu_output = value

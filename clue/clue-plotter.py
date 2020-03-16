@@ -1,4 +1,4 @@
-### clue-plotter v1.7
+### clue-plotter v1.8
 ### CircuitPython on CLUE sensor and input plotter
 ### This plots the sensors and analogue inputs in a style similar to
 ### an oscilloscope
@@ -101,7 +101,21 @@ stylemodes = (("lines", "scroll"),   # draws lines between points
 current_sm_idx = 0
 
 
-def ready_plot_source(plttr, srcs, index=0):
+def select_colors(plttr, src, def_palette):
+    # Use any requested colors that are found in palette
+    # otherwise use defaults
+    channel_colidx = []
+    palette = plttr.get_colors()
+    colors = PlotSource.DEFAULT_COLORS if def_palette else src.colors()
+    for idx, col in enumerate(colors):
+        try:
+            channel_colidx.append(palette.index(col))
+        except:
+            channel_colidx.append(PlotSource.DEFAULT_COLORS.index(col))
+    return channel_colidx
+
+
+def ready_plot_source(plttr, srcs, def_palette, index=0):
     source = srcs[index]
     ### Put the description of the source on screen at the top
     source_name = str(source)
@@ -115,20 +129,11 @@ def ready_plot_source(plttr, srcs, index=0):
     plttr.y_full_range = (source.min(), source.max())
     channels_from_source = source.values()
     plttr.channels = channels_from_source
+    plttr.channel_colidx = select_colors(plttr, source, def_palette)
 
-    # Use any requested colors that are found in palette
-    # otherwise use defaults
-    channel_colidx = []
-    palette = plttr.get_colors()
-    for idx, col in enumerate(source.colors()):
-        try:
-            channel_colidx.append(palette.index(col))
-        except:
-            channel_colidx.append(channel_colidx_default[idx])
-
-    plttr.channel_colidx = channel_colidx
     source.start()
     return (source, channels_from_source)
+
 
 def print_data_rate(source):
     """Print data read rate for debugging and setting PlotSource rates."""
@@ -139,6 +144,7 @@ def print_data_rate(source):
         t2 = time.monotonic()
         print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
 
+
 def wait_for_release(func):
    t1 = time.monotonic()
    while func():
@@ -146,9 +152,15 @@ def wait_for_release(func):
    return (time.monotonic() - t1)
 
 
+def popup_text(plttr, text, duration=1.0):
+    plttr.info = text
+    time.sleep(duration)
+    plttr.info = None
+
+
 # TODO - add user interface to change colours
 # TODO - add user interface to toggle MU output
-MU_PLOTTER_OUTPUT = False
+mu_plotter_output = False
 
 initial_title = "CLUE Plotter"
 max_title_len = max(len(initial_title), max([len(str(so)) for so in sources]))
@@ -157,8 +169,11 @@ plotter = Plotter(board.DISPLAY,
                   mode=stylemodes[current_sm_idx][1],
                   title=initial_title,
                   max_title_len=max_title_len,
-                  mu_output=MU_PLOTTER_OUTPUT,
+                  mu_output=mu_plotter_output,
                   debug=debug)
+
+# If set to true this forces use of colour blindness friendly colours
+default_palette = False
 
 clue.pixel[0] = (0, 0, 0)  # turn off the NeoPixel on the back of CLUE board
 
@@ -166,9 +181,8 @@ plotter.display_on()
 
 while True:
     # set the source and start items
-    ##switch_source = False
-    (source, channels) = ready_plot_source(plotter, sources, current_source_idx)
-
+    (source, channels) = ready_plot_source(plotter, sources,
+                                           default_palette, current_source_idx)
     if debug >= 5:
         print_data_rate(source)
 
@@ -176,12 +190,26 @@ while True:
         # read data
         all_data = source.data()
 
-        # check for button presses
+        # check for left (A) and right (B) button presses
         if clue.button_a:  # change plot source
             release_time = wait_for_release(lambda: clue.button_a)
-            current_source_idx = (current_source_idx + 1) % len(sources)
-            ##switch_source = True
-            break
+            if release_time > 3.0:
+                mu_plotter_output = not mu_plotter_output
+                plotter.mu_output = mu_plotter_output
+                popup_text(plotter,
+                           "Mu output "
+                           + ("on" if mu_plotter_output else "off"))
+            elif release_time > 1.0:
+                default_palette = not default_palette
+                popup_text(plotter,
+                           ("default" if default_palette else "source")
+                           + "\npalette")
+
+                plotter.channel_colidx = select_colors(plotter, source,
+                                                       default_palette)
+            else:
+                current_source_idx = (current_source_idx + 1) % len(sources)
+                break  # to select the new source
 
         if clue.button_b:  # change plot style and mode
             current_sm_idx = (current_sm_idx + 1) % len(stylemodes)
