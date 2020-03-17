@@ -674,17 +674,30 @@ class Plotter():
 
     @info.setter
     def info(self, value):
+        """Place some text on the screen.
+           Multiple lines are supported with newline character.
+           Font will be 3x standard terminalio font or 2x if that does not fit."""
         if self._displayio_info is not None:
             self._displayio_graph.pop()
 
         if value is not None and value != "":
             font_scale = 3
+            line_spacing = 1.25
+
+            font_w, font_h = self._font.get_bounding_box()
+            text_lines = value.split("\n")
+            max_word_chars = max([len(word) for word in text_lines])
+            ### If too large reduce the scale
+            if (max_word_chars * font_scale * font_w > self._screen_width
+                    or len(text_lines) * font_scale * font_h * line_spacing > self._screen_height):
+                font_scale -= 1
+
             self._displayio_info = Label(self._font, text=value,
+                                         line_spacing=line_spacing,
                                          scale=font_scale,
                                          background_color=self._INFO_FG_COLOR,
                                          color=self._INFO_BG_COLOR)
-            font_w, _ = self._font.get_bounding_box()
-            max_word_chars = max([len(word) for word in value.split("\n")])
+            ### centre the (left justified) text
             self._displayio_info.x = (self._screen_width
                                       - font_scale * font_w * max_word_chars) // 2
             self._displayio_info.y = self._screen_height // 2

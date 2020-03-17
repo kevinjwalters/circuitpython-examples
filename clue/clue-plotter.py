@@ -171,6 +171,13 @@ default_palette = False
 clue.pixel[0] = clue.BLACK  ### turn off the NeoPixel on the back of CLUE board
 
 plotter.display_on()
+### Using left and right here in case CLUE is cased hiding A/B labels
+popup_text(plotter,
+           "\n".join(["Button Guide",
+                      "Left: sensor change",
+                      "      2secs: palette",
+                      "      4secs: Mu plot",
+                      "Right: style change"]), duration=10)
 
 while True:
     ### set the source and start items
