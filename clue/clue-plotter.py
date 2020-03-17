@@ -1,14 +1,15 @@
-### clue-plotter v1.8
-### CircuitPython on CLUE sensor and input plotter
-### This plots the sensors and analogue inputs in a style similar to
-### an oscilloscope
+### clue-plotter v1.9
+### Sensor and input plotter for Adafruit CLUE in CircuitPython
+### This plots the sensors and three of the analogue inputs on
+### the LCD display either with scrolling or wrap mode which
+### approximates a slow timebase oscilloscope, left button selects
+### next source or with long press changes palette or longer press
+### turns on output for Mu plotting, right button changes plot style
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.0.0
 
-### ANY CRITICAL NOTES ON LIBRARIES GO HERE
-
 ### copy this file to CLUE board as code.py
-### needs companion plot_sensor.py file
+### needs companion plot_sensor.py and plotter.py files
 
 ### MIT License
 
@@ -33,43 +34,23 @@
 ### SOFTWARE.
 
 import time
-import array
-import random
-import math
 
 import board
-import displayio
-import terminalio
-import analogio
-
-from plot_source import *
-from plotter import Plotter
-
-### C/Arduino one https://github.com/adafruit/Adafruit_Arcada/blob/master/examples/full_board_tests/arcada_clue_sensorplotter/arcada_clue_sensorplotter.ino
-
-# There's a form of on-demand instanitation for touch pads
-# but analogio can be used if touch_0 - touch_3 have not been used
-# https://github.com/adafruit/Adafruit_CircuitPython_CLUE
 from adafruit_clue import clue
 
-debug = 4
-
-### TODO - work out how/if to use this in libraries
-def d_print(level, *args, **kwargs):
-    """A simple conditional print for debugging based on global debug level."""
-    if not isinstance(level, int):
-        print(level, *args, **kwargs)
-    elif debug >= level:
-        print(*args, **kwargs)
+from plot_source import PlotSource, TemperaturePlotSource, PressurePlotSource, \
+                        HumidityPlotSource, ColorPlotSource, ProximityPlotSource, \
+                        IlluminatedColorPlotSource, VolumePlotSource, \
+                        AccelerometerPlotSource, GyroPlotSource, \
+                        MagnetometerPlotSource, PinPlotSource
+from plotter import Plotter
 
 
-### TODO - got to solve the issue of reusing pins
-### group by sensor or leave this as an enhancement?
-# No attempt to graph/represent clue.gesture
-sources = [#PinPlotSource(board.P0),
-           #PinPlotSource(board.P1),
-           #PinPlotSource(board.P2),
-           TemperaturePlotSource(clue, mode="Celsius"),
+debug = 1
+
+
+# A list of all the data source for the plotting
+sources = [TemperaturePlotSource(clue, mode="Celsius"),
            TemperaturePlotSource(clue, mode="Fahrenheit"),
            PressurePlotSource(clue, mode="Metric"),
            PressurePlotSource(clue, mode="Imperial"),
@@ -86,83 +67,95 @@ sources = [#PinPlotSource(board.P0),
            MagnetometerPlotSource(clue),
            PinPlotSource([board.P0, board.P1, board.P2])
           ]
-
+# The first source to select when plotting starts
 current_source_idx = 0
 
-stylemodes = (("lines", "scroll"),   # draws lines between points
+# The various plotting styles - scroll is currently a jump scroll
+stylemodes = (("lines", "scroll"),  # draws lines between points
               ("lines", "wrap"),
-              ("dots", "scroll"),    # just points - slightly quicker
+              ("dots", "scroll"),   # just points - slightly quicker
               ("dots", "wrap")
              )
-## Not implemented yet
-##              ("heatmap", "scroll"), # collects data for 1 second and displays min/avg/max
-##              ("heatmap", "wrap"))
-
 current_sm_idx = 0
 
 
+def d_print(level, *args, **kwargs):
+    """A simple conditional print for debugging based on global debug level."""
+    if not isinstance(level, int):
+        print(level, *args, **kwargs)
+    elif debug >= level:
+        print(*args, **kwargs)
+
+
 def select_colors(plttr, src, def_palette):
-    # Use any requested colors that are found in palette
-    # otherwise use defaults
+    """Choose the colours based on the particular PlotSource
+       or forcing use of default palette."""
+    ### otherwise use defaults
     channel_colidx = []
     palette = plttr.get_colors()
     colors = PlotSource.DEFAULT_COLORS if def_palette else src.colors()
-    for idx, col in enumerate(colors):
+    for col in colors:
         try:
             channel_colidx.append(palette.index(col))
-        except:
+        except ValueError:
             channel_colidx.append(PlotSource.DEFAULT_COLORS.index(col))
     return channel_colidx
 
 
 def ready_plot_source(plttr, srcs, def_palette, index=0):
-    source = srcs[index]
+    """Select the plot source index from list and then setup the plot parameters
+       by retrieving meta-data from the PlotSource object."""
+    src = srcs[index]
     ### Put the description of the source on screen at the top
-    source_name = str(source)
-    if debug:
-        print("Selecting source:", source_name)
-
+    source_name = str(src)
+    d_print(1, "Selecting source:", source_name)
     plttr.clear_all()
     plttr.title = source_name
-    plttr.y_axis_lab = source.units()
-    plttr.y_range = (source.initial_min(), source.initial_max())
-    plttr.y_full_range = (source.min(), source.max())
-    channels_from_source = source.values()
-    plttr.channels = channels_from_source
-    plttr.channel_colidx = select_colors(plttr, source, def_palette)
+    plttr.y_axis_lab = src.units()
+    ### The range on graph will start at this value
+    plttr.y_range = (src.initial_min(), src.initial_max())
+    ### Sensor/data source is expected to produce data between these values
+    plttr.y_full_range = (src.min(), src.max())
+    channels_from_src = src.values()
+    plttr.channels = channels_from_src  ### Can be between 1 and 3
+    plttr.channel_colidx = select_colors(plttr, src, def_palette)
 
-    source.start()
-    return (source, channels_from_source)
+    src.start()
+    return (src, channels_from_src)
 
 
-def print_data_rate(source):
+def print_data_rate(src):
     """Print data read rate for debugging and setting PlotSource rates."""
     for trial in range(5):
-        t1 = time.monotonic()
-        for i in range(100):
-            _ = source.data()
-        t2 = time.monotonic()
-        print("Read rate", trial, "at", 100.0 / (t2 - t1), "Hz")
+        t1 = time.monotonic_ns()
+        for _ in range(100):
+            _ = src.data()
+        t2 = time.monotonic_ns()
+        print("Read rate", trial, "at", 100 * 1e9 / (t2 - t1), "Hz")
 
 
 def wait_for_release(func):
-   t1 = time.monotonic()
-   while func():
-       pass
-   return (time.monotonic() - t1)
+    """Waits for passed function func to return a false value.
+       Used to measure how long buttons are depressed."""
+    t1 = time.monotonic_ns()
+    while func():
+        pass
+    return (time.monotonic_ns() - t1) * 1e-9
 
 
 def popup_text(plttr, text, duration=1.0):
+    """Place some text on the screen using info property of Plotter object
+       for duration seconds."""
     plttr.info = text
     time.sleep(duration)
     plttr.info = None
 
 
-# TODO - add user interface to change colours
-# TODO - add user interface to toggle MU output
 mu_plotter_output = False
 
 initial_title = "CLUE Plotter"
+### displayio has some static limits on text - pre-calculate the maximum
+### length of all of the different PlotSource objects
 max_title_len = max(len(initial_title), max([len(str(so)) for so in sources]))
 plotter = Plotter(board.DISPLAY,
                   style=stylemodes[current_sm_idx][0],
@@ -172,25 +165,25 @@ plotter = Plotter(board.DISPLAY,
                   mu_output=mu_plotter_output,
                   debug=debug)
 
-# If set to true this forces use of colour blindness friendly colours
+### If set to true this forces use of colour blindness friendly colours
 default_palette = False
 
-clue.pixel[0] = (0, 0, 0)  # turn off the NeoPixel on the back of CLUE board
+clue.pixel[0] = clue.BLACK  ### turn off the NeoPixel on the back of CLUE board
 
 plotter.display_on()
 
 while True:
-    # set the source and start items
+    ### set the source and start items
     (source, channels) = ready_plot_source(plotter, sources,
                                            default_palette, current_source_idx)
     if debug >= 5:
         print_data_rate(source)
 
     while True:
-        # read data
+        ### read data from sensor or voltage from pad
         all_data = source.data()
 
-        # check for left (A) and right (B) button presses
+        ### check for left (A) and right (B) buttons
         if clue.button_a:  # change plot source
             release_time = wait_for_release(lambda: clue.button_a)
             if release_time > 3.0:
@@ -209,9 +202,9 @@ while True:
                                                        default_palette)
             else:
                 current_source_idx = (current_source_idx + 1) % len(sources)
-                break  # to select the new source
+                break  ### to leave inner while and select the new source
 
-        if clue.button_b:  # change plot style and mode
+        if clue.button_b:  ### change plot style and mode
             current_sm_idx = (current_sm_idx + 1) % len(stylemodes)
             (new_style, new_mode) = stylemodes[current_sm_idx]
             plotter.info = new_style + "\n" + new_mode
@@ -220,7 +213,7 @@ while True:
             d_print(1, "Graph change", new_style, new_mode)
             plotter.change_stylemode(new_style, new_mode)
 
-        # display it
+        ### display it
         if channels == 1:
             plotter.data_add((all_data,))
         else:

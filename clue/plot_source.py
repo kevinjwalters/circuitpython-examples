@@ -23,32 +23,22 @@
 """
 `plot_source`
 ================================================================================
-CircuitPython library for the clue-plotter application.
+CircuitPython library for the my_clue-plotter application.
 
 * Author(s): Kevin J. Walters
 
 Implementation Notes
 --------------------
 **Hardware:**
-* Adafruit CLUE <https://www.adafruit.com/product/4500>
+* Adafruit my_clue <https://www.adafruit.com/product/4500>
 **Software and Dependencies:**
-* Adafruit's CLUE library: https://github.com/adafruit/Adafruit_CircuitPython_CLUE
+* Adafruit's my_clue library: https://github.com/adafruit/Adafruit_CircuitPython_CLUE
 """
 
 import math
 
-import board
 import analogio
 
-# There's a form of on-demand instanitation for touch pads
-# but analogio can be used if touch_0 - touch_3 have not been used
-from adafruit_clue import clue
-
-# remember this was a p3.reference_voltage which is 3.3
-# p3 = analogio.AnalogIn(board.P3)
-
-### if clue.touch_3 has not been used then it doesn't instantiate
-### the TouchIn object so there's no problem with creating an AnalogIn
 
 ### TODO - lots of documentation on meaning/use of all these parameters
 ### TODO - lots of documentation on meaning/use of all these parameters
@@ -59,17 +49,18 @@ class PlotSource():
     RGB_COLORS = (0xff0000, 0x00ff00, 0x0000ff)
 
     def __init__(self, values, name, units="",
-                 min=0, max=65535, initial_min=None, initial_max=None,
+                 abs_min=0, abs_max=65535, initial_min=None, initial_max=None,
                  rate=None, colors=None, debug=0):
+        # pylint: disable=unidiomatic-typecheck
         if type(self) == PlotSource:
             raise TypeError("PlotSource must be subclassed")
         self._values = values
         self._name = name
         self._units = units
-        self._min = min
-        self._max = max
-        self._initial_min = initial_min if initial_min is not None else min
-        self._initial_max = initial_max if initial_max is not None else max
+        self._abs_min = abs_min
+        self._abs_max = abs_max
+        self._initial_min = initial_min if initial_min is not None else abs_min
+        self._initial_max = initial_max if initial_max is not None else abs_max
         self._rate = rate
         if colors is not None:
             self._colors = colors
@@ -84,10 +75,10 @@ class PlotSource():
         raise NotImplementedError()
 
     def min(self):
-        return self._min
+        return self._abs_min
 
     def max(self):
-        return self._max
+        return self._abs_max
 
     def initial_min(self):
         return self._initial_min
@@ -120,8 +111,8 @@ class TemperaturePlotSource(PlotSource):
     def _convert(self, value):
         return value * self._scale + self._offset
 
-    def __init__(self, clue, mode="Celsius"):
-        self._clue = clue
+    def __init__(self, my_clue, mode="Celsius"):
+        self._clue = my_clue
         if mode[0].lower() == "f":
             mode_name = "Fahrenheit"
             self._scale = 1.8
@@ -134,9 +125,10 @@ class TemperaturePlotSource(PlotSource):
             mode_name = "Celsius"
             self._scale = 1.0
             self._offset = 0.0
-        super().__init__(1, "Temperature", units="\u00b0" + mode_name[0],
-                         min=self._convert(0),
-                         max=self._convert(100),
+        super().__init__(1, "Temperature", # units="\u00b0" + mode_name[0],
+                         units=mode_name[0],
+                         abs_min=self._convert(0),
+                         abs_max=self._convert(100),
                          initial_min=self._convert(10),
                          initial_max=self._convert(40),
                          rate=24)
@@ -150,9 +142,10 @@ class PressurePlotSource(PlotSource):
     def _convert(self, value):
         return value * self._scale
 
-    def __init__(self, clue, mode="M"):
-        self._clue = clue
+    def __init__(self, my_clue, mode="M"):
+        self._clue = my_clue
         if mode[0].lower() == "i":
+            ### 29.92 inches mercury equivalent to 1013.25mb in ISA
             self._scale = 29.92 / 1013.25
             units = "inHg"
         else:
@@ -160,7 +153,7 @@ class PressurePlotSource(PlotSource):
             units = "hPa"  ### AKA millibars (mb)
 
         super().__init__(1, "Pressure", units=units,
-                         min=self._convert(300), max=self._convert(1100),
+                         abs_min=self._convert(300), abs_max=self._convert(1100),
                          initial_min=self._convert(980), initial_max=self._convert(1040),
                          rate=22)
 
@@ -169,10 +162,10 @@ class PressurePlotSource(PlotSource):
 
 
 class ProximityPlotSource(PlotSource):
-    def __init__(self, clue):
-        self._clue = clue
+    def __init__(self, my_clue):
+        self._clue = my_clue
         super().__init__(1, "Proximity",
-                         min=0, max=255,
+                         abs_min=0, abs_max=255,
                          rate=720)
 
     def data(self):
@@ -180,21 +173,22 @@ class ProximityPlotSource(PlotSource):
 
 
 class HumidityPlotSource(PlotSource):
-    def __init__(self, clue):
-        self._clue = clue
+    def __init__(self, my_clue):
+        self._clue = my_clue
         super().__init__(1, "Rel. Humidity", units="%",
-                         min=0, max=100, initial_min=20, initial_max=60,
+                         abs_min=0, abs_max=100, initial_min=20, initial_max=60,
                          rate=54)
 
     def data(self):
         return self._clue.humidity
 
-
+### If clue.touch_N has not been used then it doesn't instantiate
+### the TouchIn object so there's no problem with creating an AnalogIn...
 class PinPlotSource(PlotSource):
     def __init__(self, pin):
         try:
             pins = [p for p in pin]
-        except:
+        except TypeError:
             pins = [pin]
 
         self._pins = pins
@@ -206,7 +200,7 @@ class PinPlotSource(PlotSource):
         super().__init__(len(pins),
                          "Pad: " + ", ".join([str(p).split('.')[-1] for p in pins]),
                          units="V",
-                         min=0.0, max=math.ceil(self._reference_voltage),
+                         abs_min=0.0, abs_max=math.ceil(self._reference_voltage),
                          rate=10000)
 
     def data(self):
@@ -221,28 +215,29 @@ class PinPlotSource(PlotSource):
 
 
 class ColorPlotSource(PlotSource):
-    def __init__(self, clue):
-        self._clue = clue
+    def __init__(self, my_clue):
+        self._clue = my_clue
         super().__init__(3, "Color: R, G, B",
-                         min=0, max=8000,  ### 7169 looks like max
+                         abs_min=0, abs_max=8000,  ### 7169 looks like max
                          rate=50,
                          colors=self.RGB_COLORS,
                          )
 
     def data(self):
-        (r, g, b, c) = self._clue.color
+        (r, g, b, _) = self._clue.color  ### fourth value is clear value
         return (r, g, b)
 
     def start(self):
         ### These values will affect the maximum return value
         ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
+        # pylint: disable=protected-access
         self._clue._sensor.integration_time = 249 # 19.46ms, ~ 50Hz
         self._clue._sensor.color_gain = 0x02 # 16x (library default is 4x)
 
 
 class IlluminatedColorPlotSource(PlotSource):
-    def __init__(self, clue, mode="Clear"):
-        self._clue = clue
+    def __init__(self, my_clue, mode="Clear"):
+        self._clue = my_clue
         col_fl_lc = mode[0].lower()
         if col_fl_lc == "r":
             plot_colour = self.RGB_COLORS[0]
@@ -257,7 +252,7 @@ class IlluminatedColorPlotSource(PlotSource):
 
         self._channel = col_fl_lc
         super().__init__(1, "Ilum. color: " + self._channel.upper(),
-                         min=0, max=8000,
+                         abs_min=0, abs_max=8000,
                          initial_min=0, initial_max=2000,
                          colors=(plot_colour,),
                          rate=50)
@@ -277,6 +272,7 @@ class IlluminatedColorPlotSource(PlotSource):
 
     def start(self):
         ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
+        # pylint: disable=protected-access
         self._clue._sensor.integration_time = 249 # 19.46ms, ~ 50Hz
         self._clue._sensor.color_gain = 0x03 # 64x (library default is 4x)
 
@@ -287,10 +283,10 @@ class IlluminatedColorPlotSource(PlotSource):
 
 
 class VolumePlotSource(PlotSource):
-    def __init__(self, clue):
-        self._clue = clue
+    def __init__(self, my_clue):
+        self._clue = my_clue
         super().__init__(1, "Volume", units="dB",
-                         min=0, max=97+3,   ### 97dB is 16bit dynamic range
+                         abs_min=0, abs_max=97+3,   ### 97dB is 16bit dynamic range
                          initial_min=10, initial_max=60,
                          rate=41)
 
@@ -307,42 +303,42 @@ class VolumePlotSource(PlotSource):
 ###        if read in a tight loop
 ### CP standard says this should be radians per second
 ### but library returns degrees per second
-### https://circuitpython.readthedocs.io/en/latest/docs/design_guide.html#sensor-properties-and-units
+### https://circuitpython.readthedocs.io/en/latest/docs/design_guide.html
 ### https://github.com/adafruit/Adafruit_CircuitPython_LSM6DS/issues/9
 class GyroPlotSource(PlotSource):
-    def __init__(self, clue):
-        self._clue = clue
+    def __init__(self, my_clue):
+        self._clue = my_clue
         super().__init__(3, "Gyro", units="dps",
-                         min=-287-13, max=287+13,  ### 286.703 appears to be max
+                         abs_min=-287-13, abs_max=287+13,  ### 286.703 appears to be max
                          initial_min=-100, initial_max=100,
                          colors=self.RGB_COLORS,
                          rate=500)
 
     def data(self):
-        return clue.gyro
+        return self._clue.gyro
 
 
 class AccelerometerPlotSource(PlotSource):
-    def __init__(self, clue):
-        self._clue = clue
+    def __init__(self, my_clue):
+        self._clue = my_clue
         super().__init__(3, "Accelerometer", units="ms-2",
-                         min=-40, max=40,  ### 39.1992 approx max
+                         abs_min=-40, abs_max=40,  ### 39.1992 approx max
                          initial_min=-20, initial_max=20,
                          colors=self.RGB_COLORS,
                          rate=500)
 
     def data(self):
-        return clue.acceleration
+        return self._clue.acceleration
 
 
 class MagnetometerPlotSource(PlotSource):
-    def __init__(self, clue):
-        self._clue = clue
+    def __init__(self, my_clue):
+        self._clue = my_clue
         super().__init__(3, "Magnetometer", units="uT",
-                         min=-479-21, max=479+21,  ### 478.866 approx max
+                         abs_min=-479-21, abs_max=479+21,  ### 478.866 approx max
                          initial_min=-80, initial_max=80,  ### Earth around 60uT
                          colors=self.RGB_COLORS,
                          rate=500)
 
     def data(self):
-        return clue.magnetic
+        return self._clue.magnetic
