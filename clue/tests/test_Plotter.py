@@ -35,6 +35,10 @@ sys.modules['displayio'] = MagicMock()
 sys.modules['terminalio'] = MagicMock()
 sys.modules['adafruit_display_text.label'] = MagicMock()
 
+# Replicate CircuitPython's time.montonic_ns()
+import time
+time.monotonic_ns = lambda: int(time.monotonic() * 1e9)
+
 # Borrowing the dhalbert/tannewt technique from adafruit/Adafruit_CircuitPython_Motor
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

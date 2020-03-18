@@ -1,4 +1,4 @@
-### clue-plotter v1.9
+### clue-plotter v1.10
 ### Sensor and input plotter for Adafruit CLUE in CircuitPython
 ### This plots the sensors and three of the analogue inputs on
 ### the LCD display either with scrolling or wrap mode which
@@ -49,7 +49,7 @@ from plotter import Plotter
 debug = 1
 
 
-# A list of all the data source for the plotting
+### A list of all the data source for the plotting
 sources = [TemperaturePlotSource(clue, mode="Celsius"),
            TemperaturePlotSource(clue, mode="Fahrenheit"),
            PressurePlotSource(clue, mode="Metric"),
@@ -67,13 +67,13 @@ sources = [TemperaturePlotSource(clue, mode="Celsius"),
            MagnetometerPlotSource(clue),
            PinPlotSource([board.P0, board.P1, board.P2])
           ]
-# The first source to select when plotting starts
+### The first source to select when plotting starts
 current_source_idx = 0
 
-# The various plotting styles - scroll is currently a jump scroll
-stylemodes = (("lines", "scroll"),  # draws lines between points
+### The various plotting styles - scroll is currently a jump scroll
+stylemodes = (("lines", "scroll"),  ### draws lines between points
               ("lines", "wrap"),
-              ("dots", "scroll"),   # just points - slightly quicker
+              ("dots", "scroll"),   ### just points - slightly quicker
               ("dots", "wrap")
              )
 current_sm_idx = 0
@@ -171,7 +171,7 @@ default_palette = False
 clue.pixel[0] = clue.BLACK  ### turn off the NeoPixel on the back of CLUE board
 
 plotter.display_on()
-### Using left and right here in case CLUE is cased hiding A/B labels
+### Using left and right here in case the CLUE is cased hiding A/B labels
 popup_text(plotter,
            "\n".join(["Button Guide",
                       "Left: sensor change",
@@ -191,15 +191,15 @@ while True:
         all_data = source.data()
 
         ### check for left (A) and right (B) buttons
-        if clue.button_a:  # change plot source
+        if clue.button_a:
             release_time = wait_for_release(lambda: clue.button_a)
-            if release_time > 3.0:
+            if release_time > 3.0:  ### toggle Mu output
                 mu_plotter_output = not mu_plotter_output
                 plotter.mu_output = mu_plotter_output
                 popup_text(plotter,
                            "Mu output "
                            + ("on" if mu_plotter_output else "off"))
-            elif release_time > 1.0:
+            elif release_time > 1.0:  ### toggle palette
                 default_palette = not default_palette
                 popup_text(plotter,
                            ("default" if default_palette else "source")
@@ -207,7 +207,7 @@ while True:
 
                 plotter.channel_colidx = select_colors(plotter, source,
                                                        default_palette)
-            else:
+            else:  ### change plot source
                 current_source_idx = (current_source_idx + 1) % len(sources)
                 break  ### to leave inner while and select the new source
 

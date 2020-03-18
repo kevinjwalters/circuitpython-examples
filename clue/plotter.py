@@ -92,6 +92,11 @@ class Plotter():
     POS_INF = float("inf")
     NEG_INF = float("-inf")
 
+    ### Approximate number of seconds to review data for zooming in
+    ### and how often to do that check
+    ZOOM_IN_TIME = 8
+    ZOOM_IN_CHECK_TIME_NS = 5 * 1e9
+
     _GRID_COLOR = 0x308030
     _GRID_DOT_SPACING = 8
 
@@ -156,18 +161,20 @@ class Plotter():
             self._data_y_pos.append(array.array('i', [0] * self._data_size))
             self._data_value.append(array.array('f', [0.0] * self._data_size))
 
-        ### Clear the values which indicate which values from those arrays
-        ### are in use
         ### begin-keep-pylint-happy
         self._data_min = None
         self._data_max = None
-        self._datastats = None
+        self._data_mins = None
+        self._data_maxs = None
+        self._data_stats_maxlen = None
+        self._data_stats = None
         self._values = None
         self._data_values = None
         self._x_pos = None
         self._data_idx = None
         self._offscreen = None
-        self._plot_offscale = None
+        self._plot_offyscale = None
+        self._plot_lastzoom_ns = None
         ### end-keep-pylint-happy
         self._init_data()
 
@@ -190,7 +197,7 @@ class Plotter():
 
         self._font = terminalio.FONT
         self._y_axis_lab = ""
-        self._y_lab_width = 5
+        self._y_lab_width = 5  # maximum characters for y axis label
         self._y_lab_color = self._LABEL_COLOR
 
         self._displayio_graph = None
@@ -205,22 +212,21 @@ class Plotter():
         # Allocate arrays for each possible channel with plot_width elements
         self._data_min = self.POS_INF
         self._data_max = self.NEG_INF
+        self._data_mins = [self.POS_INF]
+        self._data_maxs = [self.NEG_INF]
+        self._data_start_ns = [time.monotonic_ns()]
+        self._data_stats_maxlen = 10
 
         # When in use the arrays in here are variable length
-        self._datastats = [[] * self._max_channels]
+        self._data_stats = [[] * self._max_channels]
 
-        self._values = 0  # total data processed
-        self._data_values = 0  # valid values in data_y_pos and data_value
+        self._values = 0  ### total data processed
+        self._data_values = 0  ### valid elements in data_y_pos and data_value
         self._x_pos = 0
         self._data_idx = 0
         self._offscreen = False
-        self._plot_offscale = False
-
-        # This is created to facilitate fast clear of the plot Bitmap
-        #self._transparent_array = array.array('B')
-        #self._row_of_zeros = array.array('B', [0] * self._plot_width)
-        #for row in range(self._plot_height):
-        #    self._transparent_array.extend(row_of_zeros)
+        self._plot_offyscale = False
+        self._plot_lastzoom_ns = 0  ### monotonic_ns() for last zoom in
 
     def _recalc_y_pos(self):
         """Recalculates _data_y_pos based on _data_value for changes in y scale."""
@@ -413,7 +419,7 @@ class Plotter():
     def _clear_plot_bitmap(self):
         if not self._plot_dirty:
             return
-        t1 = time.monotonic()
+        t1 = time.monotonic_ns()
         # This approach gave
         # "MemoryError: memory allocation failed, allocating 20100 bytes"
         #(tg_plot, plot) = self._make_empty_tg_plot_bitmap()
@@ -427,7 +433,7 @@ class Plotter():
                 self._displayio_plot[xx, yy] = self.TRANSPARENT_IDX
 
         if self._debug >= 4:
-            print("Clear plot bitmap", time.monotonic() - t1)
+            print("Clear plot bitmap", (time.monotonic_ns() - t1) * 1e-9)
         self._plot_dirty = False
 
     # This is almost always going to be quicker
@@ -536,18 +542,71 @@ class Plotter():
 
         self._plot_dirty = True
 
-    def _data_store_draw(self, values, x_pos, data_idx):
+    def _update_stats(self, value):
+        """Update the statistics for minimum and maximum."""
+        if value < self._data_min:
+            self._data_min = value
+        if value > self._data_max:
+            self._data_max = value
+
+        ### Occasionally check if we need to add a new bucket to stats
+        no_new_bucket = True
+        if self._values & 0xf == 0:
+            now_ns = time.monotonic_ns()
+            if  now_ns - self._data_start_ns[-1] > 1e9:
+                self._data_start_ns.append(now_ns)
+                self._data_mins.append(value)
+                self._data_maxs.append(value)
+                no_new_bucket = False
+                ### Remove the first elements if too long
+                if len(self._data_start_ns) > self._data_stats_maxlen:
+                    self._data_start_ns.pop(0)
+                    self._data_mins.pop(0)
+                    self._data_maxs.pop(0)
+
+        if no_new_bucket:
+            if value < self._data_mins[-1]:
+                self._data_mins[-1] = value
+            if value > self._data_maxs[-1]:
+                self._data_maxs[-1] = value
+
+    def _check_zoom_in(self):
+        start_idx = len(self._data_start_ns) - self.ZOOM_IN_TIME
+        if start_idx < 0:
+            return ()
+
+        now_ns = time.monotonic_ns()
+        if now_ns < self._plot_lastzoom_ns + self.ZOOM_IN_CHECK_TIME_NS:
+            return ()
+        self._plot_lastzoom_ns = now_ns
+
+        # TODO - need to avoid zooming in too much
+        # proximity (0-255) can easily give min = max then it is division by zero time
+        # should recent_range be expanded to (abs_max - abs_min) * 1/1000 ?
+        # or should PlotSource hand out this value with a default and overrides ??
+
+        recent_min = min(self._data_mins[start_idx:])
+        recent_max = max(self._data_maxs[start_idx:])
+        recent_range = recent_max - recent_min
+        headroom = recent_range * 0.2
+
+        if (self._plot_min > recent_min - headroom
+                and self._plot_max < recent_max + headroom):
+            return ()
+
+        return (recent_min - headroom, recent_max + headroom)
+
+    def _data_store(self, values, data_idx):
+        for ch_idx, value in enumerate(values):
+            # store value and update min/max as required
+            self._data_value[ch_idx][data_idx] = value
+            self._update_stats(value)
+
+    def _data_draw(self, values, x_pos, data_idx):
         offscale = False
         rescale_not_needed = True
 
         for ch_idx, value in enumerate(values):
-            # store value and update min/max as required
-            self._data_value[ch_idx][data_idx] = value
-            if value < self._data_min:
-                self._data_min = value
-            if value > self._data_max:
-                self._data_max = value
-
             # last two parameters appear "swapped" - this deals with the
             # displayio screen y coordinate increasing downwards
             y_pos = round(mapf(value,
@@ -556,7 +615,7 @@ class Plotter():
 
             if y_pos < 0 or y_pos >= self._plot_height:
                 offscale = True
-                self._plot_offscale = offscale
+                self._plot_offyscale = offscale
                 if self._scale_mode == "pixel":
                     rescale_not_needed = False
 
@@ -577,32 +636,36 @@ class Plotter():
         return rescale_not_needed
 
     def _auto_plot_range(self):
+        changed = False
         plot_range = self._data_max - self._data_min
         headroom = plot_range * 0.2
         new_plot_min = max(self._data_min - headroom, self._abs_min)
         new_plot_max = min(self._data_max + headroom, self._abs_max)
 
-        # set new range which will also redo y tick labels if necessary
-        self.y_range = (new_plot_min, new_plot_max)
-        self._plot_offscale = False
+        if (new_plot_min != self._plot_min or new_plot_max != self._plot_max):
+            # set new range which will also redo y tick labels if necessary
+            self.y_range = (new_plot_min, new_plot_max)
+            changed = True
+
+        self._plot_offyscale = False
+        return changed
 
     def data_add(self, values):
         # pylint: disable=too-many-branches
         data_idx = self._data_idx
+        rescaled = False
 
-        ### TODO - ponder this
-        ###        as it will not catch anything in values being off the scale
-        ###        just historical points
-        if self._x_pos == 0 and self._mode == "wrap" and self._plot_offscale:
-            self._auto_plot_range()
+        # This first check could be improved to check data in values too
+        if self._x_pos == 0 and self._mode == "wrap" and self._plot_offyscale:
+            rescaled = self._auto_plot_range()
 
-        if self._offscreen and self._mode == "scroll":
+        elif self._offscreen and self._mode == "scroll":
             # Clear and redraw the bitmap to scroll it leftward
             #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
             self._undraw_bitmap()
-            if self._plot_offscale:
+            if self._plot_offyscale:
                 self._suppress_one_redraw = True
-                self._auto_plot_range()
+                rescaled = self._auto_plot_range()
             sc_data_idx = ((data_idx + self._scroll_px - self._plot_width)
                            % self._data_size)
             self._data_values -= self._scroll_px
@@ -618,14 +681,18 @@ class Plotter():
 
         x_pos = self._x_pos
 
-        # add the data and draw it unless a y axis is going to be rescaled
-        if not self._data_store_draw(values, x_pos, data_idx):
-            # TODO - this auto_plot_range needs some sort of hint not to redraw
-            # an erased column from previous self._undraw_column()
+        ### Add the data and draw it unless a y axis is going to be rescaled
+        self._data_store(values, data_idx)
+        if not rescaled and self._values & 0xf == 0:
+            rescale_zoom_range = self._check_zoom_in()
+            if rescale_zoom_range:
+                print("ZOOM IN", rescale_zoom_range)
+                self.y_range = rescale_zoom_range
+
+        rescale_needed = not self._data_draw(values, x_pos, data_idx)
+        if rescale_needed:
             self._auto_plot_range()        # rescale y range
-            # TODO - also check self._data_y_pos for rescaling
-            # draw with new range
-            self._data_store_draw(values, x_pos, data_idx)
+            self._data_draw(values, x_pos, data_idx)
 
         # increment the data index wrapping around
         self._data_idx += 1
