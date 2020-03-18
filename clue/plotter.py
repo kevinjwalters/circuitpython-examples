@@ -79,12 +79,14 @@ class Plotter():
 
     ### Palette for plotting, first one is set transparent
     TRANSPARENT_IDX = 0
+    ### Removed one colour to get number down to 8 for more efficient
+    ### bit-packing in displayio's Bitmap
     _PLOT_COLORS = (0x000000,
                     0x0000ff,
                     0x00ff00,
                     0x00ffff,
                     0xff0000,
-                    0xff00ff,
+                    # 0xff00ff,
                     0xffff00,
                     0xffffff,
                     0xff0080)
@@ -191,6 +193,7 @@ class Plotter():
         # The current plot min/max
         self._plot_min = None
         self._plot_max = None
+        self._plot_min_range = None  ### Used partly to prevent div by zero
 
         self._plot_dirty = False  ### flag indicate some data has been plotted
         self._suppress_one_redraw = False  ### flag used to incr. efficiency
@@ -280,7 +283,6 @@ class Plotter():
             self._display_manual()
 
     def _make_empty_tg_plot_bitmap(self):
-        # Reducing to 8 colours here would save some memory due to bitpacking
         plot_bitmap = displayio.Bitmap(self._plot_width, self._plot_height,
                                        len(self._PLOT_COLORS))
         # Create a colour palette for plot dots/lines
@@ -298,6 +300,7 @@ class Plotter():
     def _make_tg_grid(self):
         grid_width  = self._plot_width + 1
         grid_height = self._plot_height
+        grid_height = self._plot_height // 2  ## QUICK HACK FOR TESTING - UNDO TODO
         plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
 
         # horizontal lines
@@ -571,6 +574,10 @@ class Plotter():
                 self._data_maxs[-1] = value
 
     def _check_zoom_in(self):
+        """Check if recent data warrants zooming in on y axis scale based on checking
+           minimum and maximum times which are recorded in approximate 1 second buckets.
+           Returns two element tuple with (min, max) or empty tuple for no zoom required.
+           Caution is required with min == max."""
         start_idx = len(self._data_start_ns) - self.ZOOM_IN_TIME
         if start_idx < 0:
             return ()
@@ -579,11 +586,6 @@ class Plotter():
         if now_ns < self._plot_lastzoom_ns + self.ZOOM_IN_CHECK_TIME_NS:
             return ()
         self._plot_lastzoom_ns = now_ns
-
-        # TODO - need to avoid zooming in too much
-        # proximity (0-255) can easily give min = max then it is division by zero time
-        # should recent_range be expanded to (abs_max - abs_min) * 1/1000 ?
-        # or should PlotSource hand out this value with a default and overrides ??
 
         recent_min = min(self._data_mins[start_idx:])
         recent_max = max(self._data_maxs[start_idx:])
@@ -792,12 +794,28 @@ class Plotter():
 
     @y_range.setter
     def y_range(self, minmax):
+        y_min, y_max = minmax
+
+        ### if values reduce range below the minimum then widen the range
+        ### but keep it within the absolute min/max values
+        if self._plot_min_range is not None:
+            range_extend = self._plot_min_range - (y_max - y_min)
+            if range_extend > 0:
+                y_max += range_extend / 2
+                y_min -= range_extend / 2
+                if y_min < self._abs_min:
+                    y_min = self._abs_min
+                    y_max = y_min + self._plot_min_range
+                elif y_max > self._abs_max:
+                    y_max = self._abs_max
+                    y_min = y_max - self._plot_min_range
+
         changed = False
         if minmax[0] != self._plot_min:
-            self._plot_min = minmax[0]
+            self._plot_min = y_min
             changed = True
         if minmax[1] != self._plot_max:
-            self._plot_max = minmax[1]
+            self._plot_max = y_max
             changed = True
 
         if changed:
@@ -819,6 +837,14 @@ class Plotter():
     def y_full_range(self, minmax):
         self._abs_min = minmax[0]
         self._abs_max = minmax[1]
+
+    @property
+    def y_min_range(self):
+        return self._plot_min_range
+
+    @y_min_range.setter
+    def y_min_range(self, value):
+        self._plot_min_range = value
 
     @property
     def y_axis_lab(self):

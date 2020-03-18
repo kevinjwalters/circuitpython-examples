@@ -114,6 +114,7 @@ def ready_plot_source(plttr, srcs, def_palette, index=0):
     plttr.y_axis_lab = src.units()
     ### The range on graph will start at this value
     plttr.y_range = (src.initial_min(), src.initial_max())
+    plttr.y_min_range = src.range_min()
     ### Sensor/data source is expected to produce data between these values
     plttr.y_full_range = (src.min(), src.max())
     channels_from_src = src.values()

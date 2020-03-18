@@ -50,6 +50,7 @@ class PlotSource():
 
     def __init__(self, values, name, units="",
                  abs_min=0, abs_max=65535, initial_min=None, initial_max=None,
+                 range_min=None,
                  rate=None, colors=None, debug=0):
         # pylint: disable=unidiomatic-typecheck
         if type(self) == PlotSource:
@@ -61,6 +62,10 @@ class PlotSource():
         self._abs_max = abs_max
         self._initial_min = initial_min if initial_min is not None else abs_min
         self._initial_max = initial_max if initial_max is not None else abs_max
+        if range_min is None:
+            self._range_min = (abs_max - abs_min) / 100  ### 1% of full range
+        else:
+            self._range_min = range_min
         self._rate = rate
         if colors is not None:
             self._colors = colors
@@ -85,6 +90,9 @@ class PlotSource():
 
     def initial_max(self):
         return self._initial_max
+
+    def range_min(self):
+        return self._range_min
 
     def start(self):
         pass

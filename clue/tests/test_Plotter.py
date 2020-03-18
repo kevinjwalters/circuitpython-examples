@@ -21,10 +21,10 @@
 # THE SOFTWARE.
 
 import unittest
-from unittest.mock import Mock, MagicMock, call
+from unittest.mock import Mock, MagicMock
 
+import time
 import array
-import numpy
 import os
 verbose = int(os.getenv('TESTVERBOSE', '2'))
 
@@ -35,8 +35,9 @@ sys.modules['displayio'] = MagicMock()
 sys.modules['terminalio'] = MagicMock()
 sys.modules['adafruit_display_text.label'] = MagicMock()
 
+import numpy
+
 # Replicate CircuitPython's time.montonic_ns()
-import time
 time.monotonic_ns = lambda: int(time.monotonic() * 1e9)
 
 # Borrowing the dhalbert/tannewt technique from adafruit/Adafruit_CircuitPython_Motor
@@ -52,6 +53,7 @@ terminalio.FONT.get_bounding_box = Mock(return_value=(6, 14))
 
 # TODO use setup() and tearDown() - https://docs.python.org/3/library/unittest.html#unittest.TestCase.tearDown
 
+# pylint: disable=protected-access
 class Test_Plotter(unittest.TestCase):
 
     _SCROLL_PX = 25
@@ -60,13 +62,13 @@ class Test_Plotter(unittest.TestCase):
         mocked_display = Mock()
 
         plotter = Plotter(mocked_display,
-                  style=style,
-                  mode=mode,
-                  scroll_px=self._SCROLL_PX,
-                  title="Debugging",
-                  max_title_len=99,
-                  mu_output=False,
-                  debug=0)
+                          style=style,
+                          mode=mode,
+                          scroll_px=self._SCROLL_PX,
+                          title="Debugging",
+                          max_title_len=99,
+                          mu_output=False,
+                          debug=0)
 
         return plotter
 
@@ -78,6 +80,7 @@ class Test_Plotter(unittest.TestCase):
         #plttr.y_axis_lab = source.units()
         plttr.y_range = (source.initial_min(), source.initial_max())
         plttr.y_full_range = (source.min(), source.max())
+        plttr.y_min_range = source.range_min()
         channels_from_source = source.values()
         plttr.channels = channels_from_source
         plttr.channel_colidx = (1, 2, 3)
@@ -90,14 +93,15 @@ class Test_Plotter(unittest.TestCase):
         ps.initial_max = Mock(return_value=100.0)
         ps.min = Mock(return_value=-100.0)
         ps.max = Mock(return_value=100.0)
+        ps.range_min = Mock(return_value=5.0)
         if channels == 1:
             ps.values = Mock(return_value=channels)
             ps.data = Mock(side_effect=list(range(10,90)) * 100)
         elif channels == 3:
             ps.values = Mock(return_value=channels)
             ps.data = Mock(side_effect=list(zip(list(range(10,90)),
-                                           list(range(15,95)),
-                                           list(range(40,60)) * 4)) * 100)
+                                                list(range(15,95)),
+                                                list(range(40,60)) * 4)) * 100)
         return ps
 
     def make_a_PlotSource_onespike(self):
@@ -106,10 +110,11 @@ class Test_Plotter(unittest.TestCase):
         ps.initial_max = Mock(return_value=100.0)
         ps.min = Mock(return_value=-100.0)
         ps.max = Mock(return_value=100.0)
+        ps.range_min = Mock(return_value=5.0)
 
         ps.values = Mock(return_value=1)
-        ps.data = Mock(side_effect=[0]*95 + [5,10,20,50,80,90,70,30,20,10]
-                                   + [0] * 95 + [1] * 1000)
+        ps.data = Mock(side_effect=([0]*95 + [5,10,20,50,80,90,70,30,20,10]
+                                    + [0] * 95 + [1] * 1000))
 
         return ps
 
@@ -119,12 +124,13 @@ class Test_Plotter(unittest.TestCase):
         ps.initial_max = Mock(return_value=100.0)
         ps.min = Mock(return_value=-1000.0)
         ps.max = Mock(return_value=1000.0)
+        ps.range_min = Mock(return_value=10.0)
 
         ps.values = Mock(return_value=1)
         ps.data = Mock(side_effect=[first_v] * 199 + [second_v] * 1001)
 
         return ps
-        
+
     def test_spike_after_wrap_and_overwrite_one_channel(self):
         """A specific test to check that a spike that appears in wrap mode is
            correctly cleared by subsequent flat data."""
@@ -166,7 +172,7 @@ class Test_Plotter(unittest.TestCase):
         self.assertTrue(9 not in non_zero_rows,
                         "Check nothing is just above 90 which plots at 10")
         self.assertEqual(non_zero_rows, [99, 100],
-                        "Only pixels left plotted should be from values 0 and 1 being plotted at 99 and 100")
+                         "Only pixels left plotted should be from values 0 and 1 being plotted at 99 and 100")
         self.assertTrue(numpy.alltrue(plot[:, 99] == [1] * 190 + [0] * 10),
                         "Checking row 99 precisely")
         self.assertTrue(numpy.alltrue(plot[:, 100] == [0] * 190 + [1] * 10),
@@ -290,7 +296,8 @@ class Test_Plotter(unittest.TestCase):
         st_x_pos = width - self._SCROLL_PX
         d_idx = plotter._data_idx - 3
 
-        self.assertTrue(3 < self._SCROLL_PX, "Ensure no recent scrolling")
+        self.assertTrue(self._SCROLL_PX > 3,
+                        "Ensure no scrolling occurred from recent 3 values")
         # the data_idx here is 2 because the size is now plot_width + 1
         self.assertEqual(plotter._data_idx, 2)
         self.assertEqual(plotter._x_pos, st_x_pos + 3)
@@ -405,7 +412,7 @@ class Test_Plotter(unittest.TestCase):
                 non_zero_rows.append(y_pos)
 
         self.assertEqual(non_zero_rows, list(range(0, 40 + 1)),
-                        "From value 60 being plotted at 40 but also upward line at end")
+                         "From value 60 being plotted at 40 but also upward line at end")
 
         # Rewrite screen with next 200 but these should force an internal
         # rescaling of y axis
@@ -425,7 +432,26 @@ class Test_Plotter(unittest.TestCase):
                 non_zero_rows.append(y_pos)
 
         self.assertEqual(non_zero_rows, [18],
-                        "Only pixels now should be from value 900 being plotted at 18")
+                         "Only pixels now should be from value 900 being plotted at 18")
+
+        plotter.display_off()
+
+    def test_rescale_zoom_in_minequalsmax(self):
+        """Test y_range adjusts any attempt to set the effective range to 0."""
+        plotter = self.make_a_Plotter("lines", "wrap")
+        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        plotter.display_on(tg_and_plot=(tg, plot))
+        test_source1 = self.make_a_PlotSource_bilevel(first_v=20, second_v=20)
+
+        self.ready_plot_source(plotter, test_source1)
+        ### Set y_range to a value which will cause a range of 0 with
+        ### the potential dire consequence of divide by zero
+        plotter.y_range = (20, 20)
+
+        plotter.data_add((test_source1.data(),))
+        y_min, y_max = plotter.y_range
+        self.assertTrue(y_max - y_min > 0,
+                        "Range is not zero and implicityly ZeroDivisionError exception has not occurred.")
 
         plotter.display_off()
 
