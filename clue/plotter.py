@@ -98,6 +98,8 @@ class Plotter():
     ### and how often to do that check
     ZOOM_IN_TIME = 8
     ZOOM_IN_CHECK_TIME_NS = 5 * 1e9
+    ### 20% headroom either side on zoom in/out
+    ZOOM_HEADROOM = 20 / 100
 
     _GRID_COLOR = 0x308030
     _GRID_DOT_SPACING = 8
@@ -590,13 +592,16 @@ class Plotter():
         recent_min = min(self._data_mins[start_idx:])
         recent_max = max(self._data_maxs[start_idx:])
         recent_range = recent_max - recent_min
-        headroom = recent_range * 0.2
+        headroom = recent_range * self.ZOOM_HEADROOM
 
+        ### No zoom if the range of data is near the plot range
         if (self._plot_min > recent_min - headroom
                 and self._plot_max < recent_max + headroom):
             return ()
 
-        return (recent_min - headroom, recent_max + headroom)
+        new_plot_min = max(recent_min - headroom, self._abs_min)
+        new_plot_max = min(recent_max + headroom, self._abs_max)
+        return (new_plot_min, new_plot_max)
 
     def _data_store(self, values, data_idx):
         for ch_idx, value in enumerate(values):
@@ -640,7 +645,7 @@ class Plotter():
     def _auto_plot_range(self):
         changed = False
         plot_range = self._data_max - self._data_min
-        headroom = plot_range * 0.2
+        headroom = plot_range * self.ZOOM_HEADROOM
         new_plot_min = max(self._data_min - headroom, self._abs_min)
         new_plot_max = min(self._data_max + headroom, self._abs_max)
 
@@ -688,7 +693,6 @@ class Plotter():
         if not rescaled and self._values & 0xf == 0:
             rescale_zoom_range = self._check_zoom_in()
             if rescale_zoom_range:
-                print("ZOOM IN", rescale_zoom_range)
                 self.y_range = rescale_zoom_range
 
         rescale_needed = not self._data_draw(values, x_pos, data_idx)
