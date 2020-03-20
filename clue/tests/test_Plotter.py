@@ -476,9 +476,9 @@ class Test_Plotter(unittest.TestCase):
         """Test y_range adjusts on data from a narrow range with unusual per pixel scaling mode."""
         ### There was a bug which was visually obvious in pixel scale_mode
         ### test this to ensure bug was squashed
-        
+
         # time.monotonic_ns.return_value = lambda: global_time_ns
-        
+
         local_time_ns = time.monotonic_ns()
         with patch('time.monotonic_ns', create=True, side_effect=lambda: local_time_ns) as time_monotonic_ns_fn:
             plotter = self.make_a_Plotter("lines", "wrap", scale_mode="pixel")
@@ -494,9 +494,7 @@ class Test_Plotter(unittest.TestCase):
             for d_idx in range(300):
                 val = test_source1.data()
                 plotter.data_add((val,))
-                local_time_ns += round(1/27 * 1e9)
-                print(time.monotonic_ns())
-                ###time.sleep(1/27)
+                local_time_ns += round(1/27 * 1e9)  ### emulation of time.sleep(1/27)
 
             y_min1, y_max1 = plotter.y_range
             self.assertAlmostEqual(y_min1, 232.4)
@@ -514,8 +512,7 @@ class Test_Plotter(unittest.TestCase):
             for d_idx in range(400):
                 val = test_source1.data()
                 plotter.data_add((val,))
-                local_time_ns += round(1/27 * 1e9)
-                ###time.sleep(1/27)
+                local_time_ns += round(1/27 * 1e9)  ### emulation of time.sleep(1/27)
 
             y_min2, y_max2 = plotter.y_range
             self.assertAlmostEqual(y_min2, 40.0)
@@ -526,7 +523,8 @@ class Test_Plotter(unittest.TestCase):
             ###self.assertEqual(list(unique2), [29, 100, 171])
             ###self.assertLessEqual(max(counts2) - min(counts2), 1)
 
-            aprint_plot(plot)
+            if verbose >=3:
+                aprint_plot(plot)
             ### Look for a specific bug which leaves some previous pixels
             ### set on screen at column 24
             ### Checking either side as this will be timing sensitive but the time

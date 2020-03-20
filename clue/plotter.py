@@ -73,7 +73,7 @@ def format_width(nchars, value):
 
 
 class Plotter():
-    _DEFAULT_SCALE_MODE = {"lines": "scroll",
+    _DEFAULT_SCALE_MODE = {"lines": "onscroll",
                            "dots": "screen",
                            "heatmap": "pixel"}
 
@@ -166,8 +166,6 @@ class Plotter():
             self._data_value.append(array.array('f', [0.0] * self._data_size))
 
         ### begin-keep-pylint-happy
-        self._data_min = None
-        self._data_max = None
         self._data_mins = None
         self._data_maxs = None
         self._data_stats_maxlen = None
@@ -177,7 +175,6 @@ class Plotter():
         self._x_pos = None
         self._data_idx = None
         self._offscreen = None
-        self._plot_offyscale = None
         self._plot_lastzoom_ns = None
         ### end-keep-pylint-happy
         self._init_data()
@@ -196,9 +193,7 @@ class Plotter():
         self._plot_min = None
         self._plot_max = None
         self._plot_min_range = None  ### Used partly to prevent div by zero
-
         self._plot_dirty = False  ### flag indicate some data has been plotted
-        self._suppress_one_redraw = False  ### flag used to incr. efficiency
 
         self._font = terminalio.FONT
         self._y_axis_lab = ""
@@ -215,8 +210,6 @@ class Plotter():
 
     def _init_data(self):
         # Allocate arrays for each possible channel with plot_width elements
-        self._data_min = self.POS_INF
-        self._data_max = self.NEG_INF
         self._data_mins = [self.POS_INF]
         self._data_maxs = [self.NEG_INF]
         self._data_start_ns = [time.monotonic_ns()]
@@ -230,7 +223,6 @@ class Plotter():
         self._x_pos = 0
         self._data_idx = 0
         self._offscreen = False
-        self._plot_offyscale = False
         self._plot_lastzoom_ns = 0  ### monotonic_ns() for last zoom in
 
     def _recalc_y_pos(self):
@@ -266,8 +258,8 @@ class Plotter():
             raise ValueError("mode not scroll or wrap")
         if scale_mode is None:
             scale_mode = self._DEFAULT_SCALE_MODE[style]
-        elif scale_mode not in ("pixel", "screen", "time"):
-            raise ValueError("scale_mode not pixel, screen or time")
+        elif scale_mode not in ("pixel", "onscroll", "screen", "time"):
+            raise ValueError("scale_mode not pixel, onscroll, screen or time")
 
         # Clearing everything on screen and everything stored in variables
         # is simplest approach here - clearing involves undrawing
@@ -421,28 +413,10 @@ class Plotter():
                                 step):
             self._displayio_plot[x1, line_y_pos] = colidx
 
-    def _clear_plot_bitmap(self):
-        if not self._plot_dirty:
-            return
-        t1 = time.monotonic_ns()
-        # This approach gave
-        # "MemoryError: memory allocation failed, allocating 20100 bytes"
-        #(tg_plot, plot) = self._make_empty_tg_plot_bitmap()
-        #self._displayio_plot = plot
-        #self._displayio_graph[1] = tg_plot
-        #self._displayio_plot[:] = self._transparent_array
+    ### def _clear_plot_bitmap(self):  ### woz here
 
-        # probably a fraction quicker with a single for loop?
-        for yy in range(self._plot_height):
-            for xx in range(self._plot_width):
-                self._displayio_plot[xx, yy] = self.TRANSPARENT_IDX
-
-        if self._debug >= 4:
-            print("Clear plot bitmap", (time.monotonic_ns() - t1) * 1e-9)
-        self._plot_dirty = False
-
-    # This is almost always going to be quicker
-    # than the slow _clear_plot_bitmap
+    ### This is almost always going to be quicker
+    ### than the slow _clear_plot_bitmap implemented on 5.0.0
     def _undraw_bitmap(self):
         if not self._plot_dirty:
             return
@@ -547,67 +521,37 @@ class Plotter():
 
         self._plot_dirty = True
 
-    def _update_stats(self, value):
+    def _update_stats(self, values):
         """Update the statistics for minimum and maximum."""
-        if value < self._data_min:
-            self._data_min = value
-        if value > self._data_max:
-            self._data_max = value
+        for idx, value in enumerate(values):
+            ### Occasionally check if we need to add a new bucket to stats
+            if idx == 0 and self._values & 0xf == 0:
+                now_ns = time.monotonic_ns()
+                if  now_ns - self._data_start_ns[-1] > 1e9:
+                    self._data_start_ns.append(now_ns)
+                    self._data_mins.append(value)
+                    self._data_maxs.append(value)
+                    ### Remove the first elements if too long
+                    if len(self._data_start_ns) > self._data_stats_maxlen:
+                        self._data_start_ns.pop(0)
+                        self._data_mins.pop(0)
+                        self._data_maxs.pop(0)
+                    continue
 
-        ### Occasionally check if we need to add a new bucket to stats
-        no_new_bucket = True
-        if self._values & 0xf == 0:
-            now_ns = time.monotonic_ns()
-            if  now_ns - self._data_start_ns[-1] > 1e9:
-                self._data_start_ns.append(now_ns)
-                self._data_mins.append(value)
-                self._data_maxs.append(value)
-                no_new_bucket = False
-                ### Remove the first elements if too long
-                if len(self._data_start_ns) > self._data_stats_maxlen:
-                    self._data_start_ns.pop(0)
-                    self._data_mins.pop(0)
-                    self._data_maxs.pop(0)
-
-        if no_new_bucket:
             if value < self._data_mins[-1]:
                 self._data_mins[-1] = value
             if value > self._data_maxs[-1]:
                 self._data_maxs[-1] = value
 
-    def _check_zoom_in(self, values):
-        """Check if recent data warrants zooming in on y axis scale based on checking
-           minimum and maximum times which are recorded in approximate 1 second buckets.
-           Returns two element tuple with (min, max) or empty tuple for no zoom required.
-           Caution is required with min == max."""
-        start_idx = len(self._data_start_ns) - self.ZOOM_IN_TIME
-        if start_idx < 0:
-            return ()
-
-        now_ns = time.monotonic_ns()
-        if now_ns < self._plot_lastzoom_ns + self.ZOOM_IN_CHECK_TIME_NS:
-            return ()
-        self._plot_lastzoom_ns = now_ns
-
-        recent_min = min(min(self._data_mins[start_idx:]), *values)
-        recent_max = max(max(self._data_maxs[start_idx:]), *values)
-        recent_range = recent_max - recent_min
-        headroom = recent_range * self.ZOOM_HEADROOM
-
-        ### No zoom if the range of data is near the plot range
-        if (self._plot_min > recent_min - headroom
-                and self._plot_max < recent_max + headroom):
-            return ()
-
-        new_plot_min = max(recent_min - headroom, self._abs_min)
-        new_plot_max = min(recent_max + headroom, self._abs_max)
-        return (new_plot_min, new_plot_max)
-
-    def _data_store(self, values, data_idx):
+    def _data_store(self, values):
+        """Store the data values in the circular buffer."""
         for ch_idx, value in enumerate(values):
-            # store value and update min/max as required
-            self._data_value[ch_idx][data_idx] = value
-            self._update_stats(value)
+            self._data_value[ch_idx][self._data_idx] = value
+
+        # increment the data index wrapping around
+        self._data_idx += 1
+        if self._data_idx >= self._data_size:
+            self._data_idx = 0
 
     def _data_draw(self, values, x_pos, data_idx):
         offscale = False
@@ -622,7 +566,6 @@ class Plotter():
 
             if y_pos < 0 or y_pos >= self._plot_height:
                 offscale = True
-                self._plot_offyscale = offscale
                 if self._scale_mode == "pixel":
                     rescale_not_needed = False
 
@@ -642,72 +585,111 @@ class Plotter():
 
         return rescale_not_needed
 
-    def _auto_plot_range(self):
-        ### TODO - this MAKES NO SENSE ANY MORE AS IT IS USING EXTREMES OF DATA
-        changed = False
-        plot_range = self._data_max - self._data_min
-        headroom = plot_range * self.ZOOM_HEADROOM
-        new_plot_min = max(self._data_min - headroom, self._abs_min)
-        new_plot_max = min(self._data_max + headroom, self._abs_max)
+    def _check_zoom_in(self):
+        """Check if recent data warrants zooming in on y axis scale based on checking
+           minimum and maximum times which are recorded in approximate 1 second buckets.
+           Returns two element tuple with (min, max) or empty tuple for no zoom required.
+           Caution is required with min == max."""
+        start_idx = len(self._data_start_ns) - self.ZOOM_IN_TIME
+        if start_idx < 0:
+            return ()
 
-        if (new_plot_min != self._plot_min or new_plot_max != self._plot_max):
-            # set new range which will also redo y tick labels if necessary
-            self.y_range = (new_plot_min, new_plot_max)
-            changed = True
+        now_ns = time.monotonic_ns()
+        if now_ns < self._plot_lastzoom_ns + self.ZOOM_IN_CHECK_TIME_NS:
+            return ()
 
-        self._plot_offyscale = False
-        return changed
+        recent_min = min(self._data_mins[start_idx:])
+        recent_max = max(self._data_maxs[start_idx:])
+        recent_range = recent_max - recent_min
+        headroom = recent_range * self.ZOOM_HEADROOM
+
+        ### No zoom if the range of data is near the plot range
+        if (self._plot_min > recent_min - headroom
+                and self._plot_max < recent_max + headroom):
+            return ()
+
+        new_plot_min = max(recent_min - headroom, self._abs_min)
+        new_plot_max = min(recent_max + headroom, self._abs_max)
+        return (new_plot_min, new_plot_max)
+
+    def _auto_plot_range(self, redraw_plot=True):
+        """Check if we need to zoom out or in.
+           """
+        zoom_in = False
+        zoom_out = False
+
+        ### Calcuate some new min/max values based on recentish data
+        ### and add some headroom
+        y_min = min(self._data_mins)
+        y_max = max(self._data_maxs)
+        y_range = y_max - y_min
+        headroom = y_range * self.ZOOM_HEADROOM
+        new_plot_min = max(y_min - headroom, self._abs_min)
+        new_plot_max = min(y_max + headroom, self._abs_max)
+
+        ### set new range if the data does not fit on the screen
+        ### this will also redo y tick labels if necessary
+        if (new_plot_min < self._plot_min or new_plot_max > self._plot_max):
+            if self._debug >= 2:
+                print("Zoom out")
+            self._change_y_range(new_plot_min, new_plot_max,
+                                 redraw_plot=redraw_plot)
+            zoom_out = True
+
+        else:  ### otherwise check if zoom in is warranted
+            rescale_zoom_range = self._check_zoom_in()
+            if rescale_zoom_range:
+                if self._debug >= 2:
+                    print("Zoom in")
+                self._change_y_range(rescale_zoom_range[0], rescale_zoom_range[1],
+                                     redraw_plot=redraw_plot)
+                zoom_in = True
+
+        if zoom_in or zoom_out:
+            self._plot_lastzoom_ns = time.monotonic_ns()
+            return True
+        return False
 
     def data_add(self, values):
         # pylint: disable=too-many-branches
+        changed = False
         data_idx = self._data_idx
-        rescaled = False
 
-        # This first check could be improved to check data in values too
-        if self._x_pos == 0 and self._mode == "wrap" and self._plot_offyscale:
-            rescaled = self._auto_plot_range()
+        self._update_stats(values)
 
-        if self._offscreen and self._mode == "scroll":
-            # Clear and redraw the bitmap to scroll it leftward
-            #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
-            self._undraw_bitmap()
-            if self._plot_offyscale:
-                self._suppress_one_redraw = True
-                rescaled = self._auto_plot_range()
-            sc_data_idx = ((data_idx + self._scroll_px - self._plot_width)
-                           % self._data_size)
-            self._data_values -= self._scroll_px
-            self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
-                              sc_data_idx)
+        if self._mode == "wrap":
+            if self._x_pos == 0 or self._scale_mode == "pixel":
+                changed = self._auto_plot_range(redraw_plot=False)
 
-            self._x_pos = self._plot_width - self._scroll_px
-            self._offscreen = False
+            ### Undraw any previous data at current x position
+            if (not changed and self._data_values >= self._plot_width
+                    and self._values >= self._plot_width):
+                self._undraw_column(self._x_pos, data_idx - self._plot_width)
 
-        elif (self._data_values >= self._plot_width
-              and self._values >= self._plot_width and self._mode == "wrap"):
-            self._undraw_column(self._x_pos, data_idx - self._plot_width)
+        elif self._mode == "scroll":
+            if self._offscreen:
+                changed = self._auto_plot_range(redraw_plot=False)
+                if not changed:
+                    self._undraw_bitmap()  ### Need to cls for the scroll
+
+                sc_data_idx = ((data_idx + self._scroll_px - self._plot_width)
+                               % self._data_size)
+                self._data_values -= self._scroll_px
+                self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
+                                  sc_data_idx)
+                self._x_pos = self._plot_width - self._scroll_px
+                self._offscreen = False
+
+            elif self._scale_mode == "pixel":
+                changed = self._auto_plot_range(redraw_plot=True)
 
         x_pos = self._x_pos
 
-        ### Add the data and draw it unless a y axis is going to be rescaled
-        self._data_store(values, data_idx)
-        if not rescaled and self._scale_mode != "TODOFIXPIXELpixel" and self._values & 0xf == 0:
-            rescale_zoom_range = self._check_zoom_in(values)
-            if rescale_zoom_range:
-                self.y_range = rescale_zoom_range
+        ### Draw the new data
+        self._data_draw(values, x_pos, data_idx)
 
-        rescale_needed = not self._data_draw(values, x_pos, data_idx)
-        if rescale_needed:
-            self._auto_plot_range()        # rescale y range
-            self._data_draw(values, x_pos, data_idx)
-
-        ### finally store the values in circular buffer
-        self._data_store(values, data_idx)
-
-        # increment the data index wrapping around
-        self._data_idx += 1
-        if self._data_idx >= self._data_size:
-            self._data_idx = 0
+        ### Store the new values in circular buffer
+        self._data_store(values)
 
         # increment x position dealing with wrap/scroll
         new_x_pos = x_pos + 1
@@ -733,6 +715,36 @@ class Plotter():
         # scrolling mode has automatic refresh in background turned off
         if self._mode == "scroll":
             self._display_refresh()
+
+    def _change_y_range(self, new_plot_min, new_plot_max, redraw_plot=True):
+        y_min = new_plot_min
+        y_max = new_plot_max
+        if self._debug >= 2:
+            print("Change Y range", new_plot_min, new_plot_max, redraw_plot)
+
+        ### if values reduce range below the minimum then widen the range
+        ### but keep it within the absolute min/max values
+        if self._plot_min_range is not None:
+            range_extend = self._plot_min_range - (y_max - y_min)
+            if range_extend > 0:
+                y_max += range_extend / 2
+                y_min -= range_extend / 2
+                if y_min < self._abs_min:
+                    y_min = self._abs_min
+                    y_max = y_min + self._plot_min_range
+                elif y_max > self._abs_max:
+                    y_max = self._abs_max
+                    y_min = y_max - self._plot_min_range
+
+        self._plot_min = y_min
+        self._plot_max = y_max
+        self.set_y_axis_tick_labels(self._plot_min, self._plot_max)
+
+        if self._values:
+            self._undraw_bitmap()
+            self._recalc_y_pos()  ## calculates new y positions
+            if redraw_plot:
+                self._data_redraw_all()
 
     @property
     def title(self):
@@ -802,40 +814,8 @@ class Plotter():
 
     @y_range.setter
     def y_range(self, minmax):
-        y_min, y_max = minmax
-
-        ### if values reduce range below the minimum then widen the range
-        ### but keep it within the absolute min/max values
-        if self._plot_min_range is not None:
-            range_extend = self._plot_min_range - (y_max - y_min)
-            if range_extend > 0:
-                y_max += range_extend / 2
-                y_min -= range_extend / 2
-                if y_min < self._abs_min:
-                    y_min = self._abs_min
-                    y_max = y_min + self._plot_min_range
-                elif y_max > self._abs_max:
-                    y_max = self._abs_max
-                    y_min = y_max - self._plot_min_range
-
-        changed = False
-        if minmax[0] != self._plot_min:
-            self._plot_min = y_min
-            changed = True
-        if minmax[1] != self._plot_max:
-            self._plot_max = y_max
-            changed = True
-
-        if changed:
-            self.set_y_axis_tick_labels(self._plot_min, self._plot_max)
-            if self._values:
-                self._undraw_bitmap()
-            self._recalc_y_pos()  ## calculates new y positions
-            if self._values:
-                if self._suppress_one_redraw:
-                    self._suppress_one_redraw = False
-                else:
-                    self._data_redraw_all()
+        if minmax[0] != self._plot_min or minmax[1] != self._plot_max:
+            self._change_y_range(minmax[0], minmax[1], redraw_plot=True)
 
     @property
     def y_full_range(self):

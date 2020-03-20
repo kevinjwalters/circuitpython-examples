@@ -1,4 +1,4 @@
-### clue-plotter v1.11
+### clue-plotter v1.12
 ### Sensor and input plotter for Adafruit CLUE in CircuitPython
 ### This plots the sensors and three of the analogue inputs on
 ### the LCD display either with scrolling or wrap mode which
@@ -46,7 +46,7 @@ from plot_source import PlotSource, TemperaturePlotSource, PressurePlotSource, \
 from plotter import Plotter
 
 
-debug = 1
+debug = 2
 
 
 ### A list of all the data source for the plotting
@@ -113,6 +113,7 @@ def ready_plot_source(plttr, srcs, def_palette, index=0):
     plttr.title = source_name
     plttr.y_axis_lab = src.units()
     ### The range on graph will start at this value
+    print("INITIAL", src.initial_min(), src.initial_max())
     plttr.y_range = (src.initial_min(), src.initial_max())
     plttr.y_min_range = src.range_min()
     ### Sensor/data source is expected to produce data between these values
