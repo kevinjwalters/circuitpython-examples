@@ -174,7 +174,6 @@ class Plotter():
         self._data_values = None
         self._x_pos = None
         self._data_idx = None
-        self._offscreen = None
         self._plot_lastzoom_ns = None
         ### end-keep-pylint-happy
         self._init_data()
@@ -208,7 +207,7 @@ class Plotter():
         self._displayio_y_axis_lab = None
         self._last_manual_refresh = None
 
-    def _init_data(self):
+    def _init_data(self, ranges=True):
         # Allocate arrays for each possible channel with plot_width elements
         self._data_mins = [self.POS_INF]
         self._data_maxs = [self.NEG_INF]
@@ -222,8 +221,13 @@ class Plotter():
         self._data_values = 0  ### valid elements in data_y_pos and data_value
         self._x_pos = 0
         self._data_idx = 0
-        self._offscreen = False
+
         self._plot_lastzoom_ns = 0  ### monotonic_ns() for last zoom in
+        if ranges:
+            self._plot_min = None
+            self._plot_max = None
+            self._plot_min_range = None  ### Used partly to prevent div by zero
+        self._plot_dirty = False  ### flag indicate some data has been plotted
 
     def _recalc_y_pos(self):
         """Recalculates _data_y_pos based on _data_value for changes in y scale."""
@@ -245,10 +249,10 @@ class Plotter():
     def get_colors(self):
         return self._PLOT_COLORS
 
-    def clear_all(self):
+    def clear_all(self, ranges=True):
         if self._values != 0:
             self._undraw_bitmap()
-        self._init_data()
+        self._init_data(ranges=ranges)
 
     # Simple implementation here is to clear the screen on change...
     def change_stylemode(self, style, mode, scale_mode=None, clear=True):
@@ -261,11 +265,12 @@ class Plotter():
         elif scale_mode not in ("pixel", "onscroll", "screen", "time"):
             raise ValueError("scale_mode not pixel, onscroll, screen or time")
 
-        # Clearing everything on screen and everything stored in variables
-        # is simplest approach here - clearing involves undrawing
-        # which uses the self._style so must not change that beforehand
+        ### Clearing everything on screen and everything stored in variables
+        ### apart from plot ranges is simplest approach here - clearing
+        ### involves undrawing which uses the self._style so must not change
+        ### that beforehand
         if clear:
-            self.clear_all()
+            self.clear_all(ranges=False)
 
         self._style = style
         self._mode = mode
@@ -654,6 +659,7 @@ class Plotter():
         # pylint: disable=too-many-branches
         changed = False
         data_idx = self._data_idx
+        x_pos = self._x_pos
 
         self._update_stats(values)
 
@@ -667,7 +673,7 @@ class Plotter():
                 self._undraw_column(self._x_pos, data_idx - self._plot_width)
 
         elif self._mode == "scroll":
-            if self._offscreen:
+            if x_pos >= self._plot_width:  ### Fallen off x axis range?
                 changed = self._auto_plot_range(redraw_plot=False)
                 if not changed:
                     self._undraw_bitmap()  ### Need to cls for the scroll
@@ -677,13 +683,10 @@ class Plotter():
                 self._data_values -= self._scroll_px
                 self._data_redraw(0, self._plot_width - 1 - self._scroll_px,
                                   sc_data_idx)
-                self._x_pos = self._plot_width - self._scroll_px
-                self._offscreen = False
+                x_pos = self._plot_width - self._scroll_px
 
             elif self._scale_mode == "pixel":
                 changed = self._auto_plot_range(redraw_plot=True)
-
-        x_pos = self._x_pos
 
         ### Draw the new data
         self._data_draw(values, x_pos, data_idx)
@@ -700,7 +703,6 @@ class Plotter():
                 self._x_pos = 0
             else:
                 self._x_pos = new_x_pos  # this is off screen
-                self._offscreen = True
         else:
             self._x_pos = new_x_pos
 

@@ -113,7 +113,6 @@ def ready_plot_source(plttr, srcs, def_palette, index=0):
     plttr.title = source_name
     plttr.y_axis_lab = src.units()
     ### The range on graph will start at this value
-    print("INITIAL", src.initial_min(), src.initial_max())
     plttr.y_range = (src.initial_min(), src.initial_max())
     plttr.y_min_range = src.range_min()
     ### Sensor/data source is expected to produce data between these values
