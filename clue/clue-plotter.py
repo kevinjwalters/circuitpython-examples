@@ -1,4 +1,4 @@
-### clue-plotter v1.10
+### clue-plotter v1.11
 ### Sensor and input plotter for Adafruit CLUE in CircuitPython
 ### This plots the sensors and three of the analogue inputs on
 ### the LCD display either with scrolling or wrap mode which
@@ -205,7 +205,6 @@ while True:
                 popup_text(plotter,
                            ("default" if default_palette else "source")
                            + "\npalette")
-
                 plotter.channel_colidx = select_colors(plotter, source,
                                                        default_palette)
             else:  ### change plot source

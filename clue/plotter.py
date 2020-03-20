@@ -575,7 +575,7 @@ class Plotter():
             if value > self._data_maxs[-1]:
                 self._data_maxs[-1] = value
 
-    def _check_zoom_in(self):
+    def _check_zoom_in(self, values):
         """Check if recent data warrants zooming in on y axis scale based on checking
            minimum and maximum times which are recorded in approximate 1 second buckets.
            Returns two element tuple with (min, max) or empty tuple for no zoom required.
@@ -589,8 +589,8 @@ class Plotter():
             return ()
         self._plot_lastzoom_ns = now_ns
 
-        recent_min = min(self._data_mins[start_idx:])
-        recent_max = max(self._data_maxs[start_idx:])
+        recent_min = min(min(self._data_mins[start_idx:]), *values)
+        recent_max = max(max(self._data_maxs[start_idx:]), *values)
         recent_range = recent_max - recent_min
         headroom = recent_range * self.ZOOM_HEADROOM
 
@@ -643,6 +643,7 @@ class Plotter():
         return rescale_not_needed
 
     def _auto_plot_range(self):
+        ### TODO - this MAKES NO SENSE ANY MORE AS IT IS USING EXTREMES OF DATA
         changed = False
         plot_range = self._data_max - self._data_min
         headroom = plot_range * self.ZOOM_HEADROOM
@@ -666,7 +667,7 @@ class Plotter():
         if self._x_pos == 0 and self._mode == "wrap" and self._plot_offyscale:
             rescaled = self._auto_plot_range()
 
-        elif self._offscreen and self._mode == "scroll":
+        if self._offscreen and self._mode == "scroll":
             # Clear and redraw the bitmap to scroll it leftward
             #self._clear_plot_bitmap()  # 2.3 seconds at 200x201
             self._undraw_bitmap()
@@ -690,8 +691,8 @@ class Plotter():
 
         ### Add the data and draw it unless a y axis is going to be rescaled
         self._data_store(values, data_idx)
-        if not rescaled and self._values & 0xf == 0:
-            rescale_zoom_range = self._check_zoom_in()
+        if not rescaled and self._scale_mode != "TODOFIXPIXELpixel" and self._values & 0xf == 0:
+            rescale_zoom_range = self._check_zoom_in(values)
             if rescale_zoom_range:
                 self.y_range = rescale_zoom_range
 
@@ -699,6 +700,9 @@ class Plotter():
         if rescale_needed:
             self._auto_plot_range()        # rescale y range
             self._data_draw(values, x_pos, data_idx)
+
+        ### finally store the values in circular buffer
+        self._data_store(values, data_idx)
 
         # increment the data index wrapping around
         self._data_idx += 1

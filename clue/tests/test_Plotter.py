@@ -21,7 +21,7 @@
 # THE SOFTWARE.
 
 import unittest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock, MagicMock, patch
 
 import time
 import array
@@ -35,10 +35,11 @@ sys.modules['displayio'] = MagicMock()
 sys.modules['terminalio'] = MagicMock()
 sys.modules['adafruit_display_text.label'] = MagicMock()
 
+# Replicate CircuitPython's time.monotonic_ns()
+time.monotonic_ns = lambda: int(time.monotonic() * 1e9)
+
 import numpy
 
-# Replicate CircuitPython's time.montonic_ns()
-time.monotonic_ns = lambda: int(time.monotonic() * 1e9)
 
 # Borrowing the dhalbert/tannewt technique from adafruit/Adafruit_CircuitPython_Motor
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -53,17 +54,37 @@ terminalio.FONT.get_bounding_box = Mock(return_value=(6, 14))
 
 # TODO use setup() and tearDown() - https://docs.python.org/3/library/unittest.html#unittest.TestCase.tearDown
 
+
+def count_nz_rows(bitmap):
+    nz_rows = []
+    for y_pos in range(0, 201):
+        count = 0
+        for x_pos in range(0, 200):
+            if bitmap[x_pos, y_pos] != 0:
+                count += 1
+        if count > 0:
+            nz_rows.append(y_pos)
+    return nz_rows
+
+def aprint_plot(bitmap):
+    for y in range(201):
+        for x in range(200):
+            print("X" if bitmap[x][y] else " ", end="")
+        print()
+
+
 # pylint: disable=protected-access
 class Test_Plotter(unittest.TestCase):
 
     _SCROLL_PX = 25
 
-    def make_a_Plotter(self, style, mode):
+    def make_a_Plotter(self, style, mode, scale_mode=None):
         mocked_display = Mock()
 
         plotter = Plotter(mocked_display,
                           style=style,
                           mode=mode,
+                          scale_mode=scale_mode,
                           scroll_px=self._SCROLL_PX,
                           title="Debugging",
                           max_title_len=99,
@@ -104,6 +125,23 @@ class Test_Plotter(unittest.TestCase):
                                                 list(range(40,60)) * 4)) * 100)
         return ps
 
+
+    def make_a_PlotSource_narrowrange(self):
+        ps = Mock()
+        ps.initial_min = Mock(return_value=0.0)
+        ps.initial_max = Mock(return_value=500.0)
+        ps.min = Mock(return_value=0.0)
+        ps.max = Mock(return_value=500.0)
+        ps.range_min = Mock(return_value=5.0)
+
+        ps.values = Mock(return_value=1)
+        # 24 elements repeated 13 times ranging between 237 and 253
+        # 5 elements repeated 6000 times
+        ps.data = Mock(side_effect=(list(range(237, 260 + 1)) * 13
+                                    + list(range(100, 400 + 1, 75)) * 6000))
+        return ps
+
+
     def make_a_PlotSource_onespike(self):
         ps = Mock()
         ps.initial_min = Mock(return_value=-100.0)
@@ -131,6 +169,8 @@ class Test_Plotter(unittest.TestCase):
 
         return ps
 
+
+
     def test_spike_after_wrap_and_overwrite_one_channel(self):
         """A specific test to check that a spike that appears in wrap mode is
            correctly cleared by subsequent flat data."""
@@ -156,14 +196,7 @@ class Test_Plotter(unittest.TestCase):
         for d_idx in range(190):
             plotter.data_add((test_source1.data(),))
 
-        non_zero_rows = []
-        for y_pos in range(0, 201):
-            count = 0
-            for x_pos in range(0, 200):
-                if plot[x_pos, y_pos] != 0:
-                    count += 1
-            if count > 0:
-                non_zero_rows.append(y_pos)
+        non_zero_rows = count_nz_rows(plot)
 
         if verbose >= 4:
             print("y=99", plot[:, 99])
@@ -402,16 +435,8 @@ class Test_Plotter(unittest.TestCase):
         for d_idx in range(200):
             plotter.data_add((test_source1.data(),))
 
-        non_zero_rows = []
-        for y_pos in range(0, 201):
-            count = 0
-            for x_pos in range(0, 200):
-                if plot[x_pos, y_pos] != 0:
-                    count += 1
-            if count > 0:
-                non_zero_rows.append(y_pos)
-
-        self.assertEqual(non_zero_rows, list(range(0, 40 + 1)),
+        non_zero_rows1 = count_nz_rows(plot)
+        self.assertEqual(non_zero_rows1, list(range(0, 40 + 1)),
                          "From value 60 being plotted at 40 but also upward line at end")
 
         # Rewrite screen with next 200 but these should force an internal
@@ -422,16 +447,8 @@ class Test_Plotter(unittest.TestCase):
         self.assertEqual(plotter.y_range, (-108.0, 1000.0),
                          "Check rescaled y range")
 
-        non_zero_rows = []
-        for y_pos in range(0, 201):
-            count = 0
-            for x_pos in range(0, 200):
-                if plot[x_pos, y_pos] != 0:
-                    count += 1
-            if count > 0:
-                non_zero_rows.append(y_pos)
-
-        self.assertEqual(non_zero_rows, [18],
+        non_zero_rows2 = count_nz_rows(plot)
+        self.assertEqual(non_zero_rows2, [18],
                          "Only pixels now should be from value 900 being plotted at 18")
 
         plotter.display_off()
@@ -454,6 +471,72 @@ class Test_Plotter(unittest.TestCase):
                         "Range is not zero and implicityly ZeroDivisionError exception has not occurred.")
 
         plotter.display_off()
+
+    def test_rescale_zoom_in_narrowrangedata(self):
+        """Test y_range adjusts on data from a narrow range with unusual per pixel scaling mode."""
+        ### There was a bug which was visually obvious in pixel scale_mode
+        ### test this to ensure bug was squashed
+        
+        # time.monotonic_ns.return_value = lambda: global_time_ns
+        
+        local_time_ns = time.monotonic_ns()
+        with patch('time.monotonic_ns', create=True, side_effect=lambda: local_time_ns) as time_monotonic_ns_fn:
+            plotter = self.make_a_Plotter("lines", "wrap", scale_mode="pixel")
+            (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+            plotter.display_on(tg_and_plot=(tg, plot))
+            test_source1 = self.make_a_PlotSource_narrowrange()
+
+            self.ready_plot_source(plotter, test_source1)
+
+            ### About 11 seconds worth - will have zoomed in during this time
+            time_ns = 1234 * 1e9
+
+            for d_idx in range(300):
+                val = test_source1.data()
+                plotter.data_add((val,))
+                local_time_ns += round(1/27 * 1e9)
+                print(time.monotonic_ns())
+                ###time.sleep(1/27)
+
+            y_min1, y_max1 = plotter.y_range
+            self.assertAlmostEqual(y_min1, 232.4)
+            self.assertAlmostEqual(y_max1, 264.6)
+
+            unique, counts = numpy.unique(plotter._data_y_pos[0],
+                                          return_counts=True)
+            self.assertEqual(min(unique), 29)
+            self.assertEqual(max(unique), 171)
+            self.assertEqual(len(unique), 24)
+            self.assertLessEqual(max(counts) - min(counts), 1)
+
+            ### Another 14 seconds and now data is in narrow range so another zoom is due
+            ### Why does this take so long?
+            for d_idx in range(400):
+                val = test_source1.data()
+                plotter.data_add((val,))
+                local_time_ns += round(1/27 * 1e9)
+                ###time.sleep(1/27)
+
+            y_min2, y_max2 = plotter.y_range
+            self.assertAlmostEqual(y_min2, 40.0)
+            self.assertAlmostEqual(y_max2, 460.0)
+
+            ###unique2, counts2 = numpy.unique(plotter._data_y_pos[0],
+            ###                                return_counts=True)
+            ###self.assertEqual(list(unique2), [29, 100, 171])
+            ###self.assertLessEqual(max(counts2) - min(counts2), 1)
+
+            aprint_plot(plot)
+            ### Look for a specific bug which leaves some previous pixels
+            ### set on screen at column 24
+            ### Checking either side as this will be timing sensitive but the time
+            ### functions are now precisely controlled in this test so should not vary
+            ### with test execution duration vs wall clock
+            for offset in range(-15, 15 + 5, 5):
+                self.assertEqual(list(plot[24 + offset][136:172]), [0] * 36,
+                                 "Checking for erased pixels at various columns")
+
+            plotter.display_off()
 
 
 if __name__ == '__main__':
