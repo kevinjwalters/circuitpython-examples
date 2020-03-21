@@ -55,28 +55,31 @@ terminalio.FONT.get_bounding_box = Mock(return_value=(6, 14))
 # TODO use setup() and tearDown() - https://docs.python.org/3/library/unittest.html#unittest.TestCase.tearDown
 
 
-def count_nz_rows(bitmap):
-    nz_rows = []
-    for y_pos in range(0, 201):
-        count = 0
-        for x_pos in range(0, 200):
-            if bitmap[x_pos, y_pos] != 0:
-                count += 1
-        if count > 0:
-            nz_rows.append(y_pos)
-    return nz_rows
-
-def aprint_plot(bitmap):
-    for y in range(201):
-        for x in range(200):
-            print("X" if bitmap[x][y] else " ", end="")
-        print()
-
-
 # pylint: disable=protected-access
 class Test_Plotter(unittest.TestCase):
-
+    ### These were the original dimensions of the Bitmap
+    ### Current clue-plotter uses 192 for width and 
+    ### scrolling is set to 50
+    _PLOT_WIDTH = 200
+    _PLOT_HEIGHT = 201    
     _SCROLL_PX = 25
+
+    def count_nz_rows(self, bitmap):
+        nz_rows = []
+        for y_pos in range(self._PLOT_HEIGHT):
+            count = 0
+            for x_pos in range(self._PLOT_WIDTH):
+                if bitmap[x_pos, y_pos] != 0:
+                    count += 1
+            if count > 0:
+                nz_rows.append(y_pos)
+        return nz_rows
+
+    def aprint_plot(self, bitmap):
+        for y in range(self._PLOT_HEIGHT):
+            for x in range(self._PLOT_WIDTH):
+                print("X" if bitmap[x][y] else " ", end="")
+            print()
 
     def make_a_Plotter(self, style, mode, scale_mode=None):
         mocked_display = Mock()
@@ -86,6 +89,8 @@ class Test_Plotter(unittest.TestCase):
                           mode=mode,
                           scale_mode=scale_mode,
                           scroll_px=self._SCROLL_PX,
+                          plot_width=self._PLOT_WIDTH,
+                          plot_height=self._PLOT_HEIGHT,
                           title="Debugging",
                           max_title_len=99,
                           mu_output=False,
@@ -175,7 +180,7 @@ class Test_Plotter(unittest.TestCase):
         """A specific test to check that a spike that appears in wrap mode is
            correctly cleared by subsequent flat data."""
         plotter = self.make_a_Plotter("lines", "wrap")
-        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        (tg, plot) = (Mock(), numpy.zeros((self._PLOT_WIDTH, self._PLOT_HEIGHT), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_source1 = self.make_a_PlotSource_onespike()
         self.ready_plot_source(plotter, test_source1)
@@ -196,7 +201,7 @@ class Test_Plotter(unittest.TestCase):
         for d_idx in range(190):
             plotter.data_add((test_source1.data(),))
 
-        non_zero_rows = count_nz_rows(plot)
+        non_zero_rows = self.count_nz_rows(plot)
 
         if verbose >= 4:
             print("y=99", plot[:, 99])
@@ -218,7 +223,7 @@ class Test_Plotter(unittest.TestCase):
         """A specific test to check that a spike that appears in lines wrap mode is
            correctly cleared by a change to dots scroll."""
         plotter = self.make_a_Plotter("lines", "wrap")
-        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        (tg, plot) = (Mock(), numpy.zeros((self._PLOT_WIDTH, self._PLOT_HEIGHT), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_source1 = self.make_a_PlotSource_onespike()
         self.ready_plot_source(plotter, test_source1)
@@ -247,7 +252,7 @@ class Test_Plotter(unittest.TestCase):
         """A specific test to check screen clears after a scroll to help
            investigate a bug with that failing to happen in most cases."""
         plotter = self.make_a_Plotter("lines", "scroll")
-        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        (tg, plot) = (Mock(), numpy.zeros((self._PLOT_WIDTH, self._PLOT_HEIGHT), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_source1 = self.make_a_PlotSource()
         self.ready_plot_source(plotter, test_source1)
@@ -284,9 +289,9 @@ class Test_Plotter(unittest.TestCase):
         plotter.display_off()
 
     def test_check_internal_data_three_channels(self):
-        width = 200
+        width = self._PLOT_WIDTH
         plotter = self.make_a_Plotter("lines", "scroll")
-        (tg, plot) = (Mock(), numpy.zeros((width, 201), numpy.uint8))
+        (tg, plot) = (Mock(), numpy.zeros((width, self._PLOT_HEIGHT), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_triplesource1 = self.make_a_PlotSource(channels=3)
 
@@ -387,7 +392,7 @@ class Test_Plotter(unittest.TestCase):
            investigate a bug with that failing to happen in most cases
            for the second and third channels."""
         plotter = self.make_a_Plotter("lines", "scroll")
-        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        (tg, plot) = (Mock(), numpy.zeros((self._PLOT_WIDTH, self._PLOT_HEIGHT), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_triplesource1 = self.make_a_PlotSource(channels=3)
 
@@ -421,7 +426,7 @@ class Test_Plotter(unittest.TestCase):
     def test_auto_rescale_wrap_mode(self):
         """Ensure the auto-scaling is working and not leaving any remnants of previous plot."""
         plotter = self.make_a_Plotter("lines", "wrap")
-        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        (tg, plot) = (Mock(), numpy.zeros((self._PLOT_WIDTH, self._PLOT_HEIGHT), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_source1 = self.make_a_PlotSource_bilevel(first_v=60, second_v=900)
 
@@ -435,7 +440,7 @@ class Test_Plotter(unittest.TestCase):
         for d_idx in range(200):
             plotter.data_add((test_source1.data(),))
 
-        non_zero_rows1 = count_nz_rows(plot)
+        non_zero_rows1 = self.count_nz_rows(plot)
         self.assertEqual(non_zero_rows1, list(range(0, 40 + 1)),
                          "From value 60 being plotted at 40 but also upward line at end")
 
@@ -447,7 +452,7 @@ class Test_Plotter(unittest.TestCase):
         self.assertEqual(plotter.y_range, (-108.0, 1000.0),
                          "Check rescaled y range")
 
-        non_zero_rows2 = count_nz_rows(plot)
+        non_zero_rows2 = self.count_nz_rows(plot)
         self.assertEqual(non_zero_rows2, [18],
                          "Only pixels now should be from value 900 being plotted at 18")
 
@@ -456,7 +461,7 @@ class Test_Plotter(unittest.TestCase):
     def test_rescale_zoom_in_minequalsmax(self):
         """Test y_range adjusts any attempt to set the effective range to 0."""
         plotter = self.make_a_Plotter("lines", "wrap")
-        (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+        (tg, plot) = (Mock(), numpy.zeros((self._PLOT_WIDTH, self._PLOT_HEIGHT), numpy.uint8))
         plotter.display_on(tg_and_plot=(tg, plot))
         test_source1 = self.make_a_PlotSource_bilevel(first_v=20, second_v=20)
 
@@ -482,7 +487,7 @@ class Test_Plotter(unittest.TestCase):
         local_time_ns = time.monotonic_ns()
         with patch('time.monotonic_ns', create=True, side_effect=lambda: local_time_ns) as time_monotonic_ns_fn:
             plotter = self.make_a_Plotter("lines", "wrap", scale_mode="pixel")
-            (tg, plot) = (Mock(), numpy.zeros((200, 201), numpy.uint8))
+            (tg, plot) = (Mock(), numpy.zeros((self._PLOT_WIDTH, self._PLOT_HEIGHT), numpy.uint8))
             plotter.display_on(tg_and_plot=(tg, plot))
             test_source1 = self.make_a_PlotSource_narrowrange()
 
@@ -524,7 +529,7 @@ class Test_Plotter(unittest.TestCase):
             ###self.assertLessEqual(max(counts2) - min(counts2), 1)
 
             if verbose >=3:
-                aprint_plot(plot)
+                self.aprint_plot(plot)
             ### Look for a specific bug which leaves some previous pixels
             ### set on screen at column 24
             ### Checking either side as this will be timing sensitive but the time

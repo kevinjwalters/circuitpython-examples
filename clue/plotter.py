@@ -103,6 +103,8 @@ class Plotter():
     GRID_COLOR = 0x308030
     GRID_DOT_SPACING = 8
 
+    _GRAPH_TOP = 30  ### y position for the graph placement
+
     INFO_FG_COLOR = 0x000080
     INFO_BG_COLOR = 0xc0c000
     LABEL_COLOR = 0xc0c0c0
@@ -126,7 +128,7 @@ class Plotter():
     def __init__(self, output,
                  style="lines", mode="scroll", scale_mode=None,
                  screen_width=240, screen_height=240,
-                 plot_width=200, plot_height=201,
+                 plot_width=192, plot_height=201,
                  x_divs=4, y_divs=4,
                  scroll_px=50,
                  max_channels=3,
@@ -183,11 +185,11 @@ class Plotter():
         self._channels = None
         self._channel_colidx = []
 
-        # The range the data source generates within
+        ### The range the data source generates within
         self._abs_min = None
         self._abs_max = None
 
-        # The current plot min/max
+        ### The current plot min/max
         self._plot_min = None
         self._plot_max = None
         self._plot_min_range = None  ### Used partly to prevent div by zero
@@ -195,7 +197,7 @@ class Plotter():
 
         self._font = terminalio.FONT
         self._y_axis_lab = ""
-        self._y_lab_width = 5  # maximum characters for y axis label
+        self._y_lab_width = 6  ### maximum characters for y axis label
         self._y_lab_color = self.LABEL_COLOR
 
         self._displayio_graph = None
@@ -291,8 +293,8 @@ class Plotter():
         plot_palette.make_transparent(0)
         tg_plot_data = displayio.TileGrid(plot_bitmap,
                                           pixel_shader=plot_palette)
-        tg_plot_data.x = 39
-        tg_plot_data.y = 30
+        tg_plot_data.x = self._screen_width - self._plot_width - 1
+        tg_plot_data.y = self._GRAPH_TOP
         return (tg_plot_data, plot_bitmap)
 
     def _make_tg_grid(self):
@@ -336,8 +338,8 @@ class Plotter():
                                           width=self._x_divs,
                                           height=self._y_divs,
                                           default_tile = 0)
-        tg_plot_grid.x = 39
-        tg_plot_grid.y = 30
+        tg_plot_grid.x = self._screen_width - self._plot_width - 1
+        tg_plot_grid.y = self._GRAPH_TOP
         tg_right_line.x = tg_plot_grid.x + grid_width
         tg_right_line.y = tg_plot_grid.y
         tg_bottom_line.x = tg_plot_grid.x
@@ -351,7 +353,7 @@ class Plotter():
         return g_plot_grid
 
     def _make_empty_graph(self, tg_and_plot=None):
-        _, font_h = self._font.get_bounding_box()
+        font_w, font_h = self._font.get_bounding_box()
 
         self._displayio_title = Label(self._font,
                                       text=self._title,
@@ -359,7 +361,7 @@ class Plotter():
                                       scale=2,
                                       line_spacing=1,
                                       color=self._y_lab_color)
-        self._displayio_title.x = 40
+        self._displayio_title.x = self._screen_width - self._plot_width
         self._displayio_title.y = font_h // 2
 
         self._displayio_y_axis_lab = Label(self._font,
@@ -374,13 +376,14 @@ class Plotter():
         ### y increases top to bottom of screen
         for y_div in range(self._y_divs + 1):
             plot_y_labels.append(Label(self._font,
-                                       text="-" * self._y_lab_width,
+                                       text=" " * self._y_lab_width,
                                        max_glyphs=self._y_lab_width,
                                        line_spacing=1,
                                        color=self._y_lab_color))
-            plot_y_labels[-1].x = 5
+            plot_y_labels[-1].x = (self._screen_width - self._plot_width
+                                   - self._y_lab_width * font_w - 5)
             plot_y_labels[-1].y = (round(y_div * self._plot_height / self._y_divs)
-                                   + 30 - 1)
+                                   + self._GRAPH_TOP - 1)
         self._displayio_y_labs = plot_y_labels
 
         ### Three items (grid, axis label, title) plus the y tick labels
