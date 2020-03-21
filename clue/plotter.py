@@ -74,8 +74,7 @@ def format_width(nchars, value):
 
 class Plotter():
     _DEFAULT_SCALE_MODE = {"lines": "onscroll",
-                           "dots": "screen",
-                           "heatmap": "pixel"}
+                           "dots": "screen"}
 
     ### Palette for plotting, first one is set transparent
     TRANSPARENT_IDX = 0
@@ -132,7 +131,7 @@ class Plotter():
                  scroll_px=50,
                  max_channels=3,
                  est_rate=50,
-                 title="CLUE Plotter",
+                 title="",
                  max_title_len=20,
                  mu_output=False,
                  debug=0):
@@ -256,7 +255,7 @@ class Plotter():
 
     # Simple implementation here is to clear the screen on change...
     def change_stylemode(self, style, mode, scale_mode=None, clear=True):
-        if style not in ("lines", "dots", "heatmap"):
+        if style not in ("lines", "dots"):
             raise ValueError("style not lines or dots")
         if mode not in ("scroll", "wrap"):
             raise ValueError("mode not scroll or wrap")
@@ -297,22 +296,12 @@ class Plotter():
         return (tg_plot_data, plot_bitmap)
 
     def _make_tg_grid(self):
-        grid_width  = self._plot_width + 1
-        grid_height = self._plot_height
-        grid_height = self._plot_height // 2  ## QUICK HACK FOR TESTING - UNDO TODO
-        plot_grid = displayio.Bitmap(grid_width, grid_height, 2)
-
-        # horizontal lines
-        if self._y_divs:
-            for x in range(0, grid_width, self._GRID_DOT_SPACING):
-                for y in range(0, grid_height, grid_height // self._y_divs):
-                    plot_grid[x, y] = 1
-
-        # vertical lines
-        if self._x_divs:
-            for x in range(0, grid_width, grid_width // self._x_divs):
-                for y in range(0, grid_height, self._GRID_DOT_SPACING):
-                    plot_grid[x, y] = 1
+        # pylint: disable=too-many-locals
+        grid_width  = self._plot_width
+        grid_height = self._plot_height - 1
+        div_width = self._plot_width // self._x_divs
+        div_height = self._plot_height // self._y_divs
+        a_plot_grid = displayio.Bitmap(div_width, div_height, 2)
 
         # grid colours
         grid_palette = displayio.Palette(2)
@@ -320,12 +309,49 @@ class Plotter():
         grid_palette[0] = 0x000000
         grid_palette[1] = self._GRID_COLOR
 
+        # horizontal line
+        for x in range(0, div_width, self._GRID_DOT_SPACING):
+            a_plot_grid[x, 0] = 1
+
+        # vertical line
+        for y in range(0, div_height, self._GRID_DOT_SPACING):
+            a_plot_grid[0, y] = 1
+
+        right_line = displayio.Bitmap(1, grid_height, 2)
+        tg_right_line = displayio.TileGrid(right_line,
+                                           pixel_shader=grid_palette)
+        for y in range(0, grid_height, self._GRID_DOT_SPACING):
+            right_line[0, y] = 1
+
+
+        bottom_line = displayio.Bitmap(grid_width + 1, 1, 2)
+        tg_bottom_line = displayio.TileGrid(bottom_line,
+                                            pixel_shader=grid_palette)
+        for x in range(0, grid_width + 1, self._GRID_DOT_SPACING):
+            bottom_line[x, 0] = 1
+
+
         # Create a TileGrid using the Bitmap and Palette
-        tg_plot_grid = displayio.TileGrid(plot_grid,
-                                          pixel_shader=grid_palette)
+        # and tiling it based on number of divisions required
+        # TODO - add extra lines
+        tg_plot_grid = displayio.TileGrid(a_plot_grid,
+                                          pixel_shader=grid_palette,
+                                          width=self._x_divs,
+                                          height=self._y_divs,
+                                          default_tile = 0)
         tg_plot_grid.x = 39
         tg_plot_grid.y = 30
-        return tg_plot_grid
+        tg_right_line.x = tg_plot_grid.x + grid_width
+        tg_right_line.y = tg_plot_grid.y
+        tg_bottom_line.x = tg_plot_grid.x
+        tg_bottom_line.y = tg_plot_grid.y + grid_height
+
+        g_plot_grid = displayio.Group(max_size=3)
+        g_plot_grid.append(tg_plot_grid)
+        g_plot_grid.append(tg_right_line)
+        g_plot_grid.append(tg_bottom_line)
+
+        return g_plot_grid
 
     def _make_empty_graph(self, tg_and_plot=None):
         _, font_h = self._font.get_bounding_box()

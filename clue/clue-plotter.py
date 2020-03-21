@@ -46,7 +46,7 @@ from plot_source import PlotSource, TemperaturePlotSource, PressurePlotSource, \
 from plotter import Plotter
 
 
-debug = 2
+debug = 1
 
 
 ### A list of all the data source for the plotting
@@ -125,16 +125,6 @@ def ready_plot_source(plttr, srcs, def_palette, index=0):
     return (src, channels_from_src)
 
 
-def print_data_rate(src):
-    """Print data read rate for debugging and setting PlotSource rates."""
-    for trial in range(5):
-        t1 = time.monotonic_ns()
-        for _ in range(100):
-            _ = src.data()
-        t2 = time.monotonic_ns()
-        print("Read rate", trial, "at", 100 * 1e9 / (t2 - t1), "Hz")
-
-
 def wait_for_release(func):
     """Waits for passed function func to return a false value.
        Used to measure how long buttons are depressed."""
@@ -184,8 +174,6 @@ while True:
     ### set the source and start items
     (source, channels) = ready_plot_source(plotter, sources,
                                            default_palette, current_source_idx)
-    if debug >= 5:
-        print_data_rate(source)
 
     while True:
         ### read data from sensor or voltage from pad
