@@ -121,10 +121,12 @@ class TemperaturePlotSource(PlotSource):
 
     def __init__(self, my_clue, mode="Celsius"):
         self._clue = my_clue
+        range_min = 0.4
         if mode[0].lower() == "f":
             mode_name = "Fahrenheit"
             self._scale = 1.8
             self._offset = 32.0
+            range_min = 0.8
         elif mode[0].lower == "k":
             mode_name = "Kelvin"
             self._scale = 1.0
@@ -139,6 +141,7 @@ class TemperaturePlotSource(PlotSource):
                          abs_max=self._convert(100),
                          initial_min=self._convert(10),
                          initial_max=self._convert(40),
+                         range_min=range_min,
                          rate=24)
 
     def data(self):
@@ -163,6 +166,7 @@ class PressurePlotSource(PlotSource):
         super().__init__(1, "Pressure", units=units,
                          abs_min=self._convert(300), abs_max=self._convert(1100),
                          initial_min=self._convert(980), initial_max=self._convert(1040),
+                         range_min=1,
                          rate=22)
 
     def data(self):
