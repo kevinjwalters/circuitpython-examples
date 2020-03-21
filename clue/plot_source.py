@@ -23,16 +23,16 @@
 """
 `plot_source`
 ================================================================================
-CircuitPython library for the my_clue-plotter application.
+CircuitPython library for the clue-plotter application.
 
 * Author(s): Kevin J. Walters
 
 Implementation Notes
 --------------------
 **Hardware:**
-* Adafruit my_clue <https://www.adafruit.com/product/4500>
+* Adafruit CLUE <https://www.adafruit.com/product/4500>
 **Software and Dependencies:**
-* Adafruit's my_clue library: https://github.com/adafruit/Adafruit_CircuitPython_CLUE
+* Adafruit's CLUE library: https://github.com/adafruit/Adafruit_CircuitPython_CLUE
 """
 
 import math
@@ -40,11 +40,27 @@ import math
 import analogio
 
 
-### TODO - lots of documentation on meaning/use of all these parameters
-### TODO - lots of documentation on meaning/use of all these parameters
-### TODO - lots of documentation on meaning/use of all these parameters
-
 class PlotSource():
+    """An abstract class for a sensor which returns the data from the sensor
+       and provides some metadata useful for plotting.
+       Sensors returning vector quanities like a 3-axis accelerometer are supported.
+       When the source is used start() will be called and when it's not needed stop() will
+       be called.
+
+    :param values: Number of values returned by data method, between 1 and 3.
+    :param name: Name of the sensor used to title the graph, only 17 characters fit on screen.
+    :param units: Units for data used for y axis label.
+    :param abs_min: Absolute minimum value for data, defaults to 0.
+    :param abs_max: Absolute maximum value for data, defaults to 65535.
+    :param initial_min: The initial minimum value suggested for y axis on graph,
+           defaults to abs_min.
+    :param initial_max: The initial maximum value suggested for y axis on graph,
+           defaults to abs_max.
+    :param range_min: A suggested minimum range to aid automatic y axis ranging.
+    :param rate: The approximate rate in Hz that that data method returns in a tight loop.
+    :param colors: A list of the suggested colors for data.
+    :param debug: A numerical debug level, defaults to 0.
+       """
     DEFAULT_COLORS = (0xffff00, 0x00ffff, 0xff0080)
     RGB_COLORS = (0xff0000, 0x00ff00, 0x0000ff)
 
@@ -52,8 +68,7 @@ class PlotSource():
                  abs_min=0, abs_max=65535, initial_min=None, initial_max=None,
                  range_min=None,
                  rate=None, colors=None, debug=0):
-        # pylint: disable=unidiomatic-typecheck
-        if type(self) == PlotSource:
+        if type(self) == PlotSource:  # pylint: disable=unidiomatic-typecheck
             raise TypeError("PlotSource must be subclassed")
         self._values = values
         self._name = name
@@ -77,6 +92,10 @@ class PlotSource():
         return self._name
 
     def data(self):
+        """Data sample from the sensor.
+
+           :return: A single numerical value or an array or tuple for vector values.
+           """
         raise NotImplementedError()
 
     def min(self):
@@ -113,20 +132,22 @@ class PlotSource():
         return self._colors
 
 
-### This over-reads presumably due to electronics warming boards update
-### plus it looks odd on close inspection as it climbs about 0.1 as being read
+### This over-reads presumably due to electronics warming the board
+### It also looks odd on close inspection as it climbs about 0.1C if
+### it's read frequently
+### Data sheet say operating temperature is -40C to 85C
 class TemperaturePlotSource(PlotSource):
     def _convert(self, value):
         return value * self._scale + self._offset
 
     def __init__(self, my_clue, mode="Celsius"):
         self._clue = my_clue
-        range_min = 0.4
+        range_min = 0.8
         if mode[0].lower() == "f":
             mode_name = "Fahrenheit"
             self._scale = 1.8
             self._offset = 32.0
-            range_min = 0.8
+            range_min = 1.6
         elif mode[0].lower == "k":
             mode_name = "Kelvin"
             self._scale = 1.0
@@ -135,10 +156,10 @@ class TemperaturePlotSource(PlotSource):
             mode_name = "Celsius"
             self._scale = 1.0
             self._offset = 0.0
-        super().__init__(1, "Temperature", # units="\u00b0" + mode_name[0],
+        super().__init__(1, "Temperature",
                          units=mode_name[0],
-                         abs_min=self._convert(0),
-                         abs_max=self._convert(100),
+                         abs_min=self._convert(-40),
+                         abs_max=self._convert(85),
                          initial_min=self._convert(10),
                          initial_max=self._convert(40),
                          range_min=range_min,
@@ -205,8 +226,8 @@ class PinPlotSource(PlotSource):
 
         self._pins = pins
         self._analogin = [analogio.AnalogIn(p) for p in pins]
-        # Assumption here that reference_voltage is same for all
-        # 3.3V graphs nicely with rounding up to 4.0V
+        ### Assumption here that reference_voltage is same for all
+        ### 3.3V graphs nicely with rounding up to 4.0V
         self._reference_voltage = self._analogin[0].reference_voltage
         self._conversion_factor = self._reference_voltage / (2**16 - 1)
         super().__init__(len(pins),
@@ -243,8 +264,8 @@ class ColorPlotSource(PlotSource):
         ### These values will affect the maximum return value
         ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
         # pylint: disable=protected-access
-        self._clue._sensor.integration_time = 249 # 19.46ms, ~ 50Hz
-        self._clue._sensor.color_gain = 0x02 # 16x (library default is 4x)
+        self._clue._sensor.integration_time = 249  ### 19.46ms, ~ 50Hz
+        self._clue._sensor.color_gain = 0x02  ### 16x (library default is 4x)
 
 
 class IlluminatedColorPlotSource(PlotSource):
@@ -285,8 +306,8 @@ class IlluminatedColorPlotSource(PlotSource):
     def start(self):
         ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
         # pylint: disable=protected-access
-        self._clue._sensor.integration_time = 249 # 19.46ms, ~ 50Hz
-        self._clue._sensor.color_gain = 0x03 # 64x (library default is 4x)
+        self._clue._sensor.integration_time = 249  ### 19.46ms, ~ 50Hz
+        self._clue._sensor.color_gain = 0x03  ### 64x (library default is 4x)
 
         self._clue.white_leds = True
 
@@ -302,7 +323,7 @@ class VolumePlotSource(PlotSource):
                          initial_min=10, initial_max=60,
                          rate=41)
 
-    # 20 due to conversion of amplitude of signal
+    ### 20 due to conversion of amplitude of signal
     _LN_CONVERSION_FACTOR = 20 / math.log(10)
 
     def data(self):
@@ -310,11 +331,10 @@ class VolumePlotSource(PlotSource):
                 * self._LN_CONVERSION_FACTOR)
 
 
-### TODO - this is not a blocking read for new data,
-###        data comes back faster (500Hz) than it changes
-###        if read in a tight loop
-### CP standard says this should be radians per second
-### but library returns degrees per second
+### This appears not to be a blocking read in terms of waiting for a
+### a genuinely newvalue from the sensor
+### CP standard says this should be radians per second but library
+### currently returns degrees per second
 ### https://circuitpython.readthedocs.io/en/latest/docs/design_guide.html
 ### https://github.com/adafruit/Adafruit_CircuitPython_LSM6DS/issues/9
 class GyroPlotSource(PlotSource):

@@ -100,12 +100,12 @@ class Plotter():
     ### 20% headroom either side on zoom in/out
     ZOOM_HEADROOM = 20 / 100
 
-    _GRID_COLOR = 0x308030
-    _GRID_DOT_SPACING = 8
+    GRID_COLOR = 0x308030
+    GRID_DOT_SPACING = 8
 
-    _INFO_FG_COLOR = 0x000080
-    _INFO_BG_COLOR = 0xc0c000
-    _LABEL_COLOR = 0xc0c0c0
+    INFO_FG_COLOR = 0x000080
+    INFO_BG_COLOR = 0xc0c000
+    LABEL_COLOR = 0xc0c0c0
 
     def _display_manual(self):
         """Intention was to disable auto_refresh here but this needs a
@@ -152,15 +152,15 @@ class Plotter():
         self._title = title
         self._max_title_len = max_title_len
 
-        # These arrays are used to provide a circular buffer
-        # with _data_values valid values - this needs to be sized
-        # one larger than screen width to retrieve prior y position
-        # for line undrawing in wrap mode
+        ### These arrays are used to provide a circular buffer
+        ### with _data_values valid values - this needs to be sized
+        ### one larger than screen width to retrieve prior y position
+        ### for line undrawing in wrap mode
         self._data_size = self._plot_width + 1
         self._data_y_pos = []
         self._data_value = []
         for _ in range(self._max_channels):
-            # 'i' is 32 bit signed integer
+            ### 'i' is 32 bit signed integer
             self._data_y_pos.append(array.array('i', [0] * self._data_size))
             self._data_value.append(array.array('f', [0.0] * self._data_size))
 
@@ -196,7 +196,7 @@ class Plotter():
         self._font = terminalio.FONT
         self._y_axis_lab = ""
         self._y_lab_width = 5  # maximum characters for y axis label
-        self._y_lab_color = self._LABEL_COLOR
+        self._y_lab_color = self.LABEL_COLOR
 
         self._displayio_graph = None
         self._displayio_plot = None
@@ -298,42 +298,39 @@ class Plotter():
     def _make_tg_grid(self):
         # pylint: disable=too-many-locals
         grid_width  = self._plot_width
-        grid_height = self._plot_height - 1
+        grid_height = self._plot_height_m1
         div_width = self._plot_width // self._x_divs
         div_height = self._plot_height // self._y_divs
         a_plot_grid = displayio.Bitmap(div_width, div_height, 2)
 
-        # grid colours
+        ### Grid colours
         grid_palette = displayio.Palette(2)
         grid_palette.make_transparent(0)
         grid_palette[0] = 0x000000
-        grid_palette[1] = self._GRID_COLOR
+        grid_palette[1] = self.GRID_COLOR
 
-        # horizontal line
-        for x in range(0, div_width, self._GRID_DOT_SPACING):
+        ### Horizontal line on grid rectangle
+        for x in range(0, div_width, self.GRID_DOT_SPACING):
             a_plot_grid[x, 0] = 1
 
-        # vertical line
-        for y in range(0, div_height, self._GRID_DOT_SPACING):
+        ### Vertical line on grid rectangle
+        for y in range(0, div_height, self.GRID_DOT_SPACING):
             a_plot_grid[0, y] = 1
 
         right_line = displayio.Bitmap(1, grid_height, 2)
         tg_right_line = displayio.TileGrid(right_line,
                                            pixel_shader=grid_palette)
-        for y in range(0, grid_height, self._GRID_DOT_SPACING):
+        for y in range(0, grid_height, self.GRID_DOT_SPACING):
             right_line[0, y] = 1
-
 
         bottom_line = displayio.Bitmap(grid_width + 1, 1, 2)
         tg_bottom_line = displayio.TileGrid(bottom_line,
                                             pixel_shader=grid_palette)
-        for x in range(0, grid_width + 1, self._GRID_DOT_SPACING):
+        for x in range(0, grid_width + 1, self.GRID_DOT_SPACING):
             bottom_line[x, 0] = 1
 
-
-        # Create a TileGrid using the Bitmap and Palette
-        # and tiling it based on number of divisions required
-        # TODO - add extra lines
+        ### Create a TileGrid using the Bitmap and Palette
+        ### and tiling it based on number of divisions required
         tg_plot_grid = displayio.TileGrid(a_plot_grid,
                                           pixel_shader=grid_palette,
                                           width=self._x_divs,
@@ -386,7 +383,7 @@ class Plotter():
                                    + 30 - 1)
         self._displayio_y_labs = plot_y_labels
 
-        # three items (grid, axis label, title) plus the y tick labels
+        ### Three items (grid, axis label, title) plus the y tick labels
         g_background = displayio.Group(max_size=3+len(plot_y_labels))
         g_background.append(self._make_tg_grid())
         for label in self._displayio_y_labs:
@@ -401,8 +398,8 @@ class Plotter():
 
         self._displayio_plot = plot
 
-        # Create the main Group for display with one spare slot for
-        # popup informational text
+        ### Create the main Group for display with one spare slot for
+        ### popup informational text
         main_group = displayio.Group(max_size=3)
         main_group.append(g_background)
         main_group.append(tg_plot)
@@ -429,14 +426,12 @@ class Plotter():
     def _draw_vline(self, x1, y1, y2, colidx):
         """Draw a clipped vertical line at x1 from pixel one along from y1 to y2.
            """
-        # Same vertical position as previous point
-        # print("VLINE", x1, y1, y2, colidx)
         if y2 == y1:
             if 0 <= y2 <= self._plot_height_m1:
                 self._displayio_plot[x1, y2] = colidx
             return
 
-        # y2 above y1, on screen this translates to being below
+        ### For y2 above y1, on screen this translates to being below
         step = 1 if y2 > y1 else -1
 
         for line_y_pos in range(max(0, min(y1 + step, self._plot_height_m1)),
@@ -469,7 +464,7 @@ class Plotter():
 
                 y_pos = self._data_y_pos[ch_idx][data_idx]
                 if self._style == "lines" and x_pos != 0:
-                    # Python supports negative array index
+                    ### Python supports negative array index
                     prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
                     self._draw_vline(x_pos, prev_y_pos, y_pos, colidx)
                 else:
@@ -579,42 +574,36 @@ class Plotter():
         for ch_idx, value in enumerate(values):
             self._data_value[ch_idx][self._data_idx] = value
 
-        # increment the data index wrapping around
+        ### Increment the data index for circular buffer
         self._data_idx += 1
         if self._data_idx >= self._data_size:
             self._data_idx = 0
 
     def _data_draw(self, values, x_pos, data_idx):
         offscale = False
-        rescale_not_needed = True
 
         for ch_idx, value in enumerate(values):
-            # last two parameters appear "swapped" - this deals with the
-            # displayio screen y coordinate increasing downwards
+            ### Last two parameters appear "swapped" - this deals with the
+            ### displayio screen y coordinate increasing downwards
             y_pos = round(mapf(value,
                                self._plot_min, self._plot_max,
                                self._plot_height_m1, 0))
 
             if y_pos < 0 or y_pos >= self._plot_height:
                 offscale = True
-                if self._scale_mode == "pixel":
-                    rescale_not_needed = False
 
-            if rescale_not_needed:
-                self._data_y_pos[ch_idx][data_idx] = y_pos
+            self._data_y_pos[ch_idx][data_idx] = y_pos
 
-                if self._style == "lines" and self._x_pos != 0:
-                    # Python supports negative array index
-                    prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
-                    self._draw_vline(x_pos, prev_y_pos, y_pos,
-                                     self._channel_colidx[ch_idx])
-                    self._plot_dirty = True  # bit wrong if whole line is off screen
-                else:
-                    if not offscale:
-                        self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
-                        self._plot_dirty = True
-
-        return rescale_not_needed
+            if self._style == "lines" and self._x_pos != 0:
+                # Python supports negative array index
+                prev_y_pos = self._data_y_pos[ch_idx][data_idx - 1]
+                self._draw_vline(x_pos, prev_y_pos, y_pos,
+                                 self._channel_colidx[ch_idx])
+                self._plot_dirty = True  # bit wrong if whole line is off screen
+            else:
+                if not offscale:
+                    self._displayio_plot[x_pos, y_pos] = self._channel_colidx[ch_idx]
+                    self._plot_dirty = True
 
     def _check_zoom_in(self):
         """Check if recent data warrants zooming in on y axis scale based on checking
@@ -812,8 +801,8 @@ class Plotter():
             self._displayio_info = Label(self._font, text=value,
                                          line_spacing=line_spacing,
                                          scale=font_scale,
-                                         background_color=self._INFO_FG_COLOR,
-                                         color=self._INFO_BG_COLOR)
+                                         background_color=self.INFO_FG_COLOR,
+                                         color=self.INFO_BG_COLOR)
             ### centre the (left justified) text
             self._displayio_info.x = (self._screen_width
                                       - font_scale * font_w * max_word_chars) // 2

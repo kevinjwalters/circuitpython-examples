@@ -1,4 +1,4 @@
-### clue-plotter v1.12
+### clue-plotter v1.13
 ### Sensor and input plotter for Adafruit CLUE in CircuitPython
 ### This plots the sensors and three of the analogue inputs on
 ### the LCD display either with scrolling or wrap mode which
@@ -35,21 +35,22 @@
 
 import time
 
+import gc
 import board
-from adafruit_clue import clue
 
+from plotter import Plotter
 from plot_source import PlotSource, TemperaturePlotSource, PressurePlotSource, \
                         HumidityPlotSource, ColorPlotSource, ProximityPlotSource, \
                         IlluminatedColorPlotSource, VolumePlotSource, \
                         AccelerometerPlotSource, GyroPlotSource, \
                         MagnetometerPlotSource, PinPlotSource
-from plotter import Plotter
+from adafruit_clue import clue
 
 
 debug = 1
 
 
-### A list of all the data source for the plotting
+### A list of all the data sources for plotting
 sources = [TemperaturePlotSource(clue, mode="Celsius"),
            TemperaturePlotSource(clue, mode="Fahrenheit"),
            PressurePlotSource(clue, mode="Metric"),
@@ -103,8 +104,8 @@ def select_colors(plttr, src, def_palette):
 
 
 def ready_plot_source(plttr, srcs, def_palette, index=0):
-    """Select the plot source index from list and then setup the plot parameters
-       by retrieving meta-data from the PlotSource object."""
+    """Select the plot source by index from srcs list and then setup the
+       plot parameters by retrieving meta-data from the PlotSource object."""
     src = srcs[index]
     ### Put the description of the source on screen at the top
     source_name = str(src)
@@ -157,7 +158,7 @@ plotter = Plotter(board.DISPLAY,
                   debug=debug)
 
 ### If set to true this forces use of colour blindness friendly colours
-default_palette = False
+use_default_palette = False
 
 clue.pixel[0] = clue.BLACK  ### turn off the NeoPixel on the back of CLUE board
 
@@ -170,16 +171,19 @@ popup_text(plotter,
                       "      4secs: Mu plot",
                       "Right: style change"]), duration=10)
 
+count = 0
+
 while True:
-    ### set the source and start items
+    ### Set the source and start items
     (source, channels) = ready_plot_source(plotter, sources,
-                                           default_palette, current_source_idx)
+                                           use_default_palette,
+                                           current_source_idx)
 
     while True:
-        ### read data from sensor or voltage from pad
+        ### Read data from sensor or voltage from pad
         all_data = source.data()
 
-        ### check for left (A) and right (B) buttons
+        ### Check for left (A) and right (B) buttons
         if clue.button_a:
             release_time = wait_for_release(lambda: clue.button_a)
             if release_time > 3.0:  ### toggle Mu output
@@ -208,11 +212,18 @@ while True:
             d_print(1, "Graph change", new_style, new_mode)
             plotter.change_stylemode(new_style, new_mode)
 
-        ### display it
+        ### Display it
         if channels == 1:
             plotter.data_add((all_data,))
         else:
             plotter.data_add(all_data)
+
+        ### An occasional print of free heap
+        if debug >=3 and count % 15 == 0:
+            gc.collect()  ### must collect() first to measure free memory
+            print("Free memory:", gc.mem_free())
+
+        count += 1
 
     source.stop()
 
