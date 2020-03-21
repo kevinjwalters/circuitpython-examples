@@ -185,7 +185,7 @@ class PressurePlotSource(PlotSource):
             self._scale = 1.0
             units = "hPa"  ### AKA millibars (mb)
             range_min = 1
-        
+
         super().__init__(1, "Pressure", units=units,
                          abs_min=self._convert(300), abs_max=self._convert(1100),
                          initial_min=self._convert(980), initial_max=self._convert(1040),

@@ -193,6 +193,7 @@ class Plotter():
         self._plot_min = None
         self._plot_max = None
         self._plot_min_range = None  ### Used partly to prevent div by zero
+        self._plot_range_lock = False
         self._plot_dirty = False  ### flag indicate some data has been plotted
 
         self._font = terminalio.FONT
@@ -636,8 +637,11 @@ class Plotter():
         return (new_plot_min, new_plot_max)
 
     def _auto_plot_range(self, redraw_plot=True):
-        """Check if we need to zoom out or in.
+        """Check if we need to zoom out or in based on checking historical
+           data values unless y_range_lock has been set.
            """
+        if self._plot_range_lock:
+            return False
         zoom_in = False
         zoom_out = False
 
@@ -883,3 +887,11 @@ class Plotter():
     @mu_output.setter
     def mu_output(self, value):
         self._mu_output = value
+
+    @property
+    def y_range_lock(self):
+        return self._plot_range_lock
+
+    @y_range_lock.setter
+    def y_range_lock(self, value):
+        self._plot_range_lock = value

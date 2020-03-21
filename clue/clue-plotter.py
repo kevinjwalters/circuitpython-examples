@@ -144,6 +144,7 @@ def popup_text(plttr, text, duration=1.0):
 
 
 mu_plotter_output = False
+range_lock = False
 
 initial_title = "CLUE Plotter"
 ### displayio has some static limits on text - pre-calculate the maximum
@@ -167,8 +168,9 @@ plotter.display_on()
 popup_text(plotter,
            "\n".join(["Button Guide",
                       "Left: sensor change",
-                      "      2secs: palette",
-                      "      4secs: Mu plot",
+                      "  2secs: palette",
+                      "  4s: Mu plot",
+                      "  6s: range lock",
                       "Right: style change"]), duration=10)
 
 count = 0
@@ -186,7 +188,13 @@ while True:
         ### Check for left (A) and right (B) buttons
         if clue.button_a:
             release_time = wait_for_release(lambda: clue.button_a)
-            if release_time > 3.0:  ### toggle Mu output
+            if release_time > 5.0:  ### toggle range lock
+                range_lock = not range_lock
+                plotter.y_range_lock = range_lock
+                popup_text(plotter,
+                           "Range lock "
+                           + ("on" if range_lock else "off"))
+            elif release_time > 3.0:  ### toggle Mu output
                 mu_plotter_output = not mu_plotter_output
                 plotter.mu_output = mu_plotter_output
                 popup_text(plotter,
