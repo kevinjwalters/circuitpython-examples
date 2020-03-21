@@ -180,14 +180,16 @@ class PressurePlotSource(PlotSource):
             ### 29.92 inches mercury equivalent to 1013.25mb in ISA
             self._scale = 29.92 / 1013.25
             units = "inHg"
+            range_min = 0.04
         else:
             self._scale = 1.0
             units = "hPa"  ### AKA millibars (mb)
-
+            range_min = 1
+        
         super().__init__(1, "Pressure", units=units,
                          abs_min=self._convert(300), abs_max=self._convert(1100),
                          initial_min=self._convert(980), initial_max=self._convert(1040),
-                         range_min=1,
+                         range_min=range_min,
                          rate=22)
 
     def data(self):
