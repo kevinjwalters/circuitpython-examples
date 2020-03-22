@@ -190,8 +190,8 @@ popup_text(plotter,
            "\n".join(["Button Guide",
                       "Left: next source",
                       "  2secs: palette",
-                      "  3s: Mu plot",
-                      "  4s: range lock",
+                      "  4s: Mu plot",
+                      "  6s: range lock",
                       "Right: style change"]), duration=10)
 
 count = 0
@@ -211,14 +211,14 @@ while True:
             ### Wait for button release with time-based menu
             opt, _ = wait_release(lambda: clue.button_a,
                                   [(2, "Next\nsource"),
-                                   (3.5,
+                                   (4,
                                     ("Source" if use_def_pal else "Default")
                                     + "\npalette"),
-                                   (5,
+                                   (6,
                                     "Mu output "
                                     + ("off" if mu_plotter_output else "on")),
-                                   (6.5,
-                                    "Range lock" + ("off" if range_lock else "on"))
+                                   (8,
+                                    "Range lock\n" + ("off" if range_lock else "on"))
                                    ])
             if opt == 0:  ### change plot source
                 current_source_idx = (current_source_idx + 1) % len(sources)
