@@ -286,7 +286,7 @@ class IlluminatedColorPlotSource(PlotSource):
             raise ValueError("Colour must be Red, Green, Blue or Clear")
 
         self._channel = col_fl_lc
-        super().__init__(1, "Ilum. color: " + self._channel.upper(),
+        super().__init__(1, "Illum. color: " + self._channel.upper(),
                          abs_min=0, abs_max=8000,
                          initial_min=0, initial_max=2000,
                          colors=(plot_colour,),
