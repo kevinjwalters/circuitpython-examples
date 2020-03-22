@@ -126,13 +126,34 @@ def ready_plot_source(plttr, srcs, def_palette, index=0):
     return (src, channels_from_src)
 
 
-def wait_for_release(func):
-    """Waits for passed function func to return a false value.
-       Used to measure how long buttons are depressed."""
-    t1 = time.monotonic_ns()
-    while func():
-        pass
-    return (time.monotonic_ns() - t1) * 1e-9
+def wait_release(func, menu):
+    """Calls func repeatedly waiting for it to return a false value
+       and goes through menu list as time passes.
+
+       The menu is a list of menu entries where each entry is a
+       two element list of time passed in seconds and text to display
+       for that period.
+       The entries must be in ascending time order."""
+
+    start_t_ns = time.monotonic_ns()
+    menu_option = None
+    selected = False
+
+    for menu_option, menu_entry in enumerate(menu):
+        menu_time_ns = start_t_ns + int(menu_entry[0] * 1e9)
+        menu_text = menu_entry[1]
+        if menu_text:
+            plotter.info = menu_text
+        while time.monotonic_ns() < menu_time_ns:
+            if not func():
+                selected = True
+                break
+        if menu_text:
+            plotter.info = ""
+        if selected:
+            break
+
+    return (menu_option, (time.monotonic_ns() - start_t_ns) * 1e-9)
 
 
 def popup_text(plttr, text, duration=1.0):
@@ -159,7 +180,7 @@ plotter = Plotter(board.DISPLAY,
                   debug=debug)
 
 ### If set to true this forces use of colour blindness friendly colours
-use_default_palette = False
+use_def_pal = False
 
 clue.pixel[0] = clue.BLACK  ### turn off the NeoPixel on the back of CLUE board
 
@@ -167,10 +188,10 @@ plotter.display_on()
 ### Using left and right here in case the CLUE is cased hiding A/B labels
 popup_text(plotter,
            "\n".join(["Button Guide",
-                      "Left: sensor change",
+                      "Left: next source",
                       "  2secs: palette",
-                      "  4s: Mu plot",
-                      "  6s: range lock",
+                      "  3s: Mu plot",
+                      "  4s: range lock",
                       "Right: style change"]), duration=10)
 
 count = 0
@@ -178,7 +199,7 @@ count = 0
 while True:
     ### Set the source and start items
     (source, channels) = ready_plot_source(plotter, sources,
-                                           use_default_palette,
+                                           use_def_pal,
                                            current_source_idx)
 
     while True:
@@ -187,36 +208,40 @@ while True:
 
         ### Check for left (A) and right (B) buttons
         if clue.button_a:
-            release_time = wait_for_release(lambda: clue.button_a)
-            if release_time > 5.0:  ### toggle range lock
-                range_lock = not range_lock
-                plotter.y_range_lock = range_lock
-                popup_text(plotter,
-                           "Range lock "
-                           + ("on" if range_lock else "off"))
-            elif release_time > 3.0:  ### toggle Mu output
-                mu_plotter_output = not mu_plotter_output
-                plotter.mu_output = mu_plotter_output
-                popup_text(plotter,
-                           "Mu output "
-                           + ("on" if mu_plotter_output else "off"))
-            elif release_time > 1.0:  ### toggle palette
-                default_palette = not default_palette
-                popup_text(plotter,
-                           ("default" if default_palette else "source")
-                           + "\npalette")
-                plotter.channel_colidx = select_colors(plotter, source,
-                                                       default_palette)
-            else:  ### change plot source
+            ### Wait for button release with time-based menu
+            opt, _ = wait_release(lambda: clue.button_a,
+                                  [(2, "Next\nsource"),
+                                   (3.5,
+                                    ("Source" if use_def_pal else "Default")
+                                    + "\npalette"),
+                                   (5,
+                                    "Mu output "
+                                    + ("off" if mu_plotter_output else "on")),
+                                   (6.5,
+                                    "Range lock" + ("off" if range_lock else "on"))
+                                   ])
+            if opt == 0:  ### change plot source
                 current_source_idx = (current_source_idx + 1) % len(sources)
                 break  ### to leave inner while and select the new source
+
+            elif opt == 1:  ### toggle palette
+                use_def_pal = not use_def_pal
+                plotter.channel_colidx = select_colors(plotter, source,
+                                                       use_def_pal)
+
+            elif opt == 2:  ### toggle Mu output
+                mu_plotter_output = not mu_plotter_output
+                plotter.mu_output = mu_plotter_output
+
+            else:  ### toggle range lock
+                range_lock = not range_lock
+                plotter.y_range_lock = range_lock
 
         if clue.button_b:  ### change plot style and mode
             current_sm_idx = (current_sm_idx + 1) % len(stylemodes)
             (new_style, new_mode) = stylemodes[current_sm_idx]
-            plotter.info = new_style + "\n" + new_mode
-            release_time = wait_for_release(lambda: clue.button_b)
-            plotter.info = ""
+            wait_release(lambda: clue.button_b,
+                         [(2, new_style + "\n" + new_mode)])
             d_print(1, "Graph change", new_style, new_mode)
             plotter.change_stylemode(new_style, new_mode)
 
