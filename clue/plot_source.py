@@ -151,7 +151,7 @@ class TemperaturePlotSource(PlotSource):
         elif mode[0].lower() == "k":
             mode_name = "Kelvin"
             self._scale = 1.0
-            self._offset = -273.15
+            self._offset = 273.15
         else:
             mode_name = "Celsius"
             self._scale = 1.0
