@@ -91,14 +91,18 @@ class Test_TemperaturePlotSource(unittest.TestCase):
         ### of test data
         mocked_clue = Mock()
         expected_data = (293.15, 294.45, 295.15,
-                         273.15, 233.14999999999998, 358.15)
+                         273.15, 233.15, 358.15)
         type(mocked_clue).temperature = PropertyMock(side_effect=self.SENSOR_DATA)
 
         source = TemperaturePlotSource(mocked_clue,
                                        mode="Kelvin")
 
         for expected_value in expected_data:
-            self.assertAlmostEqual(source.data(),
+            data = source.data()
+            # self.assertEqual(data,
+            #                 expected_value,
+            #                 msg="An inappropriate check for floating-point")
+            self.assertAlmostEqual(data,
                                    expected_value,
                                    msg="Checking converted temperature is correct")
 
