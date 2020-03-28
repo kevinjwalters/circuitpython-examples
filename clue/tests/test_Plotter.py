@@ -1,50 +1,53 @@
-# The MIT License (MIT)
-#
-# Copyright (c) 2020 Kevin J. Walters
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+### The MIT License (MIT)
+###
+### Copyright (c) 2020 Kevin J. Walters
+###
+### Permission is hereby granted, free of charge, to any person obtaining a copy
+### of this software and associated documentation files (the "Software"), to deal
+### in the Software without restriction, including without limitation the rights
+### to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+### copies of the Software, and to permit persons to whom the Software is
+### furnished to do so, subject to the following conditions:
+###
+### The above copyright notice and this permission notice shall be included in
+### all copies or substantial portions of the Software.
+###
+### THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+### IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+### FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+### AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+### LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+### THE SOFTWARE.
+
+import sys
+import time
+import array
+import os
 
 import unittest
 from unittest.mock import Mock, MagicMock, patch
 
-import time
-import array
-import os
+import numpy
+
 verbose = int(os.getenv('TESTVERBOSE', '2'))
 
-import sys
-# Mocking libraries which are about to be import'd by Plotter
+### Mocking libraries which are about to be import'd by Plotter
 sys.modules['board'] = MagicMock()
 sys.modules['displayio'] = MagicMock()
 sys.modules['terminalio'] = MagicMock()
 sys.modules['adafruit_display_text.label'] = MagicMock()
 
-# Replicate CircuitPython's time.monotonic_ns()
-time.monotonic_ns = lambda: int(time.monotonic() * 1e9)
+### Replicate CircuitPython's time.monotonic_ns() pre 3.5
+if not hasattr(time, "monotonic_ns"):
+    time.monotonic_ns = lambda: int(time.monotonic() * 1e9)
 
-import numpy
 
-
-# Borrowing the dhalbert/tannewt technique from adafruit/Adafruit_CircuitPython_Motor
+### Borrowing the dhalbert/tannewt technique from adafruit/Adafruit_CircuitPython_Motor
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# import what we are testing
+### pylint: disable=wrong-import-position
+### import what we are testing
 from plotter import Plotter
 
 import terminalio  # mocked
@@ -52,16 +55,21 @@ terminalio.FONT = Mock()
 terminalio.FONT.get_bounding_box = Mock(return_value=(6, 14))
 
 
-# TODO use setup() and tearDown() - https://docs.python.org/3/library/unittest.html#unittest.TestCase.tearDown
+### TODO use setup() and tearDown()
+### - https://docs.python.org/3/library/unittest.html#unittest.TestCase.tearDown
 
 
-# pylint: disable=protected-access
+### pylint: disable=protected-access, no-self-use, too-many-locals
 class Test_Plotter(unittest.TestCase):
+    """Tests for Plotter.
+       Very useful but code needs a good tidy particulary around widths,
+       lots of 200 hard-coded numbers.
+       Would benefit from testing different widths too."""
     ### These were the original dimensions of the Bitmap
-    ### Current clue-plotter uses 192 for width and 
+    ### Current clue-plotter uses 192 for width and
     ### scrolling is set to 50
     _PLOT_WIDTH = 200
-    _PLOT_HEIGHT = 201    
+    _PLOT_HEIGHT = 201
     _SCROLL_PX = 25
 
     def count_nz_rows(self, bitmap):
@@ -175,7 +183,6 @@ class Test_Plotter(unittest.TestCase):
         return ps
 
 
-
     def test_spike_after_wrap_and_overwrite_one_channel(self):
         """A specific test to check that a spike that appears in wrap mode is
            correctly cleared by subsequent flat data."""
@@ -185,20 +192,20 @@ class Test_Plotter(unittest.TestCase):
         test_source1 = self.make_a_PlotSource_onespike()
         self.ready_plot_source(plotter, test_source1)
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique1, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique1 == [0]),
                         "Checking all pixels start as 0")
 
         # Fill screen
-        for d_idx in range(200):
+        for _ in range(200):
             plotter.data_add((test_source1.data(),))
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0, 1]),
+        unique2, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique2 == [0, 1]),
                         "Checking pixels are now a mix of 0 and 1")
 
         # Rewrite whole screen with new data as we are in wrap mode
-        for d_idx in range(190):
+        for _ in range(190):
             plotter.data_add((test_source1.data(),))
 
         non_zero_rows = self.count_nz_rows(plot)
@@ -210,7 +217,8 @@ class Test_Plotter(unittest.TestCase):
         self.assertTrue(9 not in non_zero_rows,
                         "Check nothing is just above 90 which plots at 10")
         self.assertEqual(non_zero_rows, [99, 100],
-                         "Only pixels left plotted should be from values 0 and 1 being plotted at 99 and 100")
+                         "Only pixels left plotted should be from"
+                         + "values 0 and 1 being plotted at 99 and 100")
         self.assertTrue(numpy.alltrue(plot[:, 99] == [1] * 190 + [0] * 10),
                         "Checking row 99 precisely")
         self.assertTrue(numpy.alltrue(plot[:, 100] == [0] * 190 + [1] * 10),
@@ -228,21 +236,21 @@ class Test_Plotter(unittest.TestCase):
         test_source1 = self.make_a_PlotSource_onespike()
         self.ready_plot_source(plotter, test_source1)
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique1, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique1 == [0]),
                         "Checking all pixels start as 0")
 
-        # Fill screen then wrap to write another 20 values
-        for d_idx in range(200 + 20):
+        ### Fill screen then wrap to write another 20 values
+        for _ in range(200 + 20):
             plotter.data_add((test_source1.data(),))
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0, 1]),
+        unique2, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique2 == [0, 1]),
                         "Checking pixels are now a mix of 0 and 1")
 
         plotter.change_stylemode("dots", "scroll")
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique3, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique3 == [0]),
                         "Checking all pixels are now 0 after change_stylemode")
 
         plotter.display_off()
@@ -257,33 +265,33 @@ class Test_Plotter(unittest.TestCase):
         test_source1 = self.make_a_PlotSource()
         self.ready_plot_source(plotter, test_source1)
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique1, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique1 == [0]),
                         "Checking all pixels start as 0")
 
-        # Fill screen
-        for d_idx in range(200):
+        ### Fill screen
+        for _ in range(200):
             plotter.data_add((test_source1.data(),))
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0, 1]),
+        unique2, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique2 == [0, 1]),
                         "Checking pixels are now a mix of 0 and 1")
         self.assertEqual(plotter._values, 200)
         self.assertEqual(plotter._data_values, 200)
 
-        # Force a single scroll of the data
-        for d_idx in range(10):
+        ### Force a single scroll of the data
+        for _ in range(10):
             plotter.data_add((test_source1.data(),))
 
         self.assertEqual(plotter._values, 200 + 10)
         self.assertEqual(plotter._data_values, 200 + 10 - self._SCROLL_PX)
 
-        # This should clear all data and the screen
+        ### This should clear all data and the screen
         if verbose >= 3:
             print("change_stylemode() to a new mode which will clear screen")
         plotter.change_stylemode("dots", "wrap")
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique3, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique3 == [0]),
                         "Checking all pixels are now 0")
 
         plotter.display_off()
@@ -297,8 +305,8 @@ class Test_Plotter(unittest.TestCase):
 
         self.ready_plot_source(plotter, test_triplesource1)
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique1, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique1 == [0]),
                         "Checking all pixels start as 0")
 
         # Three data samples
@@ -307,7 +315,7 @@ class Test_Plotter(unittest.TestCase):
             all_data.append(test_triplesource1.data())
             plotter.data_add(all_data[-1])
 
-        # all_data is now [(10, 15, 40), (11, 16, 41), (12, 17, 42)]
+        ### all_data is now [(10, 15, 40), (11, 16, 41), (12, 17, 42)]
         self.assertEqual(plotter._data_y_pos[0][0:3],
                          array.array('i', [90, 89, 88]),
                          "channel 0 plotted y positions")
@@ -318,25 +326,25 @@ class Test_Plotter(unittest.TestCase):
                          array.array('i', [60, 59, 58]),
                          "channel 2 plotted y positions")
 
-        # Fill rest of screen
+        ### Fill rest of screen
         for d_idx in range(197):
             all_data.append(test_triplesource1.data())
             plotter.data_add(all_data[-1])
 
-        # Three values more values to force a scroll
+        ### Three values more values to force a scroll
         for d_idx in range(3):
             all_data.append(test_triplesource1.data())
             plotter.data_add(all_data[-1])
 
-        # all_data[-4] is (49, 54, 59)
-        # all_data[-3:0] is [(50, 55, 40) (51, 56, 41) (52, 57, 42)]
+        ### all_data[-4] is (49, 54, 59)
+        ### all_data[-3:0] is [(50, 55, 40) (51, 56, 41) (52, 57, 42)]
         expected_data_size = width - self._SCROLL_PX + 3
         st_x_pos = width - self._SCROLL_PX
         d_idx = plotter._data_idx - 3
 
         self.assertTrue(self._SCROLL_PX > 3,
                         "Ensure no scrolling occurred from recent 3 values")
-        # the data_idx here is 2 because the size is now plot_width + 1
+        ### the data_idx here is 2 because the size is now plot_width + 1
         self.assertEqual(plotter._data_idx, 2)
         self.assertEqual(plotter._x_pos, st_x_pos + 3)
         self.assertEqual(plotter._data_values, expected_data_size)
@@ -372,9 +380,10 @@ class Test_Plotter(unittest.TestCase):
                         print("Pixel value for channel",
                               "{:d}, naive expectation {:d},".format(ch_idx,
                                                                      expected),
-                              "actual {:d} at {:d}, {:d}".format(idx, actual,
-                                                                 st_x_pos+idx,
-                                                                 y_pos))
+                              "actual {:d} at {:d}, {:d}, {:d}".format(idx,
+                                                                       actual,
+                                                                       st_x_pos + idx,
+                                                                       y_pos))
         # Only 7 out of 9 will match because channel 2 put a vertical
         # line at x position 175 over-writing ch0 and ch1
         self.assertEqual(total_pixel_matches, 7, "plotted pixels check")
@@ -398,27 +407,27 @@ class Test_Plotter(unittest.TestCase):
 
         self.ready_plot_source(plotter, test_triplesource1)
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique1, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique1 == [0]),
                         "Checking all pixels start as 0")
 
         # Fill screen
-        for d_idx in range(200):
+        for _ in range(200):
             plotter.data_add(test_triplesource1.data())
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0, 1, 2, 3]),
+        unique2, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique2 == [0, 1, 2, 3]),
                         "Checking pixels are now a mix of 0, 1, 2, 3")
         # Force a single scroll of the data
-        for d_idx in range(10):
+        for _ in range(10):
             plotter.data_add(test_triplesource1.data())
 
         # This should clear all data and the screen
         if verbose >= 3:
             print("change_stylemode() to a new mode which will clear screen")
         plotter.change_stylemode("dots", "wrap")
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique3, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique3 == [0]),
                         "Checking all pixels are now 0")
 
         plotter.display_off()
@@ -432,12 +441,12 @@ class Test_Plotter(unittest.TestCase):
 
         self.ready_plot_source(plotter, test_source1)
 
-        unique, counts = numpy.unique(plot, return_counts=True)
-        self.assertTrue(numpy.alltrue(unique == [0]),
+        unique1, _ = numpy.unique(plot, return_counts=True)
+        self.assertTrue(numpy.alltrue(unique1 == [0]),
                         "Checking all pixels start as 0")
 
-        # Fill screen with first 200
-        for d_idx in range(200):
+        ### Fill screen with first 200
+        for _ in range(200):
             plotter.data_add((test_source1.data(),))
 
         non_zero_rows1 = self.count_nz_rows(plot)
@@ -446,7 +455,7 @@ class Test_Plotter(unittest.TestCase):
 
         # Rewrite screen with next 200 but these should force an internal
         # rescaling of y axis
-        for d_idx in range(200):
+        for _ in range(200):
             plotter.data_add((test_source1.data(),))
 
         self.assertEqual(plotter.y_range, (-108.0, 1000.0),
@@ -473,7 +482,8 @@ class Test_Plotter(unittest.TestCase):
         plotter.data_add((test_source1.data(),))
         y_min, y_max = plotter.y_range
         self.assertTrue(y_max - y_min > 0,
-                        "Range is not zero and implicityly ZeroDivisionError exception has not occurred.")
+                        "Range is not zero and implicitly"
+                        + "ZeroDivisionError exception has not occurred.")
 
         plotter.display_off()
 
@@ -485,7 +495,8 @@ class Test_Plotter(unittest.TestCase):
         # time.monotonic_ns.return_value = lambda: global_time_ns
 
         local_time_ns = time.monotonic_ns()
-        with patch('time.monotonic_ns', create=True, side_effect=lambda: local_time_ns) as time_monotonic_ns_fn:
+        with patch('time.monotonic_ns', create=True,
+                   side_effect=lambda: local_time_ns) as _:
             plotter = self.make_a_Plotter("lines", "wrap", scale_mode="pixel")
             (tg, plot) = (Mock(), numpy.zeros((self._PLOT_WIDTH, self._PLOT_HEIGHT), numpy.uint8))
             plotter.display_on(tg_and_plot=(tg, plot))
@@ -494,9 +505,7 @@ class Test_Plotter(unittest.TestCase):
             self.ready_plot_source(plotter, test_source1)
 
             ### About 11 seconds worth - will have zoomed in during this time
-            time_ns = 1234 * 1e9
-
-            for d_idx in range(300):
+            for _ in range(300):
                 val = test_source1.data()
                 plotter.data_add((val,))
                 local_time_ns += round(1/27 * 1e9)  ### emulation of time.sleep(1/27)
@@ -514,7 +523,7 @@ class Test_Plotter(unittest.TestCase):
 
             ### Another 14 seconds and now data is in narrow range so another zoom is due
             ### Why does this take so long?
-            for d_idx in range(400):
+            for _ in range(400):
                 val = test_source1.data()
                 plotter.data_add((val,))
                 local_time_ns += round(1/27 * 1e9)  ### emulation of time.sleep(1/27)
@@ -528,7 +537,7 @@ class Test_Plotter(unittest.TestCase):
             ###self.assertEqual(list(unique2), [29, 100, 171])
             ###self.assertLessEqual(max(counts2) - min(counts2), 1)
 
-            if verbose >=3:
+            if verbose >= 3:
                 self.aprint_plot(plot)
             ### Look for a specific bug which leaves some previous pixels
             ### set on screen at column 24
