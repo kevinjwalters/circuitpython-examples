@@ -256,7 +256,7 @@ class ColorPlotSource(PlotSource):
                          abs_min=0, abs_max=8000,  ### 7169 looks like max
                          rate=50,
                          colors=self.RGB_COLORS,
-                         )
+                        )
 
     def data(self):
         (r, g, b, _) = self._clue.color  ### fourth value is clear value
