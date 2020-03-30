@@ -264,7 +264,7 @@ class ColorPlotSource(PlotSource):
 
     def start(self):
         ### These values will affect the maximum return value
-        ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
+        ### Set APDS9960 to sample every (256 - 249 ) * 2.78 = 19.46ms
         # pylint: disable=protected-access
         self._clue._sensor.integration_time = 249  ### 19.46ms, ~ 50Hz
         self._clue._sensor.color_gain = 0x02  ### 16x (library default is 4x)
@@ -306,7 +306,7 @@ class IlluminatedColorPlotSource(PlotSource):
             return None  ### This should never happen
 
     def start(self):
-        ### Set APDS9660 to sample every (256 - 249 ) * 2.78 = 19.46ms
+        ### Set APDS9960 to sample every (256 - 249 ) * 2.78 = 19.46ms
         # pylint: disable=protected-access
         self._clue._sensor.integration_time = 249  ### 19.46ms, ~ 50Hz
         self._clue._sensor.color_gain = 0x03  ### 64x (library default is 4x)

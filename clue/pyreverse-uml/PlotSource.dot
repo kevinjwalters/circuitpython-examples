@@ -1,5 +1,0 @@
-digraph "PlotSource" {
-charset="utf-8"
-rankdir=BT
-"0" [label="{/home/kjw/dev/circuit-python/circuitpython-examples/clue/plot_source.py.PlotSource|DEFAULT_COLORS : tuple\lRGB_COLORS : tuple\l_abs_max : int\l_abs_min : int\l_colors : NoneType\l_debug : int\l_initial_max\l_initial_min\l_name\l_range_min : float, NoneType\l_rate : NoneType\l_units : str\l_values\l|__init__()\l__str__()\lcolors()\ldata()\linitial_max()\linitial_min()\lmax()\lmin()\lrange_min()\lrate()\lstart()\lstop()\lunits()\lvalues()\l}", shape="record"];
-}
