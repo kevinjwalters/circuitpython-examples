@@ -1,4 +1,4 @@
-### data-rep-calc v0.8
+### data-rep-calc v0.9
 ### A calculator which also shows the floating point data representation
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.1.0
@@ -131,12 +131,13 @@ class DecimalFP():
     def __init__(self, number=None, *, mantissa=None, exponent=None, precision=7):
         self._negative = False
         self._precision = 7
-        self._mantissa = list(range(1, precision + 1))
+        self._mantissa = list(range(1, precision + 1))  # 1.234567 equivalent
         self._exponent = 0
         self._nan = False
         self._inf = False
         self._cursor = 0
-        self._fp30bit = 1.23456  ## TODO this properly
+        self._fp30bit = None
+        self._recalc_fp()
 
     def cursor_right(self):
         self._cursor = (self._cursor + 1) % self._precision
@@ -181,7 +182,14 @@ class DecimalFP():
         if self._cursor == 0:
             return self._cursor
         return self._cursor + 1  ### skip over decimal point
-        ### TODO do i want to return two values here?
+        ### TODO do I want to return two values here?
+
+    def _recalc_fp(self):
+        """Recalculate the floating point version of the number using
+           CircuitPython's float() with a string made from the authoritative data."""
+        self._fp30bit = float(str(self._mantissa[0]) + "."
+                              + "".join(map(str, self._mantissa[1:]))
+                              + "e" + str(self._exponent))
 
     @property
     def cursor_digit(self):
@@ -192,6 +200,7 @@ class DecimalFP():
         if not isinstance(value, int) or not 0 <= value <= 9:
             raise ValueError("Not 0-9 int")
         self._mantissa[self._cursor] = value
+        self._recalc_fp()
 
     @property
     def cursor(self):
@@ -208,6 +217,7 @@ class DecimalFP():
     @exponent.setter
     def exponent(self, value):
         self._exponent = value
+        self._recalc_fp()
 
 
 class ScreenFP():
@@ -284,39 +294,67 @@ class ScreenFP():
             ScreenFP.z_a_o_palette = ScreenFP._make_z_a_o_palette()
 
         self._decimal = Label(font=terminalio.FONT,
-                              text="-" * 32, color=0x0000FF,
+                              text="-" * 32, color=0xc0c0c0,
                               scale=2)
         # Set the location
         self._decimal.x = 20
         self._decimal.y = 20
 
-        self._binary = displayio.TileGrid(self.zeros_and_ones,
-                                          pixel_shader=self.z_a_o_palette,
-                                          width = 32,
-                                          height = 1,
-                                          tile_width = self.BIT_WIDTH,
-                                          tile_height = self.BIT_HEIGHT)
-        self._binary.x = 10
-        self._binary.y = 50
+        if size=="tiny":
+            cols = 32
+            rows = 1
+            scale = 1
+        elif size=="small":
+            cols = 16
+            rows = 2
+            scale = 2
+        else:
+            raise ValueError("size must be tiny or small")
 
-        self._group = displayio.Group(max_size=2)
-        self._group.append(self._decimal)
-        self._group.append(self._binary)
+        self._binary_chunk_width = cols
+        self._binary_chunks = []
+        
+        ### _, font_h = self._font.get_bounding_box()
+        
+        y_start_pos = 50 // scale
+        for row in range(rows):
+            bin_digits = displayio.TileGrid(self.zeros_and_ones,
+                                            pixel_shader=self.z_a_o_palette,
+                                            width=cols,
+                                            height=1,
+                                            tile_width=self.BIT_WIDTH,
+                                            tile_height=self.BIT_HEIGHT)
+            bin_digits.x = 10 // scale
+            bin_digits.y = y_start_pos
+            y_start_pos += self.BIT_HEIGHT + 4  ### magic value
+            self._binary_chunks.append(bin_digits)
 
+        ### The binary row(s) need to go in as a second Group to allow them
+        ### to have their own scale factor
+        main_group = displayio.Group(max_size=2)
+        bin_group = displayio.Group(max_size=len(self._binary_chunks), scale=scale)
+        main_group.append(self._decimal)
+        main_group.append(bin_group)
+
+        for binary_chunk in self._binary_chunks:
+            bin_group.append(binary_chunk)
+        self._group = main_group
         self._set_binary([0] * 32)
 
     def _set_binary(self, bits):
-        bin_idx = 0
+        for src_bit_idx in range(32):
+            if src_bit_idx % self._binary_chunk_width == 0:
+                bin_idx = 0
+                binary_chunk = self._binary_chunks[src_bit_idx // self._binary_chunk_width]
 
-        self._binary[bin_idx] = self.SIGN_1 if bits[0] else self.SIGN_0
-        bin_idx += 1
-
-        for b in bits[1:9]:
-            self._binary[bin_idx] = self.EXPONENT_1 if b else self.EXPONENT_0
-            bin_idx += 1
-
-        for b in bits[9:32]:
-            self._binary[bin_idx] = self.MANTISSA_1 if b else self.MANTISSA_0
+            bit = bits[src_bit_idx]
+            if src_bit_idx == 0:
+                value = self.SIGN_1 if bit else self.SIGN_0
+            elif 1 <= src_bit_idx <= 8:
+                value = self.EXPONENT_1 if bit else self.EXPONENT_0
+            else:  ### 9 to 31 inclusive
+                value = self.MANTISSA_1 if bit else self.MANTISSA_0
+            binary_chunk[bin_idx] = value
             bin_idx += 1
 
     def update_value(self, text, bits):
@@ -331,18 +369,19 @@ class ScreenFP():
 
 operators = ("+", "-", "*", "/", "^")
 
-operand1_gob = ScreenFP()
+### default is tiny which is a challenge to read for oldsters!
+operand1_gob = ScreenFP(size="small")
 
 operand1 = DecimalFP()
 operand2 = DecimalFP()
 operator = operators[0]
 result = DecimalFP()
 
-
 display.show(operand1_gob.displayio_group())
 
 
 ### TODO draw a cursor with colour showing whether in edit mode
+### or could do this as a flashing inversion or could do it as a brighter character?
 
 while True:
     #text_area.text = str(digit)
