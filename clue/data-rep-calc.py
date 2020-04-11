@@ -1,4 +1,4 @@
-### data-rep-calc v0.11
+### data-rep-calc v0.13
 ### A calculator which also shows the floating point data representation
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.1.0
@@ -40,6 +40,7 @@ import terminalio
 ### TODO show operator
 ### TODO change operator
 ### TODO calculate result using CP's FP
+### TODO option to show implicit bit
 
 ### TODO make this work for bluefruit + gizmo too
 ### And PyGamer / any Arcade device which runs CircuitPython
@@ -80,12 +81,6 @@ mantissabg_col = (232, 209, 187)
 cursor_col = (255, 0, 0)  ### Red cursor
 
 
-def get_tilt_angle():
-    """ 0 degrees for flat on a desk, 90 for upright """
-    (ax, ay, az) = clue.acceleration
-    return math.atan2(ay, -az) * RAD_TO_DEG
-
-
 def get_tilt_angles():
     """0 degrees for flat, -90 for left side down to stand on its side.
        0 degrees for flat on a desk, 90 for upright """
@@ -97,7 +92,7 @@ def get_tilt_angles():
 # gyro based on first reading with magnitude 20 and rate
 # limited with 0.25s pause does not work that well
 
-start_angle = None
+start_fb_angle = None
 start_digit = None
 digit_idx = 0
 
@@ -150,8 +145,14 @@ class DecimalFP():
         self._recalc_fp()
 
     def __str__(self):
-        """Returns the value in scientific notation."""
+        """Returns the value in scientific notation
+           of the form [-]N.NNNNNNN x 10^[-]N."""
         return self.text_repr()
+
+    def __float__(self):
+        """Returns the value as a float."""
+        return self._fp30bit
+
 
     def text_repr(self, scientific=True):
         man_str = str(self._mantissa[0]) + "." + "".join(map(str, self._mantissa[1:]))
@@ -186,12 +187,38 @@ class DecimalFP():
     def _recalc_fp(self):
         """Recalculate the floating point version of the number using
            CircuitPython's float() with a string made from the authoritative data."""
-        self._fp30bit = float(str(self._mantissa[0]) + "."
+        self._fp30bit = float(("-" if self._negative else "")
+                              + str(self._mantissa[0]) + "."
                               + "".join(map(str, self._mantissa[1:]))
                               + "e" + str(self._exponent))
 
     def cursor_right(self):
         self._cursor = (self._cursor + 1) % self._precision
+
+    def set_fp(self, value):
+        """Use format to convert a float to the internal representation."""
+        mant_str, exp_str = '{:.e}'.format(value).split("e")
+        mant_idx = 0
+        dot_idx = None
+        new_negative = False
+        new_mantissa = []
+        for idx, mant_char in enumerate(mant_str):
+            if mant_char.isdigit():
+                new_mantissa.append(int(mant_char))
+            elif mant_char == ".":
+                dot_idx = idx
+            elif idx == 0 and mant_char == "-":
+                new_negative = True
+            else:
+                return ValueError("Cannot parse: " + value)
+
+        self._negative = new_negative
+        ### dot_idx expected to be 1 for positive, 2 for negative
+        self._exponent = int(exp_str) + dot_idx - 1 - (1 if new_negative else 0)
+        self._mantissa = new_mantissa[:self._precision]
+        self._recalc_fp()
+        if self._fp30bit != value:
+            d_print(0, "WARNING", "set_fp mismatch {:.e} {:.e}".format(value, self._fp30bit))
 
     @property
     def cursor(self):
@@ -222,10 +249,39 @@ class DecimalFP():
         self._recalc_fp()
 
 
+_cursors = {}
+
+def make_cursor_line(size):
+    """Make a simple line cursor in Bitmap form assuming it will be scaled
+       like the decimal text field is scaled."""
+    ### TODO - work out how (and where) to do this elegantly
+    font_w = 6
+    width = (font_w - 1) * size
+    height = 2 * size
+    cursor_line = displayio.Bitmap(width, height, 8)  ### TODO ...
+
+    for pix_idx in range(width * height):
+        cursor_line[pix_idx] = 6  ### TODO
+
+    return cursor_line
+
+def make_cursor(cursor_type, size):
+    """Create a new cursor if required, otherwise just return an existing one."""
+    cursor = _cursors.get((cursor_type, size))
+    if cursor is None:
+        if cursor_type == "line":
+            cursor = make_cursor_line(size)
+        else:
+            return ValueError("cursor_type must be line")
+        _cursors[(cursor_type, size)] = cursor
+
+    return cursor
+
+
 class ScreenFP():
     zeros_and_ones = None  ### initialised in constructor
     z_a_o_palette = None  ### initialised in constructor
-    _cursors = {}
+
 
     _COLORS = 7
 
@@ -243,31 +299,6 @@ class ScreenFP():
     _FONT_W = _FONT.get_bounding_box()[0]
     _FONT_H = _FONT.get_bounding_box()[1]
 
-    @classmethod
-    def _make_cursor_line(cls, size):
-        """Make a simple line cursor in Bitmap form assuming it will be scaled
-           like the decimal text field is scaled."""
-        width = (cls._FONT_W - 1) * size
-        height = 2 * size
-        cursor_line = displayio.Bitmap(width, height, cls._COLORS)
-
-        for pix_idx in range(width * height):
-            cursor_line[pix_idx] = 6  ### TODO
-
-        return cursor_line
-
-    @classmethod
-    def _make_cursor(cls, cursor_type, size):
-        """Create a new cursor if required, otherwise just return an existing one."""
-        cursor = cls._cursors.get((cursor_type, size))
-        if cursor is None:
-            if cursor_type == "line":
-                cursor = cls._make_cursor_line(size)
-            else:
-                return ValueError("cursor_type must be line")
-            cls._cursors[(cursor_type, size)] = cursor
-
-        return cursor
 
     @classmethod
     def _make_zeros_and_ones(cls):
@@ -341,20 +372,20 @@ class ScreenFP():
 
         self._x = x   ### TODO - ponder this as it's currently indented from the binary representation
         self._y = y
-        
+
         ### TODO magic number
         self._decimal = Label(font=self._FONT,
                               text="-" * 20, color=0xc0c0c0,
                               scale=scale)
         # Set the location
-        self._decimal.x = self._x
+        self._decimal.x = self._x + 6
         self._decimal.y = self._y + self._FONT_H * scale // 2
 
         self._binary_chunk_width = cols
         self._binary_chunks = []
 
         y_start_pos = self._y + round(1.25 * self._FONT_H * scale)
-        
+
         for row in range(rows):
             bin_digits = displayio.TileGrid(self.zeros_and_ones,
                                             pixel_shader=self.z_a_o_palette,
@@ -362,17 +393,18 @@ class ScreenFP():
                                             height=1,
                                             tile_width=self.BIT_WIDTH,
                                             tile_height=self.BIT_HEIGHT)
+            ### TODO - this x calc works but is nonsense
             bin_digits.x = self._x // 2 // scale
             bin_digits.y = y_start_pos // scale
             y_start_pos += self.BIT_HEIGHT * scale + 4  ### magic value
             self._binary_chunks.append(bin_digits)
 
         self._cursor_spacing = self._FONT_W * scale
-        self._cursor_visible = True
+        self._cursor_visible = False
 
         ### Get a shared cursor, TileGrid allows custom positioning
         ### to allow for x/y positioning
-        cursor = ScreenFP._make_cursor(cursor_type, 2)
+        cursor = make_cursor(cursor_type, 2)
         cursor_tilegrid = displayio.TileGrid(cursor,
                                              pixel_shader=self.z_a_o_palette)
         cursor_tilegrid.x = self._decimal.x
@@ -384,7 +416,8 @@ class ScreenFP():
         bin_group = displayio.Group(max_size=len(self._binary_chunks), scale=scale)
         main_group.append(self._decimal)
         main_group.append(bin_group)
-        main_group.append(cursor_tilegrid)
+        if self._cursor_visible:
+            main_group.append(cursor_tilegrid)
 
         for binary_chunk in self._binary_chunks:
             bin_group.append(binary_chunk)
@@ -430,7 +463,7 @@ class ScreenFP():
 
         ### skip the decimal point
         cursor_pos = self._cursor if self._cursor == 0 else self._cursor + 1
-        self._cursor_tilegrid.x = 20 + cursor_pos * self._cursor_spacing  ### TODO
+        self._cursor_tilegrid.x = self._decimal.x + cursor_pos * self._cursor_spacing
 
     @property
     def cursor(self):
@@ -457,94 +490,238 @@ class ScreenFP():
                 self._group.pop()
 
 
-operators = ("+", "-", "*", "/", "^")
+class ScreenOperator():
+   # needs to do a cursor
+   # need to show one character, possibly two
+
+    def __init__(self, symbol):
+        self._cursor_visible = False
+        self._symbol = symbol
+
+        symbol_gob = Label(font=terminalio.FONT,
+                           text=symbol,
+                           max_glyphs=2,
+                           color=0xc0c000,
+                           scale=2)
+
+        # Set the location TODO re-think how this is done
+        symbol_gob.x = 0
+        symbol_gob.y = 84
+        self._symbol_gob = symbol_gob
+        self._group = displayio.Group(max_size=2)
+        self._group.append(self._symbol_gob)
+        if self._cursor_visible:
+            pass  ### TODO
+
+    def displayio_group(self):
+        return self._group
+
+    @property
+    def symbol(self):
+        return self._symbol
+
+    @symbol.setter
+    def symbol(self, value):
+        self._symbol = value
+        self._symbol_gob.text = value[:2]
+
+    @property
+    def cursor_visible(self):
+        return self._cursor_visible
+
+    @cursor_visible.setter
+    def cursor_visible(self, value):
+        """If the value has changed store it and then hide or show it by removing it
+           from the main displayio Group."""
+        if self._cursor_visible != value:
+            self._cursor_visible = value
+            if self._cursor_visible:
+                pass
+                ### self._group.append(self._CURSORWHENIDOIT)  TODO
+            else:
+                pass
+                ### self._group.pop()  TODO
+
+
+class Operator():
+    def __init__(self, func, symbol):
+        self._func = func
+        self._symbol = symbol
+
+    def __str__(self):
+        return self._symbol
+
+    def apply(self, op1, op2):
+        return self._func(op1, op2)
+
+class OperatorAdd(Operator):
+    def __init__(self):
+        super().__init__(lambda arg1, arg2: arg1 + arg2, "+")
+
+class OperatorSubtract(Operator):
+    def __init__(self):
+        super().__init__(lambda arg1, arg2: arg1 - arg2, "-")
+
+class OperatorMultiply(Operator):
+    def __init__(self):
+        super().__init__(lambda arg1, arg2: arg1 * arg2, "*")
+
+class OperatorDivide(Operator):
+    def __init__(self):
+        super().__init__(lambda arg1, arg2: arg1 / arg2, "/")
+
+
+operators = (OperatorAdd(),
+             OperatorSubtract(),
+             OperatorMultiply(),
+             OperatorDivide())
+selected_operator_idx = 0
+operator_num = len(operators)
+
+operand1 = DecimalFP()
+operand2 = DecimalFP()
+operator = operators[selected_operator_idx]
+result = DecimalFP()
+
+ops = [operand1, operand2, operator]
+selected_op_idx = 0
+op_num = 3
 
 ### default is tiny which is a challenge to read for oldsters!
 operand1_gob = ScreenFP(y=00, size="small")
 operand2_gob = ScreenFP(y=85, size="small")
+op_str = str(operator)
+operator_gob = ScreenOperator(op_str)
 result_gob = ScreenFP(y=170, size="small")
 
-operand1 = DecimalFP()
-operand2 = DecimalFP()
-operator = operators[0]
-result = DecimalFP()
+screen_ops = [operand1_gob, operand2_gob, operator_gob]
 
-
-screen_group = displayio.Group(max_size=3)
+screen_group = displayio.Group(max_size=4)
 screen_group.append(operand1_gob.displayio_group())
 screen_group.append(operand2_gob.displayio_group())
+screen_group.append(operator_gob.displayio_group())
 screen_group.append(result_gob.displayio_group())
+
+screen_ops[selected_op_idx].cursor_visible = True
 
 display.show(screen_group)
 
 
-### TODO draw a cursor with colour showing whether in edit mode
-### or could do this as a flashing inversion or could do it as a brighter character?
+def update_result_duo(op1, oper, op2, res, res_gob):
+    """Do the calculation and updates the result and its graphical representation."""
+    ### CircuitPython does not currently allow/translate float()
+    ### for a class
+    new_float = oper.apply(op1.__float__(), op2.__float__())
+    res.set_fp(new_float)
+    si, ex, ma = res.binary_fp_comp()
+    res_gob.update_value(str(res), si + ex + ma)
 
+for op, screen_op in ((operand1, operand1_gob),
+                      (operand2, operand2_gob),
+                      (result, result_gob)):
+    si, ex, ma = op.binary_fp_comp()
+    screen_op.update_value(str(op), si + ex + ma)
+
+update_result_duo(operand1, operators[selected_operator_idx], operand2,
+                  result, result_gob)
+
+
+### TODO - there's a bug where start angle isn't registered for a digital change
+### on second operand under some circumstances
 while True:
     #text_area.text = str(digit)
     ### TODO only set this if value has changed (maybe)
     ##text_area.text = "".join(map(str, digits))
     ##text_area.text = str(operand1)
-    si, ex, ma = operand1.binary_fp_comp()
-    operand1_gob.update_value(str(operand1), si + ex + ma)
-
-    ### TODO - replace this
-    operand2_gob.update_value(str(operand1), si + ex + ma)
-    result_gob.update_value(str(operand1), si + ex + ma)
-
     if changed:
+        update_result_duo(operand1,
+                          operators[selected_operator_idx],
+                          operand2,
+                          result, result_gob)
         changed = False
-        time.sleep(0.25)
 
     if clue.button_a and not clue.button_b:
-        timeout = False
+        timeout1 = False
+        timeout2 = False
         start_ns = time.monotonic_ns()
         while clue.button_a:
             if time.monotonic_ns() - start_ns >= 500000000:
-                timeout = True
+                timeout1 = True
                 break
 
-        if timeout:
+        if timeout1:
+            screen_ops[selected_op_idx].cursor_visible = False
+            selected_op_idx = (selected_op_idx + 1 ) % op_num
+            screen_ops[selected_op_idx].cursor_visible = True
+
+        while clue.button_a:
+            if time.monotonic_ns() - start_ns >= 1000000000:
+                timeout2 = True
+                break
+
+        if timeout2:
             ### TODO visual indication exponent is being changed
+
+            ### Undo the cursor move from first timeout as we now know that's
+            ### not what the user wants
+            screen_ops[selected_op_idx].cursor_visible = False
+            selected_op_idx = (selected_op_idx - 1 ) % op_num
+
             start_tr_angle, _ = get_tilt_angles()
-            start_exponent = operand1.exponent
-            operand1_gob.cursor_visible = False
+            if not isinstance(ops[selected_op_idx], Operator):
+                start_exponent = ops[selected_op_idx].exponent
+
             while clue.button_a:
                 tr_angle, _ = get_tilt_angles()
                 offset = int((tr_angle - start_tr_angle) / 5.0)
-                ### TODO 38 / -38
-                operand1.exponent = max(min(start_exponent + offset,
-                                            operand1.MAX_EXPONENT),
-                                        operand1.MIN_EXPONENT)
-                ### Need to decide where/when to update text in all of this mess
-                ##text_area.text = str(operand1)
-                si, ex, ma = operand1.binary_fp_comp()
-                operand1_gob.update_value(str(operand1), si + ex + ma)
-            operand1_gob.cursor_visible = True
+
+                if not isinstance(ops[selected_op_idx], Operator):
+                    ### TODO 38 / -38
+                    ops[selected_op_idx].exponent = max(min(start_exponent + offset,
+                                                            operand1.MAX_EXPONENT),
+                                                        operand1.MIN_EXPONENT)
+                    ### Need to decide where/when to update text in all of this mess
+                    ##text_area.text = str(operand1)
+                    si, ex, ma = ops[selected_op_idx].binary_fp_comp()
+                    screen_ops[selected_op_idx].update_value(str(ops[selected_op_idx]),
+                                                             si + ex + ma)
+                    changed = True
+
+            screen_ops[selected_op_idx].cursor_visible = True
         else:
             ### Move the cursor on the held by the data representation
             ### then update the screen version
-            operand1.cursor_right()
-            operand1_gob.cursor = operand1.cursor
+            if not isinstance(ops[selected_op_idx], Operator):
+                ops[selected_op_idx].cursor_right()
+                screen_ops[selected_op_idx].cursor = ops[selected_op_idx].cursor
 
     if clue.button_b:
         ## (gx, _, _) = clue.gyro
-        if start_angle is None:
-            start_angle = get_tilt_angle()
+        if start_fb_angle is None:
+            _, start_fb_angle = get_tilt_angles()
             ##start_digit = digits[digit_idx]
-            start_digit = operand1.cursor_digit
+            if isinstance(ops[selected_op_idx], Operator):
+                start_operator_idx = selected_operator_idx
+            else:
+                start_digit = operand1.cursor_digit
         else:
-            angle = get_tilt_angle()
-            offset = int((angle - start_angle) / 5.0)
+            _, angle = get_tilt_angles()
+            offset = int((angle - start_fb_angle) / 5.0)
             ## digits[digit_idx] = max(min(start_digit + offset, 9), 0)
-            operand1.cursor_digit = max(min(start_digit + offset, 9), 0)
-            #if digit > 0 and gx > 20:
-            #    digit -= 1
-            #    changed = True
-            #elif digit < 9 and gx < -20:
-            #    digit += 1
-            #    changed = True
-    elif start_angle is not None:
-        start_angle = None
-        start_digit = None
+
+            if isinstance(ops[selected_op_idx], Operator):
+                selected_operator_idx = ( start_operator_idx + offset ) % operator_num
+                operator_gob.symbol = str(operators[selected_operator_idx])
+                if selected_operator_idx != start_operator_idx:
+                    changed = True
+            else:
+                new_digit = max(min(start_digit + offset, 9), 0)
+                if ops[selected_op_idx].cursor_digit != new_digit:
+                    ops[selected_op_idx].cursor_digit = new_digit
+
+                    si, ex, ma = ops[selected_op_idx].binary_fp_comp()
+                    screen_ops[selected_op_idx].update_value(str(ops[selected_op_idx]),
+                                                             si + ex + ma)
+                    changed = True
+    elif start_fb_angle is not None:
+        start_fb_angle = None
