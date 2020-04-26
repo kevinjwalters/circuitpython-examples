@@ -1,4 +1,4 @@
-### clue-metal-detector v0.7
+### clue-metal-detector v0.8
 ### A metal detector using a minimum number of external components
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.2.0
@@ -40,7 +40,7 @@ import pulseio
 import analogio
 import digitalio
 import ulab
-##import gc
+import gc
 from displayio import Group
 import terminalio
 ### TODO - ensure these are good for 5.2.0 and ideally would work on CPX
@@ -61,6 +61,9 @@ import audiocore
 ###        could extra min/max or 10/90% and put them up as bars too?
 ### TODO - add some loop timing and print to debug and perhaps some cumulative
 ###        loop time
+### TODO - buttons - screen on/off
+###                  mu output on/off
+###                  audio on/off
 
 ### https://circuitpython.readthedocs.io/projects/display-shapes/en/latest/api.html#rect
 
@@ -70,7 +73,7 @@ from adafruit_display_shapes.rect import Rect
 from adafruit_display_shapes.circle import Circle
 
 ### globals
-debug = 1
+debug = 3
 samples = []
 
 quantize_tones = True
@@ -86,23 +89,106 @@ def d_print(level, *args, **kwargs):
         print(*args, **kwargs)
 
 
+def voltage_bar_set(volt_diff):
+    """Draw a bar based on positive or negative values.
+       Width of 60 is performance compromise as more pixels take longer."""
+    global voltage_sep_dob, voltage_barneg_dob, voltage_barpos_dob
+    
+    if voltage_sep_dob is None:
+        voltage_sep_dob = Rect(160,119, voltage_width,4, fill=0x0000ff)
+    
+    if volt_diff < 0:
+        negbar_len = max(min(-round(volt_diff * 5e3), 118), 1)
+        posbar_len = 1
+    else:
+        negbar_len = 1
+        posbar_len = max(min(round(volt_diff * 5e3), 118), 1)
 
-### Initialise sound
+    if voltage_barneg_dob is not None:
+        screen_group.remove(voltage_barneg_dob)
+    voltage_barneg_dob = Rect(160, 118 - negbar_len,
+                              voltage_width, negbar_len,
+                              fill=0x00c0c0)
+    screen_group.append(voltage_barneg_dob)
 
-### TODO make some other timbres
-vol = 32767
-midpoint = 32768
-wave_samples_n = 20
+    if voltage_barpos_dob is not None:
+        screen_group.remove(voltage_barpos_dob)
+    voltage_barpos_dob = Rect(160, 121, 60, posbar_len,
+                              fill=0xc000c0)
+    screen_group.append(voltage_barpos_dob)
 
-## raw_samples = array.array("H", list(range(0,65535,9360)) + [43690, 21845])
+BASE_NOTE = 261.6256  ### C4 (middle C)
+QUANTIZE = 4
+POSTLOG_FACTOR = QUANTIZE / math.log(2)
 
-raw_samples = array.array("H",
-                          [round(vol * math.sin(2 * math.pi
-                                     * (idx / wave_samples_n)))
-                           + midpoint
-                           for idx in range(wave_samples_n)])
-sound_samples = audiocore.RawSample(raw_samples)
+def start_beep(freq, wave, wave_idx):
+    """Start playing a continous beep based on freq and waveform specified by wave_idx.
+       A frequency of 0 will stop the note playing.
+       This modifies the sample_rate property of the RawSample objects.
+       """
+    global last_frequency
+    if freq == 0:
+        if last_frequency != 0:
+            audio_out.stop()
+            last_frequency = 0
+        return
+
+    if quantize_tones:
+       ### TODO - make constants externally
+       note_freq = BASE_NOTE * 2**((round(math.log(freq / BASE_NOTE)
+                                          * POSTLOG_FACTOR)) / QUANTIZE)
+       d_print(3, "Quantize", freq, note_freq)
+    else:
+       note_freq = freq
+
+    (waveform, wave_samples_n) = wave[wave_idx]
+    new_freq = round(note_freq * wave_samples_n)
+    ### Only set the new frequency if it's not the last one
+    if new_freq != last_frequency:
+        waveform.sample_rate = new_freq
+        audio_out.play(waveform, loop=True)
+        last_frequency = new_freq
+
+
+### Initialise audio output
 audio_out = audiopwmio.PWMAudioOut(board.SPEAKER)
+
+### Initialise sounds
+AUDIO_MIDPOINT = 32768
+
+def make_sample_list(levels=10,
+                     volume=32767,
+                     range_l=24,
+                     start_l=8):
+    """Make a list of RawSample objects with a sine wave of varying resolution
+       from high to low.
+       The lower resolutions sound louder on the CLUE."""
+
+    sample_lens = [int((x*(range_l + .99)/(levels - 1)) + start_l)
+                   for x in range(0, levels)]
+    sample_lens.reverse()
+
+    wavefs = []
+    for s_len in sample_lens:
+        raw_samples = array.array("H",
+                                  [round(volume * math.sin(2 * math.pi
+                                     * (idx / s_len)))
+                                   + AUDIO_MIDPOINT
+                                   for idx in range(s_len)])
+        sound_samples = audiocore.RawSample(raw_samples)
+        wavefs.append((sound_samples, s_len))
+
+    return wavefs
+    
+waveforms = make_sample_list()
+last_frequency = 0
+
+if debug >= 3:
+    for idx in range(len(waveforms)):
+        start_beep(440, waveforms, idx)
+        time.sleep(0.1)
+    start_beep(0, waveforms, idx)  ### this silences it
+
 
 ### TODO is looking for board.DISPLAY a reasonable
 ### way to work out if we are on CPB+Gizmo
@@ -122,18 +208,6 @@ def sample_sum(pin, num):
     return sum(samples)
 
 
-def start_beep(freq):
-    if quantize_tones:
-       ### TODO - make constants externally
-       note_freq = 261.6256 * 2**((round(math.log(freq/261.6256) / math.log(2) * 4)) / 4)
-       d_print(3, "Quantize", freq, note_freq)
-    else:
-       note_freq = freq
-    
-    sound_samples.sample_rate = round(note_freq * wave_samples_n)
-    audio_out.play(sound_samples, loop=True)
-
-
 ### Start-up splash screen
 
 ### Initialise detector display
@@ -147,50 +221,31 @@ magnet_dob.y = 90
 magnet_circ_dob = Circle(60, 180, 5,
                          fill=0xc0c000)
 
+voltage_width = 60
+
 voltage_dob = Label(font=terminalio.FONT,
                     text="----.-mV",
                     scale=3,
                     color=0x00c0c0)
 voltage_dob.y = 30
 
-voltage_barneg_dob = Rect(160, 117, 80, 1, fill=0x00c0c0)
-
-voltage_sep_dob = Rect(160,119, 80,4, fill=0x0000ff)
-
-voltage_barpos_dob = Rect(160, 122, 80, 1, fill=0x00c0c0)
 
 screen_group = Group(max_size=6)
 screen_group.append(magnet_dob)
 screen_group.append(voltage_dob)
-screen_group.append(voltage_sep_dob)
 screen_group.append(magnet_circ_dob)
-screen_group.append(voltage_barneg_dob)
-screen_group.append(voltage_barpos_dob)
+
+voltage_barneg_dob = None
+voltage_sep_dob = None
+voltage_barpos_dob = None
+### Initialise the previous displayio objects and append them
+voltage_bar_set(0)
 
 display.show(screen_group)
 
 ### TODO check whether values have changed before replacing objects
 
-def voltage_bar_set(volt_diff):
-    """Draw a bar based on positive or negative values.
-       Width of 60 is performance compromise as more pixels take longer."""
-    global voltage_barneg_dob, voltage_barpos_dob
-    if volt_diff < 0:
-        negbar_len = max(min(-round(volt_diff * 5e3), 118), 1)
-        posbar_len = 1
-    else:
-        negbar_len = 1
-        posbar_len = max(min(round(volt_diff * 5e3), 118), 1)
 
-    screen_group.remove(voltage_barneg_dob)
-    voltage_barneg_dob = Rect(160, 118 - negbar_len, 60, negbar_len,
-                                  fill=0x00c0c0)
-    screen_group.append(voltage_barneg_dob)
-
-    screen_group.remove(voltage_barpos_dob)
-    voltage_barpos_dob = Rect(160, 121, 60, posbar_len,
-                              fill=0x00c0c0)
-    screen_group.append(voltage_barpos_dob)
 
 
 def magnet_circ_set(mag_ut):
@@ -250,6 +305,7 @@ display.auto_refresh = False
 voltage_zm1 = None
 voltage_zm2 = None
 filt_voltage = None
+mag_mag = 0.0
 
 ### Keep some historical averages of history
 ### aiming for about 10 reads per second so this gives
@@ -266,8 +322,14 @@ update_median_period = 5
 
 counter = 0
 
+audio_on = True
+
 
 while True:
+    ### garbage collect now to reduce likelihood it occurs
+    ### during sample reading
+    gc.collect()
+    
     ### read p1 value
     screen_updates = 0
     sample_start_time_ns = time.monotonic_ns()
@@ -304,25 +366,28 @@ while True:
         voltage_dob.text = "{:6.1f}mV".format(filt_voltage * 1000.0)
         screen_updates += 1
 
-    ### update bargraphs
-    diff_v = filt_voltage - base_voltage
-
-    if update_complex_graphics:
-       voltage_bar_set(diff_v)
-       screen_updates += 1
-
-    ### update audio
-    ### make an andio frequency
-    ### between 100Hz (won't be audible) and 5000 (loud on miniscule speaker)
-    frequency = min(100 + diff_v**2 * 1e8, 5000)
-    start_beep(frequency)
-
     ### read magnetometer
     mx, my, mz = clue.magnetic
     diff_x = mx - base_mx
     diff_y = my - base_my
-    diff_z = mz - base_mz
+    diff_z = mz - base_mz   ### TODO - maybe change this to only use z value if that helps with turning
     mag_mag = math.sqrt(diff_x * diff_x + diff_y * diff_y + diff_z * diff_z)
+
+    ### update audio
+    ### make an andio frequency
+    ### between 100Hz (won't be audible) and 5000 (loud on miniscule speaker)
+    diff_v = filt_voltage - base_voltage
+    abs_diff_v = abs(diff_v)
+    if audio_on:
+        frequency = min(100 + abs_diff_v * 5e5, 5000) if abs_diff_v > 0.002 or mag_mag > 2.0 else 0
+        start_beep(frequency, waveforms,
+                   min(int(mag_mag / 2), len(waveforms) - 1))
+
+    ### update bargraphs
+    if update_complex_graphics:
+       voltage_bar_set(diff_v)
+       screen_updates += 1
+
     if update_basic_graphics:
         magnet_dob.text = "{:6.1f}uT".format(mag_mag)
         screen_updates += 1
@@ -345,7 +410,8 @@ while True:
 
     d_print(1, counter, sample_start_time_ns / 1e9,
             voltage * 1000.0,
-            mag_mag, filt_voltage * 1000.0, base_voltage, voltage_hist_median)
+            mag_mag,
+            filt_voltage * 1000.0, base_voltage, voltage_hist_median)
 
     voltage_hist[voltage_hist_idx] = voltage
     if voltage_hist_idx >= len(voltage_hist) - 1:
