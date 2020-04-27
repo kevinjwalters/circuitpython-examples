@@ -1,4 +1,4 @@
-### clue-metal-detector v0.8
+### clue-metal-detector v0.9
 ### A metal detector using a minimum number of external components
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.2.0
@@ -31,25 +31,21 @@
 
 import time
 import math
-import struct
 import array
-import time
+import gc
 
 import board
 import pulseio
 import analogio
-import digitalio
 import ulab
-import gc
+
 from displayio import Group
 import terminalio
-### TODO - ensure these are good for 5.2.0 and ideally would work on CPX
+
 import audiopwmio
 import audiocore
 
 ### TODO - add manual re-calibrate
-### TODO - track drifts (5, 10 seconds?)
-### TODO - could split avg to look for outliers
 ### TODO - audio on/off
 ### TODO - make uT and mV static to reduce dirty part
 ### TODO - could do something with CLUE's reverse NeoPixel
@@ -76,9 +72,26 @@ from adafruit_display_shapes.circle import Circle
 debug = 3
 samples = []
 
-quantize_tones = True
+### globals used in functions
+last_frequency = 0
+last_negbar_len = None
+last_posbar_len = None
+last_mag_radius = None
 
+quantize_tones = True
 mu_output = True
+
+### Some constants used in start_beep()
+BASE_NOTE = 261.6256  ### C4 (middle C)
+QUANTIZE = 4
+POSTLOG_FACTOR = QUANTIZE / math.log(2)
+
+### There's room for 80 but 60 draws a bit quicker
+VOLTAGE_BAR_WIDTH = 60
+MAG_MAX_RADIUS = 50
+
+VOLTAGE_FMT = "{:6.1f}"
+MAG_FMT = "{:6.1f}"
 
 
 def d_print(level, *args, **kwargs):
@@ -93,10 +106,14 @@ def voltage_bar_set(volt_diff):
     """Draw a bar based on positive or negative values.
        Width of 60 is performance compromise as more pixels take longer."""
     global voltage_sep_dob, voltage_barneg_dob, voltage_barpos_dob
-    
+    global last_negbar_len, last_posbar_len
+
     if voltage_sep_dob is None:
-        voltage_sep_dob = Rect(160,119, voltage_width,4, fill=0x0000ff)
-    
+        voltage_sep_dob = Rect(160, 118,
+                               VOLTAGE_BAR_WIDTH, 4,
+                               fill=0x0000ff)
+        screen_group.append(voltage_sep_dob)
+
     if volt_diff < 0:
         negbar_len = max(min(-round(volt_diff * 5e3), 118), 1)
         posbar_len = 1
@@ -104,22 +121,54 @@ def voltage_bar_set(volt_diff):
         negbar_len = 1
         posbar_len = max(min(round(volt_diff * 5e3), 118), 1)
 
+    if posbar_len == last_posbar_len and negbar_len == last_negbar_len:
+        return
+
     if voltage_barneg_dob is not None:
         screen_group.remove(voltage_barneg_dob)
     voltage_barneg_dob = Rect(160, 118 - negbar_len,
-                              voltage_width, negbar_len,
+                              VOLTAGE_BAR_WIDTH, negbar_len,
                               fill=0x00c0c0)
     screen_group.append(voltage_barneg_dob)
+    last_negbar_len = negbar_len
 
     if voltage_barpos_dob is not None:
         screen_group.remove(voltage_barpos_dob)
-    voltage_barpos_dob = Rect(160, 121, 60, posbar_len,
+    voltage_barpos_dob = Rect(160, 122,
+                              VOLTAGE_BAR_WIDTH, posbar_len,
                               fill=0xc000c0)
     screen_group.append(voltage_barpos_dob)
+    last_posbar_len = posbar_len
 
-BASE_NOTE = 261.6256  ### C4 (middle C)
-QUANTIZE = 4
-POSTLOG_FACTOR = QUANTIZE / math.log(2)
+
+def magnet_circ_set(mag_ut):
+    global magnet_circ_dob
+    global last_mag_radius
+
+    ### map microteslas to a radius
+    radius = min(max(round(math.sqrt(mag_ut) * 4), 1), MAG_MAX_RADIUS)
+
+    if radius == last_mag_radius:
+        return
+
+    if magnet_circ_dob is not None:
+        screen_group.remove(magnet_circ_dob)
+    magnet_circ_dob = Circle(60, 180, radius,
+                             fill=0xc0c000)
+    screen_group.append(magnet_circ_dob)
+
+
+def manual_screen_refresh(disp):
+    refreshed = False
+    while True:
+        try:
+            refreshed = disp.refresh(minimum_frames_per_second=0,
+                                     target_frames_per_second=1000)
+        except Exception:
+            pass
+        if refreshed:
+            break
+
 
 def start_beep(freq, wave, wave_idx):
     """Start playing a continous beep based on freq and waveform specified by wave_idx.
@@ -134,12 +183,12 @@ def start_beep(freq, wave, wave_idx):
         return
 
     if quantize_tones:
-       ### TODO - make constants externally
-       note_freq = BASE_NOTE * 2**((round(math.log(freq / BASE_NOTE)
-                                          * POSTLOG_FACTOR)) / QUANTIZE)
-       d_print(3, "Quantize", freq, note_freq)
+        ### TODO - make constants externally
+        note_freq = BASE_NOTE * 2**((round(math.log(freq / BASE_NOTE)
+                                           * POSTLOG_FACTOR)) / QUANTIZE)
+        d_print(3, "Quantize", freq, note_freq)
     else:
-       note_freq = freq
+        note_freq = freq
 
     (waveform, wave_samples_n) = wave[wave_idx]
     new_freq = round(note_freq * wave_samples_n)
@@ -155,6 +204,7 @@ audio_out = audiopwmio.PWMAudioOut(board.SPEAKER)
 
 ### Initialise sounds
 AUDIO_MIDPOINT = 32768
+
 
 def make_sample_list(levels=10,
                      volume=32767,
@@ -172,16 +222,16 @@ def make_sample_list(levels=10,
     for s_len in sample_lens:
         raw_samples = array.array("H",
                                   [round(volume * math.sin(2 * math.pi
-                                     * (idx / s_len)))
+                                                           * (idx / s_len)))
                                    + AUDIO_MIDPOINT
                                    for idx in range(s_len)])
         sound_samples = audiocore.RawSample(raw_samples)
         wavefs.append((sound_samples, s_len))
 
     return wavefs
-    
+
+
 waveforms = make_sample_list()
-last_frequency = 0
 
 if debug >= 3:
     for idx in range(len(waveforms)):
@@ -211,63 +261,56 @@ def sample_sum(pin, num):
 ### Start-up splash screen
 
 ### Initialise detector display
+### The units are created as separate text objects as they are static
+### and this reduces the amount of redrawing for the dynamic numbers
+FONT_SCALE = 3
+font_width, _ = terminalio.FONT.get_bounding_box()
 
-magnet_dob = Label(font=terminalio.FONT,
-                   text="----.-uT",
-                   scale=3,
-                   color=0xc0c000)
-magnet_dob.y = 90
+magnet_value_dob = Label(font=terminalio.FONT,
+                         text="----.-",
+                         scale=FONT_SCALE,
+                         color=0xc0c000)
+magnet_value_dob.y = 90
 
-magnet_circ_dob = Circle(60, 180, 5,
-                         fill=0xc0c000)
+magnet_units_dob = Label(font=terminalio.FONT,
+                         text="uT",
+                         scale=FONT_SCALE,
+                         color=0xc0c000)
+magnet_units_dob.x = len(magnet_value_dob.text) * font_width * FONT_SCALE
+magnet_units_dob.y = magnet_value_dob.y
 
-voltage_width = 60
+voltage_value_dob = Label(font=terminalio.FONT,
+                          text="----.-",
+                          scale=FONT_SCALE,
+                          color=0x00c0c0)
+voltage_value_dob.y = 30
 
-voltage_dob = Label(font=terminalio.FONT,
-                    text="----.-mV",
-                    scale=3,
-                    color=0x00c0c0)
-voltage_dob.y = 30
+voltage_units_dob = Label(font=terminalio.FONT,
+                          text="mV",
+                          scale=FONT_SCALE,
+                          color=0x00c0c0)
+voltage_units_dob.y = voltage_value_dob.y
+voltage_units_dob.x = len(voltage_value_dob.text) * font_width * FONT_SCALE
 
-
-screen_group = Group(max_size=6)
-screen_group.append(magnet_dob)
-screen_group.append(voltage_dob)
-screen_group.append(magnet_circ_dob)
-
+### 8 elements, 4 added immediately
+screen_group = Group(max_size=8)
+screen_group.append(magnet_value_dob)
+screen_group.append(magnet_units_dob)
+screen_group.append(voltage_value_dob)
+screen_group.append(voltage_units_dob)
 voltage_barneg_dob = None
 voltage_sep_dob = None
 voltage_barpos_dob = None
+magnet_circ_dob = None
+
 ### Initialise the previous displayio objects and append them
 voltage_bar_set(0)
+magnet_circ_set(0)
 
 display.show(screen_group)
 
-### TODO check whether values have changed before replacing objects
 
 
-
-
-def magnet_circ_set(mag_ut):
-    global magnet_circ_dob
-    radius = min(max(round(math.sqrt(mag_ut) * 4), 1), 59)
-
-    screen_group.remove(magnet_circ_dob)
-    magnet_circ_dob = Circle(60, 180, radius,
-                             fill=0xc0c000)
-    screen_group.append(magnet_circ_dob)
-
-
-def manual_screen_refresh(disp):
-    refreshed = False
-    while True:
-        try:
-            refreshed = display.refresh(minimum_frames_per_second=0,
-                                        target_frames_per_second=1000)
-        except Exception:
-            pass
-        if refreshed:
-            break
 
 
 ### P1 for analogue input
@@ -284,19 +327,20 @@ pwm.duty_cycle = 55000
 totals = [0.0] * 3
 mag_samples_n = 10
 for _ in range(mag_samples_n):
-   mx, my, mz = clue.magnetic
-   totals[0] += mx
-   totals[1] += my
-   totals[2] += mz
-   time.sleep(0.05)
+    mx, my, mz = clue.magnetic
+    totals[0] += mx
+    totals[1] += my
+    totals[2] += mz
+    time.sleep(0.05)
 
 base_mx = totals[0] / mag_samples_n
 base_my = totals[1] / mag_samples_n
 base_mz = totals[2] / mag_samples_n
 
 ### Wait a bit for P1 input to stabilise
-base_voltage = sample_sum(pin_input, 3000) / 3000 * CONV_FACTOR
-voltage_dob.text = "{:6.1f}mV".format(base_voltage * 1000.0)
+_ = sample_sum(pin_input, 3000) / 3000 * CONV_FACTOR
+base_voltage = sample_sum(pin_input, 1000) / 1000 * CONV_FACTOR
+voltage_value_dob.text = "{:6.1f}".format(base_voltage * 1000.0)
 
 ### Auto refresh off
 ### TODO review this
@@ -329,11 +373,11 @@ while True:
     ### garbage collect now to reduce likelihood it occurs
     ### during sample reading
     gc.collect()
-    
+
     ### read p1 value
     screen_updates = 0
     sample_start_time_ns = time.monotonic_ns()
-    
+
     samples_to_read = 500  ### about 23ms worth on CLUE
     update_basic_graphics = counter % update_basic_graphics_period == 0
     if not update_basic_graphics:
@@ -345,25 +389,25 @@ while True:
     if not update_median:
         samples_to_read += 50
     voltage = sample_sum(pin_input, 500) / 500.0 * CONV_FACTOR
-   
+
     voltage_zm2 = voltage_zm1
     voltage_zm1 = voltage
-   
+
     if voltage_zm1 is None:
         voltage_zm1 = voltage
     if voltage_zm2 is None:
         voltage_zm2 = voltage
 
     filt_voltage = (voltage * 0.4
-                    + voltage_zm1 * 0.3 
-                    + voltage_zm2 * 0.3)                    
+                    + voltage_zm1 * 0.3
+                    + voltage_zm2 * 0.3)
 
     update_basic_graphics = counter % update_basic_graphics_period == 0
     update_complex_graphics = counter % update_complex_graphics_period == 0
 
     ### update text
     if update_basic_graphics:
-        voltage_dob.text = "{:6.1f}mV".format(filt_voltage * 1000.0)
+        voltage_value_dob.text = VOLTAGE_FMT.format(filt_voltage * 1000.0)
         screen_updates += 1
 
     ### read magnetometer
@@ -385,11 +429,11 @@ while True:
 
     ### update bargraphs
     if update_complex_graphics:
-       voltage_bar_set(diff_v)
-       screen_updates += 1
+        voltage_bar_set(diff_v)
+        screen_updates += 1
 
     if update_basic_graphics:
-        magnet_dob.text = "{:6.1f}uT".format(mag_mag)
+        magnet_value_dob.text = MAG_FMT.format(mag_mag)
         screen_updates += 1
     if update_complex_graphics:
         magnet_circ_set(mag_mag)
@@ -406,7 +450,7 @@ while True:
 
     if voltage_hist_complete and update_median:
         voltage_hist_median = ulab.numerical.sort(voltage_hist)[len(voltage_hist) // 2]
-        base_voltage = voltage_hist_median  ### TODO EXPERIMENTAL
+        base_voltage = voltage_hist_median
 
     d_print(1, counter, sample_start_time_ns / 1e9,
             voltage * 1000.0,
