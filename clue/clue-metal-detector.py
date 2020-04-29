@@ -1,4 +1,4 @@
-### clue-metal-detector v0.10
+### clue-metal-detector v0.11
 ### A metal detector using a minimum number of external components
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.2.0
@@ -74,6 +74,8 @@ from adafruit_display_shapes.circle import Circle
 ### way to work out if we are on CPB+Gizmo
 display = board.DISPLAY
 
+screen_height = display.height
+screen_width = display.width
 
 ### globals
 debug = 3
@@ -88,6 +90,10 @@ text_overlay_gob = None
 
 quantize_tones = True
 mu_output = True
+neopixel_output = True
+
+### Use to alternate/flash the NeoPixel
+neopixel_alternate = True
 
 ### Some constants used in start_beep()
 BASE_NOTE = 261.6256  ### C4 (middle C)
@@ -103,6 +109,9 @@ MAG_FMT = "{:6.1f}"
 
 INFO_FG_COLOR = 0x000080
 INFO_BG_COLOR = 0xc0c000
+
+threshold_voltage = 0.002
+threshold_mag = 2.5
 
 
 def d_print(level, *args, **kwargs):
@@ -159,9 +168,10 @@ def show_text(text):
     if text:
         text_overlay_gob = Label(terminalio.FONT,
                                  text=text,
-                                 scale=3,
+                                 scale=2,
                                  background_color=INFO_FG_COLOR,
                                  color=INFO_BG_COLOR)
+        text_overlay_gob.y = screen_height // 2
     else:
         if text_overlay_gob is not None:
             screen_group.remove(text_overlay_gob)
@@ -180,7 +190,7 @@ def voltage_bar_set(volt_diff):
     if voltage_sep_dob is None:
         voltage_sep_dob = Rect(160, 118,
                                VOLTAGE_BAR_WIDTH, 4,
-                               fill=0x0000ff)
+                               fill=0xc0c0c0)  ### white
         screen_group.append(voltage_sep_dob)
 
     if volt_diff < 0:
@@ -193,21 +203,23 @@ def voltage_bar_set(volt_diff):
     if posbar_len == last_posbar_len and negbar_len == last_negbar_len:
         return
 
-    if voltage_barneg_dob is not None:
-        screen_group.remove(voltage_barneg_dob)
-    voltage_barneg_dob = Rect(160, 118 - negbar_len,
-                              VOLTAGE_BAR_WIDTH, negbar_len,
-                              fill=0x00c0c0)
-    screen_group.append(voltage_barneg_dob)
-    last_negbar_len = negbar_len
-
     if voltage_barpos_dob is not None:
         screen_group.remove(voltage_barpos_dob)
-    voltage_barpos_dob = Rect(160, 122,
+    if posbar_len > 0:
+        voltage_barpos_dob = Rect(160, 118 - posbar_len,
                               VOLTAGE_BAR_WIDTH, posbar_len,
-                              fill=0xc000c0)
-    screen_group.append(voltage_barpos_dob)
-    last_posbar_len = posbar_len
+                              fill=0x00c000)  ### slightly darker green
+        screen_group.append(voltage_barpos_dob)
+        last_posbar_len = posbar_len
+
+    if voltage_barneg_dob is not None:
+        screen_group.remove(voltage_barneg_dob)
+    if negbar_len > 0:
+        voltage_barneg_dob = Rect(160, 122,
+                                  VOLTAGE_BAR_WIDTH, negbar_len,
+                                  fill=0xff0000)  ### red
+        screen_group.append(voltage_barneg_dob)
+        last_negbar_len = negbar_len
 
 
 def magnet_circ_set(mag_ut):
@@ -223,7 +235,7 @@ def magnet_circ_set(mag_ut):
     if magnet_circ_dob is not None:
         screen_group.remove(magnet_circ_dob)
     magnet_circ_dob = Circle(60, 180, radius,
-                             fill=0xc0c000)
+                             fill=0x0000ff)  ### blue
     screen_group.append(magnet_circ_dob)
 
 
@@ -238,6 +250,11 @@ def manual_screen_refresh(disp):
             pass
         if refreshed:
             break
+
+
+def set_neopixel(pixels, colour):
+    """Set all the NeoPixels to colour."""
+    pixels.fill(colour)
 
 
 def start_beep(freq, wave, wave_idx):
@@ -489,9 +506,28 @@ while True:
     diff_v = filt_voltage - base_voltage
     abs_diff_v = abs(diff_v)
     if audio_on:
-        frequency = min(100 + abs_diff_v * 5e5, 5000) if abs_diff_v > 0.002 or mag_mag > 2.0 else 0
+        if abs_diff_v > threshold_voltage or mag_mag > threshold_mag:
+            frequency = min(100 + abs_diff_v * 5e5, 5000)
+        else:
+            frequency = 0  ### silence
         start_beep(frequency, waveforms,
                    min(int(mag_mag / 2), len(waveforms) - 1))
+
+    ### Update the NeoPixel(s) if enabled
+    if neopixel_output:
+        np_r, np_g, np_b = (0, 0, 0)
+        if neopixel_alternate:
+            if abs_diff_v > threshold_voltage:
+                if diff_v < 0.0:
+                    np_r = min(round(abs_diff_v * 8e3), 255)
+                else:
+                    np_g = min(round(abs_diff_v * 8e3), 255)
+            else:
+                if mag_mag > threshold_mag:
+                    np_b = min(round(mag_mag * 6), 255)
+
+        set_neopixel(clue.pixel, (np_r, np_g, np_b))
+        neopixel_alternate = not neopixel_alternate
 
     ### Update voltage bargraph
     if update_complex_graphics:
@@ -506,18 +542,23 @@ while True:
         magnet_circ_set(mag_mag)
         screen_updates += 1
 
-    ### update circle
-
     ### check for buttons
     ### TODO remember to deal with display.auto_refresh = False
-
-
 
     if screen_updates:
         manual_screen_refresh(display)
     if mu_output:
         print((voltage, mag_mag))
 
+    ### Add the current voltage to the historical list
+    voltage_hist[voltage_hist_idx] = voltage
+    if voltage_hist_idx >= len(voltage_hist) - 1:
+        voltage_hist_idx = 0
+        voltage_hist_complete = True
+    else:
+        voltage_hist_idx += 1
+
+    ### Adjust the reference base_voltage to the median of historical values
     if voltage_hist_complete and update_median:
         voltage_hist_median = ulab.numerical.sort(voltage_hist)[len(voltage_hist) // 2]
         base_voltage = voltage_hist_median
@@ -526,12 +567,5 @@ while True:
             voltage * 1000.0,
             mag_mag,
             filt_voltage * 1000.0, base_voltage, voltage_hist_median)
-
-    voltage_hist[voltage_hist_idx] = voltage
-    if voltage_hist_idx >= len(voltage_hist) - 1:
-        voltage_hist_idx = 0
-        voltage_hist_complete = True
-    else:
-        voltage_hist_idx += 1
 
     counter += 1
