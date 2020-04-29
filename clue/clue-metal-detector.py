@@ -1,4 +1,4 @@
-### clue-metal-detector v0.9
+### clue-metal-detector v0.10
 ### A metal detector using a minimum number of external components
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.2.0
@@ -45,6 +45,7 @@ import terminalio
 import audiopwmio
 import audiocore
 
+
 ### TODO - add manual re-calibrate
 ### TODO - audio on/off
 ### TODO - make uT and mV static to reduce dirty part
@@ -68,6 +69,12 @@ from adafruit_display_text.label import Label
 from adafruit_display_shapes.rect import Rect
 from adafruit_display_shapes.circle import Circle
 
+
+### TODO is looking for board.DISPLAY a reasonable
+### way to work out if we are on CPB+Gizmo
+display = board.DISPLAY
+
+
 ### globals
 debug = 3
 samples = []
@@ -77,6 +84,7 @@ last_frequency = 0
 last_negbar_len = None
 last_posbar_len = None
 last_mag_radius = None
+text_overlay_gob = None
 
 quantize_tones = True
 mu_output = True
@@ -93,6 +101,9 @@ MAG_MAX_RADIUS = 50
 VOLTAGE_FMT = "{:6.1f}"
 MAG_FMT = "{:6.1f}"
 
+INFO_FG_COLOR = 0x000080
+INFO_BG_COLOR = 0xc0c000
+
 
 def d_print(level, *args, **kwargs):
     """A simple conditional print for debugging based on global debug level."""
@@ -100,6 +111,64 @@ def d_print(level, *args, **kwargs):
         print(level, *args, **kwargs)
     elif debug >= level:
         print(*args, **kwargs)
+
+
+### Adapted and borrowed from clue-plotter v1.14
+def wait_release(text_func, button_func, menu):
+    """Calls button_func repeatedly waiting for it to return a false value
+       and goes through menu list as time passes.
+
+       The menu is a list of menu entries where each entry is a
+       two element list of time passed in seconds and text to display
+       for that period. Text is displayed by calling text_func(text).
+       The entries must be in ascending time order."""
+
+    start_t_ns = time.monotonic_ns()
+    menu_option = None
+    selected = False
+
+    for menu_option, menu_entry in enumerate(menu):
+        menu_time_ns = start_t_ns + int(menu_entry[0] * 1e9)
+        menu_text = menu_entry[1]
+        if menu_text:
+            text_func(menu_text)
+        while time.monotonic_ns() < menu_time_ns:
+            if not button_func():
+                selected = True
+                break
+        if menu_text:
+            text_func("")
+        if selected:
+            break
+
+    return (menu_option, (time.monotonic_ns() - start_t_ns) * 1e-9)
+
+
+def popup_text(text_func, text, duration=1.0):
+    """Place some text on the screen using info property of Plotter object
+       for duration seconds."""
+    text_func(text)
+    time.sleep(duration)
+    text_func(None)
+
+
+def show_text(text):
+    """Place text on the screen, empty string or None clears it."""
+    global screen_group, text_overlay_gob
+
+    if text:
+        text_overlay_gob = Label(terminalio.FONT,
+                                 text=text,
+                                 scale=3,
+                                 background_color=INFO_FG_COLOR,
+                                 color=INFO_BG_COLOR)
+    else:
+        if text_overlay_gob is not None:
+            screen_group.remove(text_overlay_gob)
+            text_overlay_gob = None
+
+    if text_overlay_gob is not None:
+        screen_group.append(text_overlay_gob)
 
 
 def voltage_bar_set(volt_diff):
@@ -159,12 +228,13 @@ def magnet_circ_set(mag_ut):
 
 
 def manual_screen_refresh(disp):
+    """Refresh the screen as immediately as is currently possibly with refresh method."""
     refreshed = False
     while True:
         try:
             refreshed = disp.refresh(minimum_frames_per_second=0,
                                      target_frames_per_second=1000)
-        except Exception:
+        except RuntimeError:
             pass
         if refreshed:
             break
@@ -240,25 +310,12 @@ if debug >= 3:
     start_beep(0, waveforms, idx)  ### this silences it
 
 
-### TODO is looking for board.DISPLAY a reasonable
-### way to work out if we are on CPB+Gizmo
-display = board.DISPLAY
-
-# screen_group = displayio.Group(max_size=4)
-# screen_group.append(operand1_gob.displayio_group())
-# screen_group.append(operand2_gob.displayio_group())
-# screen_group.append(operator_gob.displayio_group())
-# screen_group.append(result_gob.displayio_group())
-# screen_ops[selected_op_idx].cursor_visible = True
-
-
 def sample_sum(pin, num):
     global samples   ### Not strictly needed - indicative of r/w use
     samples[:] = [pin.value for _ in range(num)]
     return sum(samples)
 
 
-### Start-up splash screen
 
 ### Initialise detector display
 ### The units are created as separate text objects as they are static
@@ -292,8 +349,8 @@ voltage_units_dob = Label(font=terminalio.FONT,
 voltage_units_dob.y = voltage_value_dob.y
 voltage_units_dob.x = len(voltage_value_dob.text) * font_width * FONT_SCALE
 
-### 8 elements, 4 added immediately
-screen_group = Group(max_size=8)
+### 9 elements, 4 added immediately, 4 later, 1 spare for on-screen text
+screen_group = Group(max_size=4 + 4 + 1)
 screen_group.append(magnet_value_dob)
 screen_group.append(magnet_units_dob)
 screen_group.append(voltage_value_dob)
@@ -307,17 +364,24 @@ magnet_circ_dob = None
 voltage_bar_set(0)
 magnet_circ_set(0)
 
+### Start-up splash screen
 display.show(screen_group)
 
-
-
-
+### Start-up splash screen
+popup_text(show_text,
+           "\n".join(["Button Guide",
+                      "Left: audio toggle",
+                      "  2secs: screen toggle",
+                      "  4s Mu output",
+                      "Right: recalibrate"]), duration=10)
 
 ### P1 for analogue input
 pin_input = analogio.AnalogIn(board.P1)
 CONV_FACTOR = pin_input.reference_voltage / 65535
 
 ### Start pwm output
+### 400kHz and 55000 (84%) duty_cycle were chosen empirically
+### to maximise the voltage drop on a small pair of metal scissors
 pwm = pulseio.PWMOut(board.P0, frequency=400 * 1000,
                      duty_cycle=0, variable_frequency=True)
 pwm.duty_cycle = 55000
@@ -410,15 +474,17 @@ while True:
         voltage_value_dob.text = VOLTAGE_FMT.format(filt_voltage * 1000.0)
         screen_updates += 1
 
-    ### read magnetometer
+    ### Read magnetometer
     mx, my, mz = clue.magnetic
     diff_x = mx - base_mx
     diff_y = my - base_my
-    diff_z = mz - base_mz   ### TODO - maybe change this to only use z value if that helps with turning
-    mag_mag = math.sqrt(diff_x * diff_x + diff_y * diff_y + diff_z * diff_z)
+    diff_z = mz - base_mz
+    ### Use the z value as a crude measure as this is
+    ### constant if the device is rotated
+    mag_mag = math.sqrt(diff_z * diff_z)
 
-    ### update audio
-    ### make an andio frequency
+    ### Calculate a new audio frequency based on the absolute difference
+    ### in voltage being read - turn small voltages into 0 for silence
     ### between 100Hz (won't be audible) and 5000 (loud on miniscule speaker)
     diff_v = filt_voltage - base_voltage
     abs_diff_v = abs(diff_v)
@@ -427,11 +493,12 @@ while True:
         start_beep(frequency, waveforms,
                    min(int(mag_mag / 2), len(waveforms) - 1))
 
-    ### update bargraphs
+    ### Update voltage bargraph
     if update_complex_graphics:
         voltage_bar_set(diff_v)
         screen_updates += 1
 
+    ### Update the magnetomer text value and the filled circle representation
     if update_basic_graphics:
         magnet_value_dob.text = MAG_FMT.format(mag_mag)
         screen_updates += 1
@@ -442,6 +509,9 @@ while True:
     ### update circle
 
     ### check for buttons
+    ### TODO remember to deal with display.auto_refresh = False
+
+
 
     if screen_updates:
         manual_screen_refresh(display)
