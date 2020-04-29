@@ -1,4 +1,4 @@
-### clue-metal-detector v0.11
+### clue-metal-detector v1.0
 ### A metal detector using a minimum number of external components
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.2.0
@@ -29,6 +29,8 @@
 ### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ### SOFTWARE.
 
+### pylint: disable=global-statement
+
 import time
 import math
 import array
@@ -45,23 +47,6 @@ import terminalio
 import audiopwmio
 import audiocore
 
-
-### TODO - add manual re-calibrate
-### TODO - audio on/off
-### TODO - make uT and mV static to reduce dirty part
-### TODO - could do something with CLUE's reverse NeoPixel
-###        R G B / intensity or flashing may make more sense
-
-### TODO - change font colour for pos / neg perhaps graduated
-### TODO - deal with 90 degree spins with magnetic side of things
-### TODO - do i want to do anything else with that sorted data?
-###        could extra min/max or 10/90% and put them up as bars too?
-### TODO - add some loop timing and print to debug and perhaps some cumulative
-###        loop time
-### TODO - buttons - screen on/off
-###                  mu output on/off
-###                  audio on/off
-
 ### https://circuitpython.readthedocs.io/projects/display-shapes/en/latest/api.html#rect
 
 from adafruit_clue import clue
@@ -72,25 +57,38 @@ from adafruit_display_shapes.circle import Circle
 
 ### TODO is looking for board.DISPLAY a reasonable
 ### way to work out if we are on CPB+Gizmo
+
+### Outputs
 display = board.DISPLAY
+pixels = clue.pixel
 
-screen_height = display.height
-screen_width = display.width
+### Inputs
+button_left = lambda: clue.button_a
+button_right = lambda: clue.button_b
 
-### globals
-debug = 3
-samples = []
-
-### globals used in functions
+### globals used r/w in functions
 last_frequency = 0
 last_negbar_len = None
 last_posbar_len = None
 last_mag_radius = None
 text_overlay_gob = None
+voltage_barneg_dob = None
+voltage_sep_dob = None
+voltage_barpos_dob = None
+magnet_circ_dob = None
 
+### globals
+debug = 2
+screen_height = display.height
+screen_width = display.width
+samples = []
+
+### other globals
 quantize_tones = True
-mu_output = True
-neopixel_output = True
+audio_on = True
+screen_on = True
+mu_output = False
+neopixel_on = True
 
 ### Use to alternate/flash the NeoPixel
 neopixel_alternate = True
@@ -109,6 +107,12 @@ MAG_FMT = "{:6.1f}"
 
 INFO_FG_COLOR = 0x000080
 INFO_BG_COLOR = 0xc0c000
+BLACK_TUPLE = (0, 0, 0)
+
+RED     = 0xff0000
+GREEN75 = 0x00c000
+BLUE    = 0x0000ff
+WHITE75 = 0xc0c0c0
 
 threshold_voltage = 0.002
 threshold_mag = 2.5
@@ -166,31 +170,43 @@ def show_text(text):
     global screen_group, text_overlay_gob
 
     if text:
+        font_scale = 3
+        line_spacing = 1.25
+
+        font_w, font_h = terminalio.FONT.get_bounding_box()
+        text_lines = text.split("\n")
+        max_word_chars = max([len(word) for word in text_lines])
+        ### If too large reduce the scale to 2 and hope!
+        if (max_word_chars * font_scale * font_w > screen_width
+                or len(text_lines) * font_scale * font_h * line_spacing > screen_height):
+            font_scale -= 1
+
         text_overlay_gob = Label(terminalio.FONT,
                                  text=text,
-                                 scale=2,
+                                 scale=font_scale,
                                  background_color=INFO_FG_COLOR,
                                  color=INFO_BG_COLOR)
+        ### Centre the (left justified) text
+        text_overlay_gob.x = (screen_width
+                              - font_scale * font_w * max_word_chars) // 2
         text_overlay_gob.y = screen_height // 2
+        screen_group.append(text_overlay_gob)
     else:
         if text_overlay_gob is not None:
             screen_group.remove(text_overlay_gob)
             text_overlay_gob = None
 
-    if text_overlay_gob is not None:
-        screen_group.append(text_overlay_gob)
-
 
 def voltage_bar_set(volt_diff):
     """Draw a bar based on positive or negative values.
        Width of 60 is performance compromise as more pixels take longer."""
-    global voltage_sep_dob, voltage_barneg_dob, voltage_barpos_dob
+    global voltage_sep_dob, voltage_barpos_dob, voltage_barneg_dob
     global last_negbar_len, last_posbar_len
 
     if voltage_sep_dob is None:
         voltage_sep_dob = Rect(160, 118,
                                VOLTAGE_BAR_WIDTH, 4,
-                               fill=0xc0c0c0)  ### white
+                               fill=WHITE75)
         screen_group.append(voltage_sep_dob)
 
     if volt_diff < 0:
@@ -207,8 +223,8 @@ def voltage_bar_set(volt_diff):
         screen_group.remove(voltage_barpos_dob)
     if posbar_len > 0:
         voltage_barpos_dob = Rect(160, 118 - posbar_len,
-                              VOLTAGE_BAR_WIDTH, posbar_len,
-                              fill=0x00c000)  ### slightly darker green
+                                  VOLTAGE_BAR_WIDTH, posbar_len,
+                                  fill=GREEN75)
         screen_group.append(voltage_barpos_dob)
         last_posbar_len = posbar_len
 
@@ -217,16 +233,18 @@ def voltage_bar_set(volt_diff):
     if negbar_len > 0:
         voltage_barneg_dob = Rect(160, 122,
                                   VOLTAGE_BAR_WIDTH, negbar_len,
-                                  fill=0xff0000)  ### red
+                                  fill=RED)
         screen_group.append(voltage_barneg_dob)
         last_negbar_len = negbar_len
 
 
 def magnet_circ_set(mag_ut):
+    """Display a filled circle to represent the magnetic value mag_ut in microteslas."""
     global magnet_circ_dob
     global last_mag_radius
 
-    ### map microteslas to a radius
+    ### map microteslas to a radius with minimum of 1 and
+    ### maximum of MAG_MAX_RADIUS
     radius = min(max(round(math.sqrt(mag_ut) * 4), 1), MAG_MAX_RADIUS)
 
     if radius == last_mag_radius:
@@ -234,8 +252,7 @@ def magnet_circ_set(mag_ut):
 
     if magnet_circ_dob is not None:
         screen_group.remove(magnet_circ_dob)
-    magnet_circ_dob = Circle(60, 180, radius,
-                             fill=0x0000ff)  ### blue
+    magnet_circ_dob = Circle(60, 180, radius, fill=BLUE)
     screen_group.append(magnet_circ_dob)
 
 
@@ -252,9 +269,23 @@ def manual_screen_refresh(disp):
             break
 
 
-def set_neopixel(pixels, colour):
+def neopixel_set(pix, d_volt, mag_ut):
     """Set all the NeoPixels to colour."""
-    pixels.fill(colour)
+    global neopixel_alternate
+
+    np_r, np_g, np_b = BLACK_TUPLE
+    if neopixel_alternate:
+        if abs(d_volt) > threshold_voltage:
+            if d_volt < 0.0:
+                np_r = min(round(-d_volt * 8e3), 255)
+            else:
+                np_g = min(round(d_volt * 8e3), 255)
+        else:
+            if mag_ut > threshold_mag:
+                np_b = min(round(mag_ut * 6), 255)
+
+    pix.fill((np_r, np_g, np_b))  ### note: double brackets to pass tuple
+    neopixel_alternate = not neopixel_alternate
 
 
 def start_beep(freq, wave, wave_idx):
@@ -320,18 +351,17 @@ def make_sample_list(levels=10,
 
 waveforms = make_sample_list()
 
-if debug >= 3:
+if debug >= 4:
     for idx in range(len(waveforms)):
         start_beep(440, waveforms, idx)
         time.sleep(0.1)
-    start_beep(0, waveforms, idx)  ### this silences it
+    start_beep(0, waveforms, idx)  ### This silences it
 
 
 def sample_sum(pin, num):
     global samples   ### Not strictly needed - indicative of r/w use
     samples[:] = [pin.value for _ in range(num)]
     return sum(samples)
-
 
 
 ### Initialise detector display
@@ -372,12 +402,10 @@ screen_group.append(magnet_value_dob)
 screen_group.append(magnet_units_dob)
 screen_group.append(voltage_value_dob)
 screen_group.append(voltage_units_dob)
-voltage_barneg_dob = None
-voltage_sep_dob = None
-voltage_barpos_dob = None
-magnet_circ_dob = None
 
-### Initialise the previous displayio objects and append them
+### Initialise some displayio objects and append them
+### The following variables are set by these two functions
+### voltage_barneg_dob, voltage_sep_dob, voltage_barpos_dob, magnet_circ_dob
 voltage_bar_set(0)
 magnet_circ_set(0)
 
@@ -387,9 +415,10 @@ display.show(screen_group)
 ### Start-up splash screen
 popup_text(show_text,
            "\n".join(["Button Guide",
-                      "Left: audio toggle",
-                      "  2secs: screen toggle",
-                      "  4s Mu output",
+                      "Left: audio",
+                      "  2secs: NeoPixel",
+                      "  4s: Mu screen",
+                      "  6s: Mu output",
                       "Right: recalibrate"]), duration=10)
 
 ### P1 for analogue input
@@ -446,10 +475,6 @@ update_complex_graphics_period = 4
 update_median_period = 5
 
 counter = 0
-
-audio_on = True
-
-
 while True:
     ### garbage collect now to reduce likelihood it occurs
     ### during sample reading
@@ -460,16 +485,19 @@ while True:
     sample_start_time_ns = time.monotonic_ns()
 
     samples_to_read = 500  ### about 23ms worth on CLUE
-    update_basic_graphics = counter % update_basic_graphics_period == 0
+    update_basic_graphics = (screen_on
+                             and counter % update_basic_graphics_period == 0)
     if not update_basic_graphics:
         samples_to_read += 150
-    update_complex_graphics = counter % update_complex_graphics_period == 0
+    update_complex_graphics = (screen_on
+                               and counter % update_complex_graphics_period == 0)
     if not update_complex_graphics:
         samples_to_read += 400
     update_median = counter % update_median_period == 0
     if not update_median:
         samples_to_read += 50
-    voltage = sample_sum(pin_input, 500) / 500.0 * CONV_FACTOR
+    voltage = (sample_sum(pin_input, samples_to_read)
+               / samples_to_read * CONV_FACTOR)
 
     voltage_zm2 = voltage_zm1
     voltage_zm1 = voltage
@@ -514,20 +542,8 @@ while True:
                    min(int(mag_mag / 2), len(waveforms) - 1))
 
     ### Update the NeoPixel(s) if enabled
-    if neopixel_output:
-        np_r, np_g, np_b = (0, 0, 0)
-        if neopixel_alternate:
-            if abs_diff_v > threshold_voltage:
-                if diff_v < 0.0:
-                    np_r = min(round(abs_diff_v * 8e3), 255)
-                else:
-                    np_g = min(round(abs_diff_v * 8e3), 255)
-            else:
-                if mag_mag > threshold_mag:
-                    np_b = min(round(mag_mag * 6), 255)
-
-        set_neopixel(clue.pixel, (np_r, np_g, np_b))
-        neopixel_alternate = not neopixel_alternate
+    if neopixel_on:
+        neopixel_set(pixels, diff_v, mag_mag)
 
     ### Update voltage bargraph
     if update_complex_graphics:
@@ -542,13 +558,63 @@ while True:
         magnet_circ_set(mag_mag)
         screen_updates += 1
 
-    ### check for buttons
-    ### TODO remember to deal with display.auto_refresh = False
-
+    ### Update the screen
     if screen_updates:
         manual_screen_refresh(display)
+
+    ### Send output to Mu in tuple format
     if mu_output:
-        print((voltage, mag_mag))
+        print((diff_v, mag_mag))
+
+    ### Check for buttons and just for this period turn back on the
+    ### screen auto-refresh so menus actually appear!
+    display.auto_refresh = True
+    if button_left():
+        opt, _ = wait_release(show_text,
+                              button_left,
+                              [(2,
+                                "Audio "
+                                + ("off" if audio_on else "on")),
+                               (4,
+                                "NeoPixel "
+                                + ("off" if neopixel_on else "on")),
+                               (6,
+                                "Screen "
+                                + ("off" if screen_on else "on")),
+                               (8,
+                                "Mu output "
+                                + ("off" if mu_output else "on"))
+                              ])
+        if not screen_on or opt == 2:  ### screen toggle
+            screen_on = not screen_on
+            if screen_on:
+                display.show(screen_group)
+                display.brightness = 1.0
+            else:
+                display.show(None)
+                display.brightness = 0.0
+        elif opt == 0:  ### audio toggle
+            audio_on = not audio_on
+            if not audio_on:
+                start_beep(0, waveforms, 0)  ### Silence
+        elif opt == 1:  ### NeoPixel toggle
+            neopixel_on = not neopixel_on
+            if not neopixel_on:
+                neopixel_set(pixels, 0.0, 0.0)
+        else:  ### mu toggle
+            mu_output = not mu_output
+
+    if button_right():
+        wait_release(show_text,
+                     button_right,
+                     [(2, "Recalibrate")])
+        d_print(1, "Recalibrate")
+        base_voltage = voltage
+        voltage_hist_idx = 0
+        voltage_hist_complete = False
+        voltage_hist_median = None
+        base_mx, base_my, base_mz = mx, my, mz
+        display.auto_refresh = False
 
     ### Add the current voltage to the historical list
     voltage_hist[voltage_hist_idx] = voltage
