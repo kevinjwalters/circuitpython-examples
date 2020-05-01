@@ -1,4 +1,4 @@
-### clue-metal-detector v1.0
+### clue-metal-detector v1.1
 ### A metal detector using a minimum number of external components
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.2.0
@@ -34,6 +34,7 @@
 import time
 import math
 import array
+import os
 import gc
 
 import board
@@ -47,24 +48,42 @@ import terminalio
 import audiopwmio
 import audiocore
 
-### https://circuitpython.readthedocs.io/projects/display-shapes/en/latest/api.html#rect
-
-from adafruit_clue import clue
+### displayio graphical objects
 from adafruit_display_text.label import Label
 from adafruit_display_shapes.rect import Rect
 from adafruit_display_shapes.circle import Circle
 
+### https://circuitpython.readthedocs.io/projects/display-shapes/en/latest/api.html#rect
 
-### TODO is looking for board.DISPLAY a reasonable
-### way to work out if we are on CPB+Gizmo
+### Assuming CLUE if it's not a Circuit Playround (Bluefruit)
+clue_less = "Circuit Playground" in os.uname().machine
 
-### Outputs
-display = board.DISPLAY
-pixels = clue.pixel
+if clue_less:
+    ### CPB with TFT Gizmo (240x240)
+    from adafruit_circuitplayground import cp
+    from adafruit_gizmo import tft_gizmo
+    pixels = cp.pixels
 
-### Inputs
-button_left = lambda: clue.button_a
-button_right = lambda: clue.button_b
+    display = tft_gizmo.TFT_Gizmo()
+    pixels = cp.pixels
+    board_pin_output = board.A1
+
+    board_pin_input = board.A2
+    magnetometer = None  ### This indicates device is not present
+    button_left = lambda: cp.button_b
+    button_right = lambda: cp.button_a
+else:
+    ### CLUE with builtin screen (240x240)
+    from adafruit_clue import clue
+
+    display = board.DISPLAY
+    pixels = clue.pixel
+    board_pin_output = board.P0
+
+    board_pin_input = board.P1
+    magnetometer = lambda: clue.magnetic
+    button_left = lambda: clue.button_a
+    button_right = lambda: clue.button_b
 
 ### globals used r/w in functions
 last_frequency = 0
@@ -370,18 +389,19 @@ def sample_sum(pin, num):
 FONT_SCALE = 3
 font_width, _ = terminalio.FONT.get_bounding_box()
 
-magnet_value_dob = Label(font=terminalio.FONT,
-                         text="----.-",
-                         scale=FONT_SCALE,
-                         color=0xc0c000)
-magnet_value_dob.y = 90
+if magnetometer is not None:
+    magnet_value_dob = Label(font=terminalio.FONT,
+                             text="----.-",
+                             scale=FONT_SCALE,
+                             color=0xc0c000)
+    magnet_value_dob.y = 90
 
-magnet_units_dob = Label(font=terminalio.FONT,
-                         text="uT",
-                         scale=FONT_SCALE,
-                         color=0xc0c000)
-magnet_units_dob.x = len(magnet_value_dob.text) * font_width * FONT_SCALE
-magnet_units_dob.y = magnet_value_dob.y
+    magnet_units_dob = Label(font=terminalio.FONT,
+                             text="uT",
+                             scale=FONT_SCALE,
+                             color=0xc0c000)
+    magnet_units_dob.x = len(magnet_value_dob.text) * font_width * FONT_SCALE
+    magnet_units_dob.y = magnet_value_dob.y
 
 voltage_value_dob = Label(font=terminalio.FONT,
                           text="----.-",
@@ -398,8 +418,9 @@ voltage_units_dob.x = len(voltage_value_dob.text) * font_width * FONT_SCALE
 
 ### 9 elements, 4 added immediately, 4 later, 1 spare for on-screen text
 screen_group = Group(max_size=4 + 4 + 1)
-screen_group.append(magnet_value_dob)
-screen_group.append(magnet_units_dob)
+if magnetometer is not None:
+    screen_group.append(magnet_value_dob)
+    screen_group.append(magnet_units_dob)
 screen_group.append(voltage_value_dob)
 screen_group.append(voltage_units_dob)
 
@@ -407,7 +428,8 @@ screen_group.append(voltage_units_dob)
 ### The following variables are set by these two functions
 ### voltage_barneg_dob, voltage_sep_dob, voltage_barpos_dob, magnet_circ_dob
 voltage_bar_set(0)
-magnet_circ_set(0)
+if magnetometer is not None:
+    magnet_circ_set(0)
 
 ### Start-up splash screen
 display.show(screen_group)
@@ -422,39 +444,38 @@ popup_text(show_text,
                       "Right: recalibrate"]), duration=10)
 
 ### P1 for analogue input
-pin_input = analogio.AnalogIn(board.P1)
+pin_input = analogio.AnalogIn(board_pin_input)
 CONV_FACTOR = pin_input.reference_voltage / 65535
 
 ### Start pwm output
 ### 400kHz and 55000 (84%) duty_cycle were chosen empirically
 ### to maximise the voltage drop on a small pair of metal scissors
-pwm = pulseio.PWMOut(board.P0, frequency=400 * 1000,
+pwm = pulseio.PWMOut(board_pin_output, frequency=400 * 1000,
                      duty_cycle=0, variable_frequency=True)
 pwm.duty_cycle = 55000
 
 
-### Get magnetic value
+### Get a baseline value for magnetometer
 totals = [0.0] * 3
 mag_samples_n = 10
-for _ in range(mag_samples_n):
-    mx, my, mz = clue.magnetic
-    totals[0] += mx
-    totals[1] += my
-    totals[2] += mz
-    time.sleep(0.05)
+if magnetometer is not None:
+    for _ in range(mag_samples_n):
+        mx, my, mz = magnetometer()
+        totals[0] += mx
+        totals[1] += my
+        totals[2] += mz
+        time.sleep(0.05)
 
 base_mx = totals[0] / mag_samples_n
 base_my = totals[1] / mag_samples_n
 base_mz = totals[2] / mag_samples_n
 
-### Wait a bit for P1 input to stabilise
+### Wait a bit for P1/A2 input to stabilise
 _ = sample_sum(pin_input, 3000) / 3000 * CONV_FACTOR
 base_voltage = sample_sum(pin_input, 1000) / 1000 * CONV_FACTOR
 voltage_value_dob.text = "{:6.1f}".format(base_voltage * 1000.0)
 
 ### Auto refresh off
-### TODO review this
-
 display.auto_refresh = False
 voltage_zm1 = None
 voltage_zm2 = None
@@ -520,13 +541,16 @@ while True:
         screen_updates += 1
 
     ### Read magnetometer
-    mx, my, mz = clue.magnetic
-    diff_x = mx - base_mx
-    diff_y = my - base_my
-    diff_z = mz - base_mz
-    ### Use the z value as a crude measure as this is
-    ### constant if the device is rotated
-    mag_mag = math.sqrt(diff_z * diff_z)
+    if magnetometer is not None:
+        mx, my, mz = magnetometer()
+        diff_x = mx - base_mx
+        diff_y = my - base_my
+        diff_z = mz - base_mz
+        ### Use the z value as a crude measure as this is
+        ### constant if the device is rotated
+        mag_mag = math.sqrt(diff_z * diff_z)
+    else:
+        mag_mag = 0.0
 
     ### Calculate a new audio frequency based on the absolute difference
     ### in voltage being read - turn small voltages into 0 for silence
@@ -550,13 +574,14 @@ while True:
         voltage_bar_set(diff_v)
         screen_updates += 1
 
-    ### Update the magnetomer text value and the filled circle representation
-    if update_basic_graphics:
-        magnet_value_dob.text = MAG_FMT.format(mag_mag)
-        screen_updates += 1
-    if update_complex_graphics:
-        magnet_circ_set(mag_mag)
-        screen_updates += 1
+    ### Update the magnetometer text value and the filled circle representation
+    if magnetometer is not None:
+        if update_basic_graphics:
+            magnet_value_dob.text = MAG_FMT.format(mag_mag)
+            screen_updates += 1
+        if update_complex_graphics:
+            magnet_circ_set(mag_mag)
+            screen_updates += 1
 
     ### Update the screen
     if screen_updates:
