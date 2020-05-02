@@ -1,4 +1,4 @@
-### clue-metal-detector v1.2
+### clue-metal-detector v1.3
 ### A simple metal detector using a minimum number of external components
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython 5.2.0
@@ -72,6 +72,8 @@ if clue_less:
     ### Outputs
     display = tft_gizmo.TFT_Gizmo()
     audio_out = AudioOut(board.SPEAKER)
+    min_audio_frequency = 100
+    max_audio_frequency = 5000
     pixels = cp.pixels
     board_pin_output = board.A1
 
@@ -91,6 +93,8 @@ else:
     ### Outputs
     display = board.DISPLAY
     audio_out = AudioOut(board.SPEAKER)
+    min_audio_frequency = 100
+    max_audio_frequency = 3000
     pixels = clue.pixel
     board_pin_output = board.P0
 
@@ -566,12 +570,14 @@ while True:
 
     ### Calculate a new audio frequency based on the absolute difference
     ### in voltage being read - turn small voltages into 0 for silence
-    ### between 100Hz (won't be audible) and 5000 (loud on miniscule speaker)
+    ### between 100Hz (won't be audible)
+    ### and 5000 (loud on CLUE's miniscule speaker)
     diff_v = filt_voltage - base_voltage
     abs_diff_v = abs(diff_v)
     if audio_on:
         if abs_diff_v > threshold_voltage or mag_mag > threshold_mag:
-            frequency = min(100 + abs_diff_v * 5e5, 5000)
+            frequency = min(min_audio_frequency + abs_diff_v * 5e5,
+                            max_audio_frequency)
         else:
             frequency = 0  ### silence
         start_beep(frequency, waveforms,
