@@ -1,9 +1,12 @@
-### clue-metal-detector v1.1
-### A metal detector using a minimum number of external components
+### clue-metal-detector v1.2
+### A simple metal detector using a minimum number of external components
 
-### Tested with an Adafruit CLUE (Alpha) and CircuitPython and 5.2.0
+### Tested with an Adafruit CLUE (Alpha) and CircuitPython 5.2.0
+### Tested with an Adafruit Circuit Playground Bluefruit with TFT Gizmo
+### and CircuitPython 5.2.0
 
-### Pad P0 is an output and pad P1 is an input
+### CLUE: Pad P0 is an output and pad P1 is an input
+### CPB: Pad/STEMMA A1 is an output and Pad/STEMMA A2 is an input
 
 ### copy this file to CLUE board as code.py
 
@@ -45,15 +48,18 @@ import ulab
 from displayio import Group
 import terminalio
 
-import audiopwmio
-import audiocore
+### These imports works on CLUE, CPB (and CPX on 5.x)
+from audiocore import RawSample
+try:
+    from audioio import AudioOut
+except ImportError:
+    from audiopwmio import PWMAudioOut as AudioOut
 
 ### displayio graphical objects
 from adafruit_display_text.label import Label
 from adafruit_display_shapes.rect import Rect
 from adafruit_display_shapes.circle import Circle
 
-### https://circuitpython.readthedocs.io/projects/display-shapes/en/latest/api.html#rect
 
 ### Assuming CLUE if it's not a Circuit Playround (Bluefruit)
 clue_less = "Circuit Playground" in os.uname().machine
@@ -62,28 +68,38 @@ if clue_less:
     ### CPB with TFT Gizmo (240x240)
     from adafruit_circuitplayground import cp
     from adafruit_gizmo import tft_gizmo
-    pixels = cp.pixels
 
+    ### Outputs
     display = tft_gizmo.TFT_Gizmo()
+    audio_out = AudioOut(board.SPEAKER)
     pixels = cp.pixels
     board_pin_output = board.A1
 
+    ### Enable the onboard amplifier for speaker
+    cp._speaker_enable.value = True  ### pylint: disable=protected-access
+
+    ### Inputs
     board_pin_input = board.A2
     magnetometer = None  ### This indicates device is not present
     button_left = lambda: cp.button_b
     button_right = lambda: cp.button_a
+
 else:
     ### CLUE with builtin screen (240x240)
     from adafruit_clue import clue
 
+    ### Outputs
     display = board.DISPLAY
+    audio_out = AudioOut(board.SPEAKER)
     pixels = clue.pixel
     board_pin_output = board.P0
 
+    ### Inputs (buttons reversed as it is used upside-down with Gizmo)
     board_pin_input = board.P1
     magnetometer = lambda: clue.magnetic
     button_left = lambda: clue.button_a
     button_right = lambda: clue.button_b
+
 
 ### globals used r/w in functions
 last_frequency = 0
@@ -114,7 +130,7 @@ neopixel_alternate = True
 
 ### Some constants used in start_beep()
 BASE_NOTE = 261.6256  ### C4 (middle C)
-QUANTIZE = 4
+QUANTIZE = 4          ### determines the "scale"
 POSTLOG_FACTOR = QUANTIZE / math.log(2)
 
 ### There's room for 80 but 60 draws a bit quicker
@@ -294,6 +310,7 @@ def neopixel_set(pix, d_volt, mag_ut):
 
     np_r, np_g, np_b = BLACK_TUPLE
     if neopixel_alternate:
+        ### RGB values are 8bit, hence the cap of 255 using min()
         if abs(d_volt) > threshold_voltage:
             if d_volt < 0.0:
                 np_r = min(round(-d_volt * 8e3), 255)
@@ -320,7 +337,6 @@ def start_beep(freq, wave, wave_idx):
         return
 
     if quantize_tones:
-        ### TODO - make constants externally
         note_freq = BASE_NOTE * 2**((round(math.log(freq / BASE_NOTE)
                                            * POSTLOG_FACTOR)) / QUANTIZE)
         d_print(3, "Quantize", freq, note_freq)
@@ -329,19 +345,14 @@ def start_beep(freq, wave, wave_idx):
 
     (waveform, wave_samples_n) = wave[wave_idx]
     new_freq = round(note_freq * wave_samples_n)
-    ### Only set the new frequency if it's not the last one
+    ### Only set the new frequency if it's not the same as last one
     if new_freq != last_frequency:
         waveform.sample_rate = new_freq
         audio_out.play(waveform, loop=True)
         last_frequency = new_freq
 
 
-### Initialise audio output
-audio_out = audiopwmio.PWMAudioOut(board.SPEAKER)
-
-### Initialise sounds
 AUDIO_MIDPOINT = 32768
-
 
 def make_sample_list(levels=10,
                      volume=32767,
@@ -362,7 +373,7 @@ def make_sample_list(levels=10,
                                                            * (idx / s_len)))
                                    + AUDIO_MIDPOINT
                                    for idx in range(s_len)])
-        sound_samples = audiocore.RawSample(raw_samples)
+        sound_samples = RawSample(raw_samples)
         wavefs.append((sound_samples, s_len))
 
     return wavefs
@@ -425,8 +436,9 @@ screen_group.append(voltage_value_dob)
 screen_group.append(voltage_units_dob)
 
 ### Initialise some displayio objects and append them
-### The following variables are set by these two functions
-### voltage_barneg_dob, voltage_sep_dob, voltage_barpos_dob, magnet_circ_dob
+### The following four variables are set by these two functions
+### voltage_barneg_dob, voltage_sep_dob, voltage_barpos_dob
+### magnet_circ_dob
 voltage_bar_set(0)
 if magnetometer is not None:
     magnet_circ_set(0)
@@ -443,7 +455,7 @@ popup_text(show_text,
                       "  6s: Mu output",
                       "Right: recalibrate"]), duration=10)
 
-### P1 for analogue input
+### P1 or A2 for analogue input
 pin_input = analogio.AnalogIn(board_pin_input)
 CONV_FACTOR = pin_input.reference_voltage / 65535
 
