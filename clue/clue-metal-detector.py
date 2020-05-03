@@ -1,4 +1,4 @@
-### clue-metal-detector v1.3
+### clue-metal-detector v1.4
 ### A simple metal detector using a minimum number of external components
 
 ### Tested with an Adafruit CLUE (Alpha) and CircuitPython 5.2.0
@@ -73,7 +73,7 @@ if clue_less:
     display = tft_gizmo.TFT_Gizmo()
     audio_out = AudioOut(board.SPEAKER)
     min_audio_frequency = 100
-    max_audio_frequency = 5000
+    max_audio_frequency = 4000
     pixels = cp.pixels
     board_pin_output = board.A1
 
@@ -94,7 +94,7 @@ else:
     display = board.DISPLAY
     audio_out = AudioOut(board.SPEAKER)
     min_audio_frequency = 100
-    max_audio_frequency = 3000
+    max_audio_frequency = 5000
     pixels = clue.pixel
     board_pin_output = board.P0
 
@@ -105,7 +105,7 @@ else:
     button_right = lambda: clue.button_b
 
 
-### globals used r/w in functions
+### Globals variables used r/w in functions
 last_frequency = 0
 last_negbar_len = None
 last_posbar_len = None
@@ -116,20 +116,20 @@ voltage_sep_dob = None
 voltage_barpos_dob = None
 magnet_circ_dob = None
 
-### globals
-debug = 2
+### Globals
+debug = 1
 screen_height = display.height
 screen_width = display.width
 samples = []
 
-### other globals
+### Other globals
 quantize_tones = True
 audio_on = True
 screen_on = True
 mu_output = False
 neopixel_on = True
 
-### Use to alternate/flash the NeoPixel
+### Used to alternate/flash the NeoPixel
 neopixel_alternate = True
 
 ### Some constants used in start_beep()
@@ -137,8 +137,12 @@ BASE_NOTE = 261.6256  ### C4 (middle C)
 QUANTIZE = 4          ### determines the "scale"
 POSTLOG_FACTOR = QUANTIZE / math.log(2)
 
-### There's room for 80 but 60 draws a bit quicker
+AUDIO_MIDPOINT = 32768
+
+### There's room for 80 pixels but 60 draws a bit quicker
 VOLTAGE_BAR_WIDTH = 60
+VOLTAGE_BAR_HEIGHT = 118
+VOLTAGE_BAR_SEP_HEIGHT = 4
 MAG_MAX_RADIUS = 50
 
 VOLTAGE_FMT = "{:6.1f}"
@@ -153,6 +157,9 @@ GREEN75 = 0x00c000
 BLUE    = 0x0000ff
 WHITE75 = 0xc0c0c0
 
+FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
+
+### Thresholds below which audio is silent and NeoPixels are dark
 threshold_voltage = 0.002
 threshold_mag = 2.5
 
@@ -205,19 +212,19 @@ def popup_text(text_func, text, duration=1.0):
 
 
 def show_text(text):
-    """Place text on the screen, empty string or None clears it."""
+    """Place text on the screen. Empty string or None clears it."""
     global screen_group, text_overlay_gob
 
     if text:
         font_scale = 3
         line_spacing = 1.25
 
-        font_w, font_h = terminalio.FONT.get_bounding_box()
         text_lines = text.split("\n")
         max_word_chars = max([len(word) for word in text_lines])
         ### If too large reduce the scale to 2 and hope!
-        if (max_word_chars * font_scale * font_w > screen_width
-                or len(text_lines) * font_scale * font_h * line_spacing > screen_height):
+        if (max_word_chars * font_scale * FONT_WIDTH > screen_width
+                or (len(text_lines) * font_scale
+                    * FONT_HEIGHT * line_spacing) > screen_height):
             font_scale -= 1
 
         text_overlay_gob = Label(terminalio.FONT,
@@ -227,7 +234,7 @@ def show_text(text):
                                  color=INFO_BG_COLOR)
         ### Centre the (left justified) text
         text_overlay_gob.x = (screen_width
-                              - font_scale * font_w * max_word_chars) // 2
+                              - font_scale * FONT_WIDTH * max_word_chars) // 2
         text_overlay_gob.y = screen_height // 2
         screen_group.append(text_overlay_gob)
     else:
@@ -243,17 +250,19 @@ def voltage_bar_set(volt_diff):
     global last_negbar_len, last_posbar_len
 
     if voltage_sep_dob is None:
-        voltage_sep_dob = Rect(160, 118,
-                               VOLTAGE_BAR_WIDTH, 4,
+        voltage_sep_dob = Rect(160, VOLTAGE_BAR_HEIGHT,
+                               VOLTAGE_BAR_WIDTH, VOLTAGE_BAR_SEP_HEIGHT,
                                fill=WHITE75)
         screen_group.append(voltage_sep_dob)
 
     if volt_diff < 0:
-        negbar_len = max(min(-round(volt_diff * 5e3), 118), 1)
+        negbar_len = max(min(-round(volt_diff * 5e3),
+                             VOLTAGE_BAR_HEIGHT), 1)
         posbar_len = 1
     else:
         negbar_len = 1
-        posbar_len = max(min(round(volt_diff * 5e3), 118), 1)
+        posbar_len = max(min(round(volt_diff * 5e3),
+                             VOLTAGE_BAR_HEIGHT), 1)
 
     if posbar_len == last_posbar_len and negbar_len == last_negbar_len:
         return
@@ -261,7 +270,7 @@ def voltage_bar_set(volt_diff):
     if voltage_barpos_dob is not None:
         screen_group.remove(voltage_barpos_dob)
     if posbar_len > 0:
-        voltage_barpos_dob = Rect(160, 118 - posbar_len,
+        voltage_barpos_dob = Rect(160, VOLTAGE_BAR_HEIGHT - posbar_len,
                                   VOLTAGE_BAR_WIDTH, posbar_len,
                                   fill=GREEN75)
         screen_group.append(voltage_barpos_dob)
@@ -270,7 +279,8 @@ def voltage_bar_set(volt_diff):
     if voltage_barneg_dob is not None:
         screen_group.remove(voltage_barneg_dob)
     if negbar_len > 0:
-        voltage_barneg_dob = Rect(160, 122,
+        voltage_barneg_dob = Rect(160,
+                                  VOLTAGE_BAR_HEIGHT + VOLTAGE_BAR_SEP_HEIGHT,
                                   VOLTAGE_BAR_WIDTH, negbar_len,
                                   fill=RED)
         screen_group.append(voltage_barneg_dob)
@@ -300,6 +310,8 @@ def manual_screen_refresh(disp):
     refreshed = False
     while True:
         try:
+            ### 1000fps is fastest library allows - this high value
+            ### minimises any delays this refresh() method introduces
             refreshed = disp.refresh(minimum_frames_per_second=0,
                                      target_frames_per_second=1000)
         except RuntimeError:
@@ -309,7 +321,9 @@ def manual_screen_refresh(disp):
 
 
 def neopixel_set(pix, d_volt, mag_ut):
-    """Set all the NeoPixels to colour."""
+    """Set all the NeoPixels to an alternating colour
+       based on voltage difference and
+       magnitude of magnetic flux density difference."""
     global neopixel_alternate
 
     np_r, np_g, np_b = BLACK_TUPLE
@@ -324,13 +338,14 @@ def neopixel_set(pix, d_volt, mag_ut):
             if mag_ut > threshold_mag:
                 np_b = min(round(mag_ut * 6), 255)
 
-    pix.fill((np_r, np_g, np_b))  ### note: double brackets to pass tuple
+    pix.fill((np_r, np_g, np_b))  ### Note: double brackets to pass tuple
     neopixel_alternate = not neopixel_alternate
 
 
 def start_beep(freq, wave, wave_idx):
     """Start playing a continous beep based on freq and waveform specified by wave_idx.
        A frequency of 0 will stop the note playing.
+       This quantizes the notes into a scale to make beeping sound more pleasant.
        This modifies the sample_rate property of the RawSample objects.
        """
     global last_frequency
@@ -356,16 +371,15 @@ def start_beep(freq, wave, wave_idx):
         last_frequency = new_freq
 
 
-AUDIO_MIDPOINT = 32768
-
 def make_sample_list(levels=10,
                      volume=32767,
                      range_l=24,
                      start_l=8):
-    """Make a list of RawSample objects with a sine wave of varying resolution
-       from high to low.
-       The lower resolutions sound louder on the CLUE."""
+    """Make a list of tuples of (RawSample, sample_length)
+       with a sine wave of varying resolution from high to low.
+       The lower resolutions sound crunchier and louder on the CLUE."""
 
+    ### Make a range of sample lengths, default is between 32 and 8
     sample_lens = [int((x*(range_l + .99)/(levels - 1)) + start_l)
                    for x in range(0, levels)]
     sample_lens.reverse()
@@ -385,14 +399,18 @@ def make_sample_list(levels=10,
 
 waveforms = make_sample_list()
 
+### For testing the waveforms
 if debug >= 4:
     for idx in range(len(waveforms)):
         start_beep(440, waveforms, idx)
         time.sleep(0.1)
     start_beep(0, waveforms, idx)  ### This silences it
 
-
+### See https://forums.adafruit.com/viewtopic.php?f=60&t=164758 for
+### a comparison and performance analysis of alternate techniques for this
 def sample_sum(pin, num):
+    """Sample the analogue value from pin num times and return the sum
+       of the values."""
     global samples   ### Not strictly needed - indicative of r/w use
     samples[:] = [pin.value for _ in range(num)]
     return sum(samples)
@@ -402,7 +420,6 @@ def sample_sum(pin, num):
 ### The units are created as separate text objects as they are static
 ### and this reduces the amount of redrawing for the dynamic numbers
 FONT_SCALE = 3
-font_width, _ = terminalio.FONT.get_bounding_box()
 
 if magnetometer is not None:
     magnet_value_dob = Label(font=terminalio.FONT,
@@ -415,7 +432,7 @@ if magnetometer is not None:
                              text="uT",
                              scale=FONT_SCALE,
                              color=0xc0c000)
-    magnet_units_dob.x = len(magnet_value_dob.text) * font_width * FONT_SCALE
+    magnet_units_dob.x = len(magnet_value_dob.text) * FONT_WIDTH * FONT_SCALE
     magnet_units_dob.y = magnet_value_dob.y
 
 voltage_value_dob = Label(font=terminalio.FONT,
@@ -429,7 +446,7 @@ voltage_units_dob = Label(font=terminalio.FONT,
                           scale=FONT_SCALE,
                           color=0x00c0c0)
 voltage_units_dob.y = voltage_value_dob.y
-voltage_units_dob.x = len(voltage_value_dob.text) * font_width * FONT_SCALE
+voltage_units_dob.x = len(voltage_value_dob.text) * FONT_WIDTH * FONT_SCALE
 
 ### 9 elements, 4 added immediately, 4 later, 1 spare for on-screen text
 screen_group = Group(max_size=4 + 4 + 1)
@@ -455,7 +472,7 @@ popup_text(show_text,
            "\n".join(["Button Guide",
                       "Left: audio",
                       "  2secs: NeoPixel",
-                      "  4s: Mu screen",
+                      "  4s: Screen",
                       "  6s: Mu output",
                       "Right: recalibrate"]), duration=10)
 
@@ -463,9 +480,9 @@ popup_text(show_text,
 pin_input = analogio.AnalogIn(board_pin_input)
 CONV_FACTOR = pin_input.reference_voltage / 65535
 
-### Start pwm output
-### 400kHz and 55000 (84%) duty_cycle were chosen empirically
-### to maximise the voltage drop on a small pair of metal scissors
+### Start pwm output on P0 or A1
+### 400kHz and 55000 (84%) duty_cycle were chosen empirically to maximise
+### the voltage and the voltage drop detecting a small pair of metal scissors
 pwm = pulseio.PWMOut(board_pin_output, frequency=400 * 1000,
                      duty_cycle=0, variable_frequency=True)
 pwm.duty_cycle = 55000
@@ -493,35 +510,43 @@ voltage_value_dob.text = "{:6.1f}".format(base_voltage * 1000.0)
 
 ### Auto refresh off
 display.auto_refresh = False
+
+### Store two previous values of voltage to make a simple
+### filtered value
 voltage_zm1 = None
 voltage_zm2 = None
 filt_voltage = None
+
+### Initialise the magnitude of the
+### magnetic flux density difference from its baseline
 mag_mag = 0.0
 
-### Keep some historical averages of history
+### Keep some historical voltage data to calculate median for re-baselining
 ### aiming for about 10 reads per second so this gives
 ### 20 seconds
-voltage_hist = ulab.zeros(201, dtype=ulab.float)
+voltage_hist = ulab.zeros(20 * 10 + 1, dtype=ulab.float)
 voltage_hist_idx = 0
 voltage_hist_complete = False
 voltage_hist_median = None
 
-### reduce the number of more heavyweight graphical changes
+### Reduce the frequency of the more heavyweight graphical changes
 update_basic_graphics_period = 2
 update_complex_graphics_period = 4
 update_median_period = 5
 
 counter = 0
 while True:
-    ### garbage collect now to reduce likelihood it occurs
+    ### Garbage collect now to reduce likelihood it occurs
     ### during sample reading
     gc.collect()
+    if debug >=2:
+        d_print(2, "mem_free=" + str(gc.mem_free()))
 
-    ### read p1 value
-    screen_updates = 0
-    sample_start_time_ns = time.monotonic_ns()
+    screen_updates = 0  ### Used to determine if the screen needs a refresh
 
-    samples_to_read = 500  ### about 23ms worth on CLUE
+    ### Take arithmetic mean of 500 samples but take a few more samples
+    ### if the loop isn't doing other work
+    samples_to_read = 500  ### About 23ms worth on CLUE
     update_basic_graphics = (screen_on
                              and counter % update_basic_graphics_period == 0)
     if not update_basic_graphics:
@@ -533,9 +558,12 @@ while True:
     update_median = counter % update_median_period == 0
     if not update_median:
         samples_to_read += 50
+    ### Read the analogue values from P1/A2
+    sample_start_time_ns = time.monotonic_ns()
     voltage = (sample_sum(pin_input, samples_to_read)
                / samples_to_read * CONV_FACTOR)
 
+    ### Store the previous two voltage values
     voltage_zm2 = voltage_zm1
     voltage_zm1 = voltage
 
@@ -551,7 +579,7 @@ while True:
     update_basic_graphics = counter % update_basic_graphics_period == 0
     update_complex_graphics = counter % update_complex_graphics_period == 0
 
-    ### update text
+    ### Update text
     if update_basic_graphics:
         voltage_value_dob.text = VOLTAGE_FMT.format(filt_voltage * 1000.0)
         screen_updates += 1
@@ -563,7 +591,7 @@ while True:
         diff_y = my - base_my
         diff_z = mz - base_mz
         ### Use the z value as a crude measure as this is
-        ### constant if the device is rotated
+        ### constant if the device is rotated and kept level
         mag_mag = math.sqrt(diff_z * diff_z)
     else:
         mag_mag = 0.0
@@ -601,7 +629,7 @@ while True:
             magnet_circ_set(mag_mag)
             screen_updates += 1
 
-    ### Update the screen
+    ### Update the screen with a refresh if needed
     if screen_updates:
         manual_screen_refresh(display)
 
@@ -609,8 +637,8 @@ while True:
     if mu_output:
         print((diff_v, mag_mag))
 
-    ### Check for buttons and just for this period turn back on the
-    ### screen auto-refresh so menus actually appear!
+    ### Check for buttons and just for this section of code turn back on
+    ### the screen auto-refresh so the menus actually appear!
     display.auto_refresh = True
     if button_left():
         opt, _ = wait_release(show_text,
@@ -628,7 +656,7 @@ while True:
                                 "Mu output "
                                 + ("off" if mu_output else "on"))
                               ])
-        if not screen_on or opt == 2:  ### screen toggle
+        if not screen_on or opt == 2:  ### Screen toggle
             screen_on = not screen_on
             if screen_on:
                 display.show(screen_group)
@@ -636,7 +664,7 @@ while True:
             else:
                 display.show(None)
                 display.brightness = 0.0
-        elif opt == 0:  ### audio toggle
+        elif opt == 0:  ### Audio toggle
             audio_on = not audio_on
             if not audio_on:
                 start_beep(0, waveforms, 0)  ### Silence
@@ -644,9 +672,10 @@ while True:
             neopixel_on = not neopixel_on
             if not neopixel_on:
                 neopixel_set(pixels, 0.0, 0.0)
-        else:  ### mu toggle
+        else:  ### Mu toggle
             mu_output = not mu_output
 
+    ### Set new baseline voltage and magnetometer on right button press
     if button_right():
         wait_release(show_text,
                      button_right,
@@ -657,7 +686,8 @@ while True:
         voltage_hist_complete = False
         voltage_hist_median = None
         base_mx, base_my, base_mz = mx, my, mz
-        display.auto_refresh = False
+
+    display.auto_refresh = False
 
     ### Add the current voltage to the historical list
     voltage_hist[voltage_hist_idx] = voltage
@@ -672,7 +702,7 @@ while True:
         voltage_hist_median = ulab.numerical.sort(voltage_hist)[len(voltage_hist) // 2]
         base_voltage = voltage_hist_median
 
-    d_print(1, counter, sample_start_time_ns / 1e9,
+    d_print(2, counter, sample_start_time_ns / 1e9,
             voltage * 1000.0,
             mag_mag,
             filt_voltage * 1000.0, base_voltage, voltage_hist_median)
