@@ -41,14 +41,16 @@ RPS_ENC_DATA_ID = const(0xff32)
 ### Issue raised in https://github.com/adafruit/Adafruit_CircuitPython_BLE/issues/79
 RPS_KEY_DATA_ID = const(0xff34)
 
+
 ### TODO prefix improvements mentioned in https://github.com/adafruit/Adafruit_CircuitPython_BLE/issues/82
 ### may not happen in time though
 
+
 class RpsEncDataAdvertisement(Advertisement):
     """An RPS (broadcast) message.
+       This sends the encrypted choice of the player. 
        This is not connectable and does not elicit a scan response
        based on defaults in Advertisement parent class. 
-       This sends the game data. 
        """
     flags = None
 
@@ -92,15 +94,8 @@ class RpsEncDataAdvertisement(Advertisement):
 
     enc_data = ManufacturerDataField(RPS_ENC_DATA_ID, "<" + _DATA_FMT_ENC_DATA)
     round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
-    """RPS choice."""
+    """Round number starting at 1."""
 
-### UNTESTED
-### Pending whether this is actually useful
-### 
-##    def __init__(self):
-##        super().__init__()
-##        self.scan_response = True
-     
     def __init__(self, *, enc_data=None, round=None):
         super().__init__()
         if enc_data is not None:
@@ -111,6 +106,8 @@ class RpsEncDataAdvertisement(Advertisement):
 
 class RpsKeyDataAdvertisement(Advertisement):
     """An RPS (broadcast) message.
+       This informs other players the round is complete.
+       This is essentially an acknowledgement of receipt for previous message.
        This is not connectable and does not elicit a scan response
        based on defaults in Advertisement parent class. 
        This sends the game data. 
@@ -145,19 +142,9 @@ class RpsKeyDataAdvertisement(Advertisement):
         key_encoding="<H"
     )
 
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_BroadcastNet/blob/c6328d5c7edf8a99ff719c3b1798cb4111bab397/adafruit_ble_broadcastnet.py#L66-L67
-### has a sequence_number - this will be use for for Complex Game
-###    sequence_number = ManufacturerDataField(0x0003, "<B")
-###    """Sequence number of the measurement. Used to detect missed packets."""
-
-    ### 0x0003 is used in AdafruitSensorMeasurement()
-    ##sequence_number = ManufacturerDataField(0x0003, "<" + _SEQ_FMT)
-    ##"""Sequence number of the data. Used for acknowledgements."""
-    
     key_data = ManufacturerDataField(RPS_KEY_DATA_ID, "<" + _DATA_FMT_KEY_DATA)
     round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
-    
-    """RPS choice."""
+    """Round number starting at 1."""
 
     def __init__(self, *, key_data=None, round=None):
         super().__init__()
@@ -167,8 +154,53 @@ class RpsKeyDataAdvertisement(Advertisement):
             self.round = round
 
 
+class RpsRoundEndAdvertisement(Advertisement):
+    """An RPS (broadcast) message.
+       This sends the key to decrypt the previous encrypted choice of the player.
+       This is not connectable and does not elicit a scan response
+       based on defaults in Advertisement parent class. 
+       """
+    flags = None
+
+    _PREFIX_FMT = "<B" "BHBH"
+    ## _SEQ_FMT = "B"
+    _DATA_FMT_KEY_DATA = "8s"
+    _DATA_FMT_ROUND = "B"
+    ## _DATA_FMT = "s"  ### this only transfers one byte!
+
+    ### prefix appears to be used to determine whether an incoming
+    ### packet matches this class
+    ### The second struct.calcsize needs to include the _DATA_FMT for some
+    ### reason I either don't know or can't remember
+    prefix = struct.pack(
+        _PREFIX_FMT,
+        struct.calcsize(_PREFIX_FMT) - 1,
+        MANUFACTURING_DATA_ADT,
+        ADAFRUIT_COMPANY_ID,
+        ##struct.calcsize("<H" + _SEQ_FMT + _DATA_FMT),
+        struct.calcsize("<H" + _DATA_FMT_KEY_DATA),
+        ##struct.calcsize("<H"),
+        RPS_ROUND_ID
+    )
+    manufacturer_data = LazyObjectField(
+        ManufacturerData,
+        "manufacturer_data",
+        advertising_data_type=MANUFACTURING_DATA_ADT,
+        company_id=ADAFRUIT_COMPANY_ID,
+        key_encoding="<H"
+    )
+
+    round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    """Round number starting at 1."""
+
+    def __init__(self, *, round=None):
+        super().__init__()
+        if round is not None:
+            self.round = round
+
+
 class JoinGameAdvertisement(Advertisement):
-    """A join game (broadcast) message.
+    """A join game (broadcast) message used as the first message to work out who is playing.
        This is not connectable and does not elicit a scan response
        based on defaults in Advertisement parent class. 
        """

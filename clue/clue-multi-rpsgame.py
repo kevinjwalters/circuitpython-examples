@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.7
+### clue-multi-rpsgame v0.8
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -45,7 +45,10 @@ from adafruit_display_text.label import Label
 ### https://github.com/adafruit/Adafruit_CircuitPython_BLE
 from adafruit_ble import BLERadio
 
-from rps_advertisements import JoinGameAdvertisement, RpsEncDataAdvertisement, RpsKeyDataAdvertisement
+from rps_advertisements import JoinGameAdvertisement, \
+                               RpsEncDataAdvertisement, \
+                               RpsKeyDataAdvertisement, \
+                               RpsRoundEndAdvertisement
 
 ### BUGS
 ### The protocol is flawed, after receiving packets from other players it stops
@@ -204,6 +207,7 @@ def setCursor(idx):
     if 0 <= idx < len(choices):
         cursor_dob.y = top_y_pos + choice_sep * idx
 
+
 if display is not None:
     ### The 6x14 terminalio classic font
     FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
@@ -267,6 +271,7 @@ voids = 0
 
 TOTAL_ROUND = 5
 
+
 def evaluateGame(mine, yours):
     """Determine who won the game based on the two strings mine and yours.
        Returns three booleans (win, draw, void)."""
@@ -301,9 +306,12 @@ def evaluateGame(mine, yours):
 
 
 def broadcastAndReceive(send_ad,
+                        *receive_ads_types,
                         min_time=0,
                         max_time=MAX_SEND_TIME_S,
-                        receive_n=0):
+                        receive_n=0,
+                        ads_by_addr={}
+                        ):
     """Send an Advertisement sendad and then wait max_time seconds to receive_n
        receive_n Advertisements from other devices.
        If receive_n is 0 then wait for the remaining max_time.
@@ -321,6 +329,9 @@ def broadcastAndReceive(send_ad,
     ## ble.start_advertising(tx_message, interval=0.02001)
 
     opponent_choice = None
+    ### TODO review this - using 20ms - maybe less agressive is better with more devices?
+    ### Remember default scanning interval is 100ms and transmit is probably 1 channel
+    ### changing every 5s
     ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
     sending_ns = time.monotonic_ns()
 
@@ -337,24 +348,34 @@ def broadcastAndReceive(send_ad,
 
     ### A dict to store unique Advertisement indexed by mac address
     ### as text string
-    received_ad_by_addr = {}
-    rx_class = type(send_ad)
+    received_ads_by_addr = dict(ads_by_addr)  ### Will not be a deep copy
+    if receive_ads_types:
+        rx_ad_classes = receive_ads_types
+    else:
+        rx_ad_classes = (type(send_ad),)
+
+    ### Count of the number of packets already received of the
+    ### first type in rx_ad_classes
     rx_count = 0
-    for adv in ble.start_scan(rx_class, minimum_rssi=-127,
+    for adsnb_per_addr in received_ads_by_addr.values():
+        if rx_ad_classes[0] in [type(andb[0]) for andb in adsnb_per_addr]:
+            rx_count += 1
+
+    for adv in ble.start_scan(*rx_ad_classes, minimum_rssi=-127,
                               timeout=max_time):
         received_ns = time.monotonic_ns()
         d_print(2, "RXed RTA", adv)
         addr_text = "".join(["{:02x}".format(b) for b in reversed(adv.address.address_bytes)])
-        if addr_text in received_ad_by_addr:
+        if addr_text in received_ads_by_addr:
             this_ad_b = bytes(adv)
-            for existing_ad in received_ad_by_addr[addr_text]:
+            for existing_ad in received_ads_by_addr[addr_text]:
                 if this_ad_b == existing_ad[1]:
                     break  ### already present
-            else:  ### python's unusual else for for
-                received_ad_by_addr[addr_text].append((adv, bytes(adv)))
+            else:  ### Python's unusual for/else 
+                received_ads_by_addr[addr_text].append((adv, bytes(adv)))
                 rx_count += 1
         else:
-            received_ad_by_addr[addr_text] = [(adv, bytes(adv))]
+            received_ads_by_addr[addr_text] = [(adv, bytes(adv))]
             rx_count += 1
         if receive_n > 0 and receive_n == rx_count:
             break
@@ -380,12 +401,12 @@ def broadcastAndReceive(send_ad,
 
     ble.stop_advertising()
 
-    ### Make a single list of all the received adverts from the dict 
+    ### Make a single list of all the received adverts from the dict
     received_ads = []
-    for ads in received_ad_by_addr.values():
+    for ads in received_ads_by_addr.values():
         ### Pick out the first value, second value is just bytes() version
         received_ads.extend([a[0] for a in ads])
-    return (received_ads, received_ad_by_addr)
+    return (received_ads, received_ads_by_addr)
 
 
 def bytes_pad(text, size=8, pad=0):
@@ -396,7 +417,7 @@ def bytes_pad(text, size=8, pad=0):
         return text_as_bytes
     else:
         return text_as_bytes + bytes([pad] * (size - len(text_as_bytes)))
- 
+
 
 def str_unpad(text_as_bytes, pad=0):
     """Convert a bytes to a str removing trailing characters matching pad."""
@@ -406,6 +427,7 @@ def str_unpad(text_as_bytes, pad=0):
             end_ex -= 1
     
     return text_as_bytes[0:end_ex].decode("utf-8")
+
 
 def generateOTPadKey(n_bytes):
     """Generate a random key of n_bytes bytes returned as type bytes.
@@ -486,31 +508,54 @@ while True:
         cipher_bytes = encrypt(plain_bytes, otpad_key, "xor")
         enc_data_msg = RpsEncDataAdvertisement(enc_data=cipher_bytes,
                                                round=round)
-        d_print(2, "TXing", enc_data_msg)
+        ### Players will not be synchronised at this point as they do not
+        ### have to make their choices simultaneously
         _, enc_data_by_addr = broadcastAndReceive(enc_data_msg,
-                                                  receive_n=num_other_players)
-        
-        key_data_msg = RpsKeyDataAdvertisement(key_data=otpad_key, round=round)
-        d_print(2, "TXing", key_data_msg)
-        _, key_data_by_addr = broadcastAndReceive(key_data_msg,
+                                                  RpsEncDataAdvertisement,
+                                                  RpsKeyDataAdvertisement,
                                                   receive_n=num_other_players)
 
+        key_data_msg = RpsKeyDataAdvertisement(key_data=otpad_key, round=round)
+        ### All of the programs will be loosely synchronised now
+        _, key_data_by_addr = broadcastAndReceive(key_data_msg,
+                                                  RpsKeyDataAdvertisement,
+                                                  RpsRoundEndAdvertisement,
+                                                  receive_n=num_other_players,
+                                                  ads_by_addr=enc_data_by_addr)
+
+        re_msg = RpsRoundEndAdvertisement(round=round)
+        ### The round end message is really about acknowledging receipt of the key
+        ### by sending a message that holds non-critical information
+        ### TODO - this one should only send for a few second, JoinGame should send for loads
+        _, re_by_addr = broadcastAndReceive(re_msg,                                                  
+                                            receive_n=num_other_players,
+                                            ads_by_addr=key_data_by_addr)
+        ### This will have accumulated all the messages for this round
+        allmsg_by_addr = re_by_addr
+
         ### Decrypt results
-        ### TODO - punt this out to a sub?
+        ### - if any data is incorrect the opponent_choice is left as None
         for p_idx1, player in enumerate(players[1:], 1):
             opponent_choice = None
             try:
-                ### TODO - check lengths of lists and warn if > 1 ???
-                cipher_bytes = enc_data_by_addr[player][0][0].enc_data
-                round_msg1 = enc_data_by_addr[player][0][0].round
-                key_bytes = key_data_by_addr[player][0][0].key_data
-                round_msg2 = key_data_by_addr[player][0][0].round
-                if round == round_msg1 == round_msg2:
-                    plain_bytes = decrypt(cipher_bytes, key_bytes, "xor")
-                    opponent_choice = str_unpad(plain_bytes)
+                cipher_ads = list(filter(lambda ad: isinstance(ad[0], RpsEncDataAdvertisement),
+                                  allmsg_by_addr[player]))
+                key_ads = list(filter(lambda ad: isinstance(ad[0], RpsKeyDataAdvertisement),
+                               allmsg_by_addr[player]))
+                if len(cipher_ads) == 1 and len(key_ads) == 1:
+                    cipher_bytes = cipher_ads[0][0].enc_data
+                    round_msg1 = cipher_ads[0][0].round
+                    key_bytes = key_ads[0][0].key_data
+                    round_msg2 = key_ads[0][0].round
+                    if round == round_msg1 == round_msg2:
+                        plain_bytes = decrypt(cipher_bytes, key_bytes, "xor")
+                        opponent_choice = str_unpad(plain_bytes)
+                    else:
+                        print("Received wrong round for {:d}: {:d} {:d}",
+                              round, round_msg1, round_msg2)
                 else:
-                    print("Received wrong round for {:d}: {:d} {:d}",
-                          round, round_msg1, round_msg2)
+                    print("Wrong number of RpsEncDataAdvertisement {:d} and RpsKeyDataAdvertisement",
+                          len(cipher_ads), len(key_ads))
             except KeyError:
                 pass
             player_choices.append(opponent_choice)
