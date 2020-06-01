@@ -41,9 +41,16 @@ RPS_ENC_DATA_ID = const(0xff32)
 ### Issue raised in https://github.com/adafruit/Adafruit_CircuitPython_BLE/issues/79
 RPS_KEY_DATA_ID = const(0xff34)
 
+RPS_ACKALL_ID = const(0xff35)
 
 ### TODO prefix improvements mentioned in https://github.com/adafruit/Adafruit_CircuitPython_BLE/issues/82
 ### may not happen in time though
+
+### Data formats for shared fields
+### The ManufacturerDataField does not currently properly support data-less
+### fields - _DATA_FMT_ACKALL only needs to be present / not present
+_DATA_FMT_ROUND = "B"
+_DATA_FMT_ACKALL = "B"
 
 
 class RpsEncDataAdvertisement(Advertisement):
@@ -57,7 +64,7 @@ class RpsEncDataAdvertisement(Advertisement):
     _PREFIX_FMT = "<B" "BHBH"
     ## _SEQ_FMT = "B"
     _DATA_FMT_ENC_DATA = "8s"
-    _DATA_FMT_ROUND = "B"
+
     ## _DATA_FMT = "s"  ### this only transfers one byte!
 
     ### prefix appears to be used to determine whether an incoming
@@ -94,30 +101,31 @@ class RpsEncDataAdvertisement(Advertisement):
 
     enc_data = ManufacturerDataField(RPS_ENC_DATA_ID, "<" + _DATA_FMT_ENC_DATA)
     round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    ackall = ManufacturerDataField(RPS_ACKALL_ID, "<" + _DATA_FMT_ACKALL)
     """Round number starting at 1."""
 
-    def __init__(self, *, enc_data=None, round=None):
+    def __init__(self, *, enc_data=None, round=None, ackall=None):
+        """ackall must be set to () to send this optional, data-less field."""
         super().__init__()
         if enc_data is not None:
             self.enc_data = enc_data
         if round is not None:
             self.round = round
+        if ackall is not None:
+            self.ackall = ackall
 
 
 class RpsKeyDataAdvertisement(Advertisement):
     """An RPS (broadcast) message.
-       This informs other players the round is complete.
-       This is essentially an acknowledgement of receipt for previous message.
+       This sends the key to decrypt the previous encrypted choice of the player.
        This is not connectable and does not elicit a scan response
        based on defaults in Advertisement parent class. 
-       This sends the game data. 
        """
     flags = None
 
     _PREFIX_FMT = "<B" "BHBH"
     ## _SEQ_FMT = "B"
     _DATA_FMT_KEY_DATA = "8s"
-    _DATA_FMT_ROUND = "B"
     ## _DATA_FMT = "s"  ### this only transfers one byte!
 
     ### prefix appears to be used to determine whether an incoming
@@ -144,19 +152,23 @@ class RpsKeyDataAdvertisement(Advertisement):
 
     key_data = ManufacturerDataField(RPS_KEY_DATA_ID, "<" + _DATA_FMT_KEY_DATA)
     round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    ackall = ManufacturerDataField(RPS_ACKALL_ID, "<" + _DATA_FMT_ACKALL)
     """Round number starting at 1."""
 
-    def __init__(self, *, key_data=None, round=None):
+    def __init__(self, *, key_data=None, round=None, ackall=None):
+        """ackall must be set to () to send this optional, data-less field."""
         super().__init__()
         if key_data is not None:
             self.key_data = key_data
         if round is not None:
             self.round = round
+        if ackall is not None:
+            self.ackall = ackall
 
 
 class RpsRoundEndAdvertisement(Advertisement):
     """An RPS (broadcast) message.
-       This sends the key to decrypt the previous encrypted choice of the player.
+       This informs other players the round is complete.
        This is not connectable and does not elicit a scan response
        based on defaults in Advertisement parent class. 
        """
@@ -165,7 +177,6 @@ class RpsRoundEndAdvertisement(Advertisement):
     _PREFIX_FMT = "<B" "BHBH"
     ## _SEQ_FMT = "B"
     _DATA_FMT_KEY_DATA = "8s"
-    _DATA_FMT_ROUND = "B"
     ## _DATA_FMT = "s"  ### this only transfers one byte!
 
     ### prefix appears to be used to determine whether an incoming
@@ -191,12 +202,16 @@ class RpsRoundEndAdvertisement(Advertisement):
     )
 
     round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    ackall = ManufacturerDataField(RPS_ACKALL_ID, "<" + _DATA_FMT_ACKALL)
     """Round number starting at 1."""
 
-    def __init__(self, *, round=None):
+    def __init__(self, *, round=None, ackall=None):
+        """ackall must be set to () to send this optional, data-less field."""
         super().__init__()
         if round is not None:
             self.round = round
+        if ackall is not None:
+            self.ackall = ackall
 
 
 class JoinGameAdvertisement(Advertisement):
