@@ -34,14 +34,18 @@ ADAFRUIT_COMPANY_ID = const(0x0822)
 GM_JOIN_ID = const(0xfe30)
 
 RPS_VERSION = const(0xff30)
-RPS_ROUND_ID = const(0xff31)
-RPS_ENC_DATA_ID = const(0xff32)
+### DIRTY HACK - cannot us 0xff31 for RPS_ROUND_ID
+### DIRTY HACK - as number affects hash order and order affects prefix matching
+RPS_ROUND_ID = const(0xff42)
+RPS_ENC_DATA_ID = const(0xff34)
 ### DIRTY HACK - cannot use 0xff33 for RPS_KEY_DATA_ID
-### DIRTY HACK - as this is determining the hash order
+### DIRTY HACK - as number affects hash order and order affects prefix matching
 ### Issue raised in https://github.com/adafruit/Adafruit_CircuitPython_BLE/issues/79
-RPS_KEY_DATA_ID = const(0xff34)
+RPS_KEY_DATA_ID = const(0xff54)
 
-RPS_ACKALL_ID = const(0xff35)
+### DIRTY HACK - cannot use 0xff35 for RPS_KEY_DATA_ID
+### DIRTY HACK - as number affects hash order and order affects prefix matching
+RPS_ACKALL_ID = const(0xff52)
 
 ### TODO prefix improvements mentioned in https://github.com/adafruit/Adafruit_CircuitPython_BLE/issues/82
 ### may not happen in time though
