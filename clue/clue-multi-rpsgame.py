@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.10
+### clue-multi-rpsgame v0.11
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -51,6 +51,8 @@ from rps_advertisements import JoinGameAdvertisement, \
                                RpsRoundEndAdvertisement
 
 from adafruit_ble.advertising import Advertisement  ### ONLY NEEDED FOR DEBUGGING
+import adafruit_ble.advertising.standard  ### for encode_data and decode_data
+
 
 ### BUGS
 ### The protocol is flawed, after receiving packets from other players it stops
@@ -249,6 +251,7 @@ def d_print(level, *args, **kwargs):
 NS_IN_S = 1000 * 1000  * 1000
 MIN_SEND_TIME_NS = 6 * NS_IN_S
 MAX_SEND_TIME_S = 20
+REG_SEND_TIME_S = 4
 MAX_SEND_TIME_NS = MAX_SEND_TIME_S * NS_IN_S
 
 MIN_AD_INTERVAL = 0.02001
@@ -310,8 +313,9 @@ def evaluateGame(mine, yours):
 def broadcastAndReceive(send_ad,
                         *receive_ads_types,
                         min_time=0,
-                        max_time=MAX_SEND_TIME_S,
+                        max_time=REG_SEND_TIME_S,
                         receive_n=0,
+                        match_locally=True,
                         ads_by_addr={}
                         ):
     """Send an Advertisement sendad and then wait max_time seconds to receive_n
@@ -359,60 +363,87 @@ def broadcastAndReceive(send_ad,
         rx_ad_classes = receive_ads_types
     else:
         rx_ad_classes = (cls_send_ad,)
+    
+    if match_locally:
+        ss_rx_ad_classes = (Advertisement,)
+    else:
+        ss_rx_ad_classes = rx_ad_classes
 
     ### Count of the number of packets already received of the
     ### first type in rx_ad_classes and set acks based on any
     ### ackall fields set
     rx_count = 0
     acks = {}
-    for addr, adsnb_per_addr in received_ads_by_addr.items():
+    rxs = {}
+    for addr_text, adsnb_per_addr in received_ads_by_addr.items():
         if cls_send_ad in [type(andb[0]) for andb in adsnb_per_addr]:
-            rx_count += 1
+            rxs[addr_text] = True
             acks_thisaddr = filter((lambda andb: isinstance(andb[0], cls_send_ad)
                                                  and hasattr(andb[0], "ackall")
                                                  and isinstance(andb[0].ackall, int)),
                                     adsnb_per_addr)
             if acks_thisaddr:
-                acks[addr] = True
+                acks[addr_text] = True
                 d_print(3, "Already have ack for", cls_send_ad,
-                        "from", addr, "in", acks_thisaddr)
+                        "from", addr_text, "in", acks_thisaddr)
                 
     ### Determine whether there is a second phase of sending 
     enable_ackall = hasattr(send_ad, "ackall")
     awaiting_allacks = False      
     awaiting_allrx = True
 
-    d_print(1, "Listening for", rx_ad_classes)
-    ### TODO - this is experimentation over the missing data on CPB + Gizmo
-    ### rx_ad_classes = [Advertisement]
-    for adv in ble.start_scan(*rx_ad_classes,
+    d_print(1, "Listening for", ss_rx_ad_classes)
+    for adv_ss in ble.start_scan(*ss_rx_ad_classes,
                               ## minimum_rssi=-127,
+                              active=True,   ### TODO - change this to False and check effect
                               timeout=max_time):
         received_ns = time.monotonic_ns()
+        addr_text = "".join(["{:02x}".format(b) for b in reversed(adv_ss.address.address_bytes)])
+        if match_locally:
+            d_print(3, "RXed RTA", addr_text, repr(adv_ss))
+            adv_ss_as_bytes = adafruit_ble.advertising.standard.encode_data(adv_ss.data_dict)
+            adv = None
+            for cls in rx_ad_classes:
+                prefix = cls.prefix
+                ### TODO - this does not implement proper matching
+                ### proper matching would involve parsing prefix and then matching each
+                ### resulting prefix against each dict entry from decode_data()
+                if adv_ss_as_bytes[1:len(prefix)] == prefix[1:]:
+                    adv = cls()
+                    ### Only popuplating fields in use
+                    adv.data_dict = adafruit_ble.advertising.standard.decode_data(adv_ss_as_bytes)
+                    adv.address = adv_ss.address
+                    d_print(2, "RXed mm RTA", addr_text, adv)
+                    break
+            if adv is None:
+                continue
+        else:
+            adv = adv_ss
+            d_print(2, "RXed RTA", addr_text, adv)
 
-        addr_text = "".join(["{:02x}".format(b) for b in reversed(adv.address.address_bytes)])
-        d_print(2, "RXed RTA", addr_text, adv)
         if hasattr(adv, "ackall") and isinstance(adv.ackall, int):
             d_print(2, "Found ackall")
             if isinstance(adv, cls_send_ad):
                 acks[addr_text] = True
-        else:
-            if addr_text in received_ads_by_addr:
-                this_ad_b = bytes(adv)
-                for existing_ad in received_ads_by_addr[addr_text]:
-                    if this_ad_b == existing_ad[1]:
-                        break  ### already present
-                else:  ### Python's unusual for/else 
-                    received_ads_by_addr[addr_text].append((adv, bytes(adv)))
-                    if isinstance(adv, cls_send_ad):
-                        rx_count += 1
-            else:
-                received_ads_by_addr[addr_text] = [(adv, bytes(adv))]
+
+        if addr_text in received_ads_by_addr:
+            this_ad_b = bytes(adv)
+            for existing_ad in received_ads_by_addr[addr_text]:
+                if this_ad_b == existing_ad[1]:
+                    break  ### already present
+            else:  ### Python's unusual for/else 
+                received_ads_by_addr[addr_text].append((adv, bytes(adv)))
                 if isinstance(adv, cls_send_ad):
-                    rx_count += 1
+                    rxs[addr_text] = True
+        else:
+            received_ads_by_addr[addr_text] = [(adv, bytes(adv))]
+            if isinstance(adv, cls_send_ad):
+                rxs[addr_text] = True
+
+        d_print(3, "rxs", len(rxs), "ack", len(acks))
 
         if awaiting_allrx:
-            if receive_n > 0 and receive_n == rx_count:
+            if receive_n > 0 and len(rxs) == receive_n:
                 if enable_ackall:
                     awaiting_allrx = False
                     awaiting_allacks = True
@@ -425,7 +456,7 @@ def broadcastAndReceive(send_ad,
                 else:
                     break  ### packets received but not waiting for acks
         elif awaiting_allacks:
-            if receive_n == len(acks):
+            if len(acks) == receive_n:
                 break  ### all acks received, can stop now
 
     ble.stop_scan()
@@ -516,7 +547,8 @@ tx_power = 3 ### 13 for testing, I think it's currently fixed at 0dBm
 jg_msg = JoinGameAdvertisement(game="RPS")
 
 ### jg_msg.tx_power = tx_power  ### Setting this breaks prefix matching
-other_player_ads, other_player_ads_by_addr = broadcastAndReceive(jg_msg)
+other_player_ads, other_player_ads_by_addr = broadcastAndReceive(jg_msg,
+                                                                 max_time=MAX_SEND_TIME_S)
 
 ### Make a list of all the player's mac addr_text
 ### with this player as first entry
@@ -532,7 +564,7 @@ d_print(1, "PLAYERS", players)
 while True:
     if round > TOTAL_ROUND:
         print("Summary: ",
-              "wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
+              "wins {:d}, losses {:d}, draws {:d}, void {:d}\n\n".format(wins, losses, draws, voids))
 
         ### Reset variables for another game
         round = 1
@@ -550,6 +582,7 @@ while True:
             setCursor(my_choice_idx)
 
     if button_right():
+        ### TODO - beep to indicate to other players we have chosen
         my_choice = choices[my_choice_idx]
         player_choices = [my_choice]
 
@@ -565,6 +598,7 @@ while True:
         _, enc_data_by_addr = broadcastAndReceive(enc_data_msg,
                                                   RpsEncDataAdvertisement,
                                                   RpsKeyDataAdvertisement,
+                                                  max_time=REG_SEND_TIME_S*2,
                                                   receive_n=num_other_players)
 
         key_data_msg = RpsKeyDataAdvertisement(key_data=otpad_key, round=round)
