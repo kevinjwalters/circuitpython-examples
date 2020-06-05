@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.11
+### clue-multi-rpsgame v0.13
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -258,7 +258,7 @@ MIN_AD_INTERVAL = 0.02001
 
 ble = BLERadio()
 
-### TODO - allow the user to set this
+### TODO - allow the user to set this - do this from optional secrets.py ?
 ##ble.name = ?
 
 
@@ -310,11 +310,31 @@ def evaluateGame(mine, yours):
     return (win, draw, void)
 
 
+def max_ack(acklist):
+    """Return the highest ack number from a contiguous run.
+       Returns 0 for an empty list."""
+
+    if len(acklist) == 0:
+        return 0
+    elif len(acklist) == 1:
+        return acklist[0]
+
+    ordered_acklist = sorted(acklist)
+    max_ack_sofar = ordered_acklist[0]
+    for ack in ordered_acklist[1:]:
+        if ack - max_ack_sofar > 1:
+            break
+        max_ack_sofar = ack
+    return max_ack_sofar
+
+
 def broadcastAndReceive(send_ad,
                         *receive_ads_types,
                         min_time=0,
                         max_time=REG_SEND_TIME_S,
                         receive_n=0,
+                        seq_tx=None,
+                        seq_rx_by_addr=None,
                         match_locally=True,
                         ads_by_addr={}
                         ):
@@ -324,7 +344,8 @@ def broadcastAndReceive(send_ad,
        Returns list of received Advertisements not necessarily in arrival order and
        dictionary indexed by the compressed text representation of the address with a list
        of tuples of (advertisement, bytes(advertisement)).
-       This MODIFIES send_ad by setting it if it has an ackall property."""
+       This MODIFIES send_ad by setting sequence_number and ack if those
+       properties are present."""
 
     d_print(2, "TXing", send_ad)
 
@@ -353,7 +374,13 @@ def broadcastAndReceive(send_ad,
     ### window and interval are 0.1 by default - same value means
     ### continuous scanning (sending Advertisement will interrupt this)
 
-
+    sequence_number = None
+    acked = None
+    if seq_tx is not None and hasattr(send_ad, "sequence_number"):
+        sequence_number = seq_tx[0]
+        seq_tx[0] += 1
+        send_ad.sequence_number = sequence_number
+        acked = False
 
     ### A dict to store unique Advertisement indexed by mac address
     ### as text string
@@ -363,40 +390,40 @@ def broadcastAndReceive(send_ad,
         rx_ad_classes = receive_ads_types
     else:
         rx_ad_classes = (cls_send_ad,)
-    
+
     if match_locally:
         ss_rx_ad_classes = (Advertisement,)
     else:
         ss_rx_ad_classes = rx_ad_classes
 
-    ### Count of the number of packets already received of the
-    ### first type in rx_ad_classes and set acks based on any
-    ### ackall fields set
-    rx_count = 0
-    acks = {}
+    ### Look for packets already received of the cls_send_ad class (type)
+    ### Check for the maximum sequence number ackd across all packets
     rxs = {}
+    acks = {}
     for addr_text, adsnb_per_addr in received_ads_by_addr.items():
         if cls_send_ad in [type(andb[0]) for andb in adsnb_per_addr]:
             rxs[addr_text] = True
-            acks_thisaddr = filter((lambda andb: isinstance(andb[0], cls_send_ad)
-                                                 and hasattr(andb[0], "ackall")
-                                                 and isinstance(andb[0].ackall, int)),
-                                    adsnb_per_addr)
-            if acks_thisaddr:
-                acks[addr_text] = True
-                d_print(3, "Already have ack for", cls_send_ad,
-                        "from", addr_text, "in", acks_thisaddr)
-                
-    ### Determine whether there is a second phase of sending 
-    enable_ackall = hasattr(send_ad, "ackall")
+            
+        ### Pick out any Advertisements with an ack field with a value
+        acks_thisaddr = filter(lambda adnb: hasattr(adnb[0], "ack")
+                                            and isinstance(adnb[0].ack, int),
+                               adsnb_per_addr)
+        if acks_thisaddr:
+            seqs = [adnb[0].ack for adnb in acks_thisaddr]
+            acks[addr_text] = seqs
+            d_print(3, "Already have ack for", cls_send_ad,
+                    "from", addr_text, "of", seqs, "in", acks_thisaddr)
+
+    ### Determine whether there is a second phase of sending acks
+    enable_ack = hasattr(send_ad, "ack")
     awaiting_allacks = False      
     awaiting_allrx = True
 
     d_print(1, "Listening for", ss_rx_ad_classes)
     for adv_ss in ble.start_scan(*ss_rx_ad_classes,
-                              ## minimum_rssi=-127,
-                              active=True,   ### TODO - change this to False and check effect
-                              timeout=max_time):
+                                 ## minimum_rssi=-127,
+                                 active=True,   ### TODO - change this to False and check effect
+                                 timeout=max_time):
         received_ns = time.monotonic_ns()
         addr_text = "".join(["{:02x}".format(b) for b in reversed(adv_ss.address.address_bytes)])
         if match_locally:
@@ -421,10 +448,13 @@ def broadcastAndReceive(send_ad,
             adv = adv_ss
             d_print(2, "RXed RTA", addr_text, adv)
 
-        if hasattr(adv, "ackall") and isinstance(adv.ackall, int):
+        ### Look for an ack and add it if not already there
+        if hasattr(adv, "ack") and isinstance(adv.ack, int):
             d_print(2, "Found ackall")
-            if isinstance(adv, cls_send_ad):
-                acks[addr_text] = True
+            if addr_text not in acks:
+                acks[addr_text] = [adv.ack]
+            elif adv.ack not in acks[addr_text]:
+                acks[addr_text].append(adv.ack)
 
         if addr_text in received_ads_by_addr:
             this_ad_b = bytes(adv)
@@ -444,20 +474,24 @@ def broadcastAndReceive(send_ad,
 
         if awaiting_allrx:
             if receive_n > 0 and len(rxs) == receive_n:
-                if enable_ackall:
+                if enable_ack and sequence_number is not None:
                     awaiting_allrx = False
                     awaiting_allacks = True
                     ble.stop_advertising()
-                    ### empty tuple sets this data-less ManufacturerDataField
-                    send_ad.ackall = 99
+                    send_ad.ack = sequence_number
                     ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
                     d_print(2, "TXing with ack for all", send_ad,
                             "ack_count", len(acks))
                 else:
-                    break  ### packets received but not waiting for acks
+                    break  ### packets received but not sending ack nor waiting for acks
         elif awaiting_allacks:
             if len(acks) == receive_n:
-                break  ### all acks received, can stop now
+                ack_count = 0
+                for addr_text, acks_for_addr in acks.items():
+                    if max_ack(acks_for_addr) >= sequence_number:
+                        ack_count += 1
+                if ack_count == receive_n:
+                    break  ### all acks received, can stop now
 
     ble.stop_scan()
 
@@ -552,10 +586,15 @@ other_player_ads, other_player_ads_by_addr = broadcastAndReceive(jg_msg,
 
 ### Make a list of all the player's mac addr_text
 ### with this player as first entry
+### Lots of things assume this is mac addr so take care with any changes here
 players = (["".join(["{:02x}".format(b) for b in reversed(ble.address_bytes)])]
            + list(other_player_ads_by_addr.keys()))
 
 num_other_players = len(players) - 1
+
+### Sequence numbers - real packets start at 1
+seq_tx = [1]  ### The next number to send
+seq_rx_by_addr = {p: 0 for p in players[1:]}  ### Per address received all up to
 
 d_print(1, "PLAYERS", players)
 
@@ -599,28 +638,43 @@ while True:
                                                   RpsEncDataAdvertisement,
                                                   RpsKeyDataAdvertisement,
                                                   max_time=REG_SEND_TIME_S*2,
-                                                  receive_n=num_other_players)
+                                                  receive_n=num_other_players,
+                                                  seq_tx=seq_tx,
+                                                  seq_rx_by_addr=seq_rx_by_addr)
 
         key_data_msg = RpsKeyDataAdvertisement(key_data=otpad_key, round=round)
         ### All of the programs will be loosely synchronised now
         _, key_data_by_addr = broadcastAndReceive(key_data_msg,
+                                                  RpsEncDataAdvertisement,
                                                   RpsKeyDataAdvertisement,
                                                   RpsRoundEndAdvertisement,
+                                                  max_time=REG_SEND_TIME_S,
                                                   receive_n=num_other_players,
+                                                  seq_tx=seq_tx,
+                                                  seq_rx_by_addr=seq_rx_by_addr,
                                                   ads_by_addr=enc_data_by_addr)
 
+        ### TODO maybe this could be used with a minimum tx time of 1s
+        ### to just tidy up acks
+
         ### With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
-        ##re_msg = RpsRoundEndAdvertisement(round=round)
+        re_msg = RpsRoundEndAdvertisement(round=round)
         ### The round end message is really about acknowledging receipt of the key
         ### by sending a message that holds non-critical information
         ### TODO - this one should only send for a few second, JoinGame should send for loads
-        ##_, re_by_addr = broadcastAndReceive(re_msg,
-        ##                                    receive_n=num_other_players,
-        ##                                   ads_by_addr=key_data_by_addr)
-        
+        _, re_by_addr = broadcastAndReceive(re_msg,
+                                            RpsEncDataAdvertisement,
+                                            RpsKeyDataAdvertisement,
+                                            RpsRoundEndAdvertisement,
+                                            max_time=1,
+                                            receive_n=num_other_players,
+                                            seq_tx=seq_tx,
+                                            seq_rx_by_addr=seq_rx_by_addr,
+                                            ads_by_addr=key_data_by_addr)
+
         ### This will have accumulated all the messages for this round
-        allmsg_by_addr = key_data_by_addr
-        ##allmsg_by_addr = re_by_addr
+        ##allmsg_by_addr = key_data_by_addr
+        allmsg_by_addr = re_by_addr
 
         ### Decrypt results
         ### - if any data is incorrect the opponent_choice is left as None
@@ -631,7 +685,11 @@ while True:
                                   allmsg_by_addr[player]))
                 key_ads = list(filter(lambda ad: isinstance(ad[0], RpsKeyDataAdvertisement),
                                allmsg_by_addr[player]))
-                if len(cipher_ads) == 1 and len(key_ads) == 1:
+                ### Two packets per class will be the packet and then packet
+                ### with ackall set is received
+                ### One packet will be the first packets lost but the second
+                ### received with ackall
+                if len(cipher_ads) in (1, 2) and len(key_ads) in (1, 2):
                     cipher_bytes = cipher_ads[0][0].enc_data
                     round_msg1 = cipher_ads[0][0].round
                     key_bytes = key_ads[0][0].key_data
