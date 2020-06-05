@@ -29,6 +29,9 @@ from adafruit_ble.advertising.standard import ManufacturerData, ManufacturerData
 MANUFACTURING_DATA_ADT = const(0xFF)
 ADAFRUIT_COMPANY_ID = const(0x0822)
 
+### This is from https://github.com/adafruit/Adafruit_CircuitPython_BLE_BroadcastNet/blob/c6328d5c7edf8a99ff719c3b1798cb4111bab397/adafruit_ble_broadcastnet.py#L84-L85
+ADAFRUIT_SEQ_ID = const(0x0003)
+
 ### According to https://github.com/adafruit/Adafruit_CircuitPython_BLE/blob/master/adafruit_ble/advertising/adafruit.py
 ### 0xf000 (to 0xffff) is for range for Adafruit customers
 GM_JOIN_ID = const(0xfe30)
@@ -36,7 +39,9 @@ GM_JOIN_ID = const(0xfe30)
 RPS_VERSION = const(0xff30)
 ### DIRTY HACK - cannot us 0xff31 for RPS_ROUND_ID
 ### DIRTY HACK - as number affects hash order and order affects prefix matching
-RPS_ROUND_ID = const(0xff42)
+### 0xff42 was moved by 0x0003
+RPS_ROUND_ID = const(0xff74)
+
 RPS_ENC_DATA_ID = const(0xff34)
 ### DIRTY HACK - cannot use 0xff33 for RPS_KEY_DATA_ID
 ### DIRTY HACK - as number affects hash order and order affects prefix matching
@@ -45,16 +50,18 @@ RPS_KEY_DATA_ID = const(0xff54)
 
 ### DIRTY HACK - cannot use 0xff35 for RPS_KEY_DATA_ID
 ### DIRTY HACK - as number affects hash order and order affects prefix matching
-RPS_ACKALL_ID = const(0xff52)
+RPS_ACK_ID = const(0xff52)
 
 ### TODO prefix improvements mentioned in https://github.com/adafruit/Adafruit_CircuitPython_BLE/issues/82
 ### may not happen in time though
 
 ### Data formats for shared fields
 ### The ManufacturerDataField does not currently properly support data-less
-### fields - _DATA_FMT_ACKALL only needs to be present / not present
+### fields - _DATA_FMT_ACK only needs to be present / not present
 _DATA_FMT_ROUND = "B"
-_DATA_FMT_ACKALL = "B"
+_DATA_FMT_ACK = "B"
+
+_SEQ_FMT = "B"
 
 
 class RpsEncDataAdvertisement(Advertisement):
@@ -99,24 +106,25 @@ class RpsEncDataAdvertisement(Advertisement):
 ###    sequence_number = ManufacturerDataField(0x0003, "<B")
 ###    """Sequence number of the measurement. Used to detect missed packets."""
 
-    ### 0x0003 is used in AdafruitSensorMeasurement()
-    ##sequence_number = ManufacturerDataField(0x0003, "<" + _SEQ_FMT)
-    ##"""Sequence number of the data. Used for acknowledgements."""
+    sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
+    """Sequence number of the data. Used in acknowledgements."""
 
     enc_data = ManufacturerDataField(RPS_ENC_DATA_ID, "<" + _DATA_FMT_ENC_DATA)
     round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
-    ackall = ManufacturerDataField(RPS_ACKALL_ID, "<" + _DATA_FMT_ACKALL)
+    ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, enc_data=None, round=None, ackall=None):
-        """ackall must be set to () to send this optional, data-less field."""
+    def __init__(self, *, enc_data=None, round=None, ack=None, sequence_number=None):
+        """ack must be set to () to send this optional, data-less field."""
         super().__init__()
         if enc_data is not None:
             self.enc_data = enc_data
         if round is not None:
             self.round = round
-        if ackall is not None:
-            self.ackall = ackall
+        if ack is not None:
+            self.ack = ack
+        if sequence_number is not None:
+            self.sequence_number = sequence_number
 
 
 class RpsKeyDataAdvertisement(Advertisement):
@@ -154,20 +162,25 @@ class RpsKeyDataAdvertisement(Advertisement):
         key_encoding="<H"
     )
 
+    sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
+    """Sequence number of the data. Used in acknowledgements."""
+
     key_data = ManufacturerDataField(RPS_KEY_DATA_ID, "<" + _DATA_FMT_KEY_DATA)
     round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
-    ackall = ManufacturerDataField(RPS_ACKALL_ID, "<" + _DATA_FMT_ACKALL)
+    ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, key_data=None, round=None, ackall=None):
-        """ackall must be set to () to send this optional, data-less field."""
+    def __init__(self, *, key_data=None, round=None, ack=None, sequence_number=None):
+        """ack must be set to () to send this optional, data-less field."""
         super().__init__()
         if key_data is not None:
             self.key_data = key_data
         if round is not None:
             self.round = round
-        if ackall is not None:
-            self.ackall = ackall
+        if ack is not None:
+            self.ack = ack
+        if sequence_number is not None:
+            self.sequence_number = sequence_number
 
 
 class RpsRoundEndAdvertisement(Advertisement):
@@ -205,17 +218,22 @@ class RpsRoundEndAdvertisement(Advertisement):
         key_encoding="<H"
     )
 
+    sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
+    """Sequence number of the data. Used in acknowledgements."""
+
     round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
-    ackall = ManufacturerDataField(RPS_ACKALL_ID, "<" + _DATA_FMT_ACKALL)
+    ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, round=None, ackall=None):
-        """ackall must be set to () to send this optional, data-less field."""
+    def __init__(self, *, round=None, ack=None, sequence_number=None):
+        """ack must be set to () to send this optional, data-less field."""
         super().__init__()
         if round is not None:
             self.round = round
-        if ackall is not None:
-            self.ackall = ackall
+        if ack is not None:
+            self.ack = ack
+        if sequence_number is not None:
+            self.sequence_number = sequence_number
 
 
 class JoinGameAdvertisement(Advertisement):
@@ -252,15 +270,6 @@ class JoinGameAdvertisement(Advertisement):
         key_encoding="<H"
     )
 
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_BroadcastNet/blob/c6328d5c7edf8a99ff719c3b1798cb4111bab397/adafruit_ble_broadcastnet.py#L66-L67
-### has a sequence_number - this will be use for for Complex Game
-###    sequence_number = ManufacturerDataField(0x0003, "<B")
-###    """Sequence number of the measurement. Used to detect missed packets."""
-
-    ### 0x0003 is used in AdafruitSensorMeasurement()
-    ##sequence_number = ManufacturerDataField(0x0003, "<" + _SEQ_FMT)
-    ##"""Sequence number of the data. Used for acknowledgements."""
-
     game = ManufacturerDataField(GM_JOIN_ID, "<" + _DATA_FMT)
     """RPS choice."""
 
@@ -268,3 +277,4 @@ class JoinGameAdvertisement(Advertisement):
         super().__init__()
         if game is not None:
             self.game = game
+
