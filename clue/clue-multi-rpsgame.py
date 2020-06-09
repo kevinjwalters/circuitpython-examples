@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.13
+### clue-multi-rpsgame v0.15
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -53,7 +53,6 @@ from rps_advertisements import JoinGameAdvertisement, \
 from adafruit_ble.advertising import Advertisement  ### ONLY NEEDED FOR DEBUGGING
 import adafruit_ble.advertising.standard  ### for encode_data and decode_data
 
-
 ### BUGS
 ### The protocol is flawed, after receiving packets from other players it stops
 ### transmitting its own data but this may not have been received
@@ -61,6 +60,10 @@ import adafruit_ble.advertising.standard  ### for encode_data and decode_data
 ### TODO
 ### Maybe simple version is clue only
 ### simple version still needs win indicator (flash text?) and a score counter
+
+### TODO - deal with crypto flaw - maybe use XXTEA?
+
+### TODO - left button to terminate scanning works on all but the penultimate device!!
 
 ### Complex version demos how to
 ### work on cpb
@@ -117,8 +120,20 @@ try:
 except ImportError:
     from audiopwmio import PWMAudioOut as AudioOut
 
+### Look for ble_name in secrets.py file if present
+ble_name = None
+try:
+    from secrets import secrets
+    ble_name = secrets.get("rps_name")
+    if ble_name is None:
+        ble_name = secrets.get("ble_name")
+        if ble_name is None:
+            print("No rps_name or ble_name entry found in secrets dict")
+except ImportError:
+    pass
 
-debug = 3
+
+debug = 5
 
 
 def tftGizmoPresent():
@@ -192,6 +207,7 @@ else:
     button_left = lambda: not _button_a.value
     button_right = lambda: not _button_b.value
 
+
 choices = ("rock", "paper", "scissors")
 my_choice_idx = 0
 
@@ -203,6 +219,8 @@ DIM_TXT_COL_FG = 0x505050
 DEFAULT_TXT_COL_FG = 0xa0a0a0
 CURSOR_COL_FG = 0xc0c000
 
+### This limit is based on displaying names on screen with scale=2 font
+MAX_PLAYERS = 8
 
 def setCursor(idx):
     """Set the position of the cursor on-screen to indicate the player's selection."""
@@ -215,7 +233,7 @@ def setCursor(idx):
 if display is not None:
     ### The 6x14 terminalio classic font
     FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
-    screen_group = Group(max_size=len(choices) * 2 + 1)
+    gameround_group = Group(max_size=len(choices) * 2 + 1)
 
     for x_pos in (20, display.width // 2 + 20):
         y_pos = top_y_pos
@@ -227,17 +245,17 @@ if display is not None:
             rps_dob.x = x_pos
             rps_dob.y = y_pos
             y_pos += 60
-            screen_group.append(rps_dob)
+            gameround_group.append(rps_dob)
 
     cursor_dob = Label(terminalio.FONT,
-                            text=">",
-                            scale=3,
-                            color=CURSOR_COL_FG)
+                       text=">",
+                       scale=3,
+                       color=CURSOR_COL_FG)
     cursor_dob.x = 0
     setCursor(my_choice_idx)
     cursor_dob.y = top_y_pos
-    screen_group.append(cursor_dob)
-    display.show(screen_group)
+    gameround_group.append(cursor_dob)
+    ##display.show(gameround_group)
 
 
 def d_print(level, *args, **kwargs):
@@ -254,13 +272,15 @@ MAX_SEND_TIME_S = 20
 REG_SEND_TIME_S = 4
 MAX_SEND_TIME_NS = MAX_SEND_TIME_S * NS_IN_S
 
+### 20ms is the minimum delay between advertising packets
+### in Bluetooth Low Energy
+### extra 10us deals with API floating point rounding issues
 MIN_AD_INTERVAL = 0.02001
 
+### Enable the Bluetooth LE radio and set player's name (from secrets.py)
 ble = BLERadio()
-
-### TODO - allow the user to set this - do this from optional secrets.py ?
-##ble.name = ?
-
+if ble_name is not None:
+    ble.name = ble_name
 
 opponent_choice = None
 
@@ -274,7 +294,7 @@ losses = 0
 draws = 0 
 voids = 0
 
-TOTAL_ROUND = 5
+TOTAL_ROUNDS = 5
 
 
 def evaluateGame(mine, yours):
@@ -310,6 +330,8 @@ def evaluateGame(mine, yours):
     return (win, draw, void)
 
 
+### Networking bits BEGIN
+
 def max_ack(acklist):
     """Return the highest ack number from a contiguous run.
        Returns 0 for an empty list."""
@@ -336,7 +358,11 @@ def broadcastAndReceive(send_ad,
                         seq_tx=None,
                         seq_rx_by_addr=None,
                         match_locally=True,
-                        ads_by_addr={}
+                        scan_response_request=False,
+                        ads_by_addr={},
+                        names_by_addr={},
+                        name_cb=None,
+                        endscan_cb=None
                         ):
     """Send an Advertisement sendad and then wait max_time seconds to receive_n
        receive_n Advertisements from other devices.
@@ -396,6 +422,8 @@ def broadcastAndReceive(send_ad,
     else:
         ss_rx_ad_classes = rx_ad_classes
 
+    blenames_by_addr = dict(names_by_addr)  ### Will not be a deep copy
+
     ### Look for packets already received of the cls_send_ad class (type)
     ### Check for the maximum sequence number ackd across all packets
     rxs = {}
@@ -403,7 +431,7 @@ def broadcastAndReceive(send_ad,
     for addr_text, adsnb_per_addr in received_ads_by_addr.items():
         if cls_send_ad in [type(andb[0]) for andb in adsnb_per_addr]:
             rxs[addr_text] = True
-            
+
         ### Pick out any Advertisements with an ack field with a value
         acks_thisaddr = filter(lambda adnb: hasattr(adnb[0], "ack")
                                             and isinstance(adnb[0].ack, int),
@@ -411,7 +439,7 @@ def broadcastAndReceive(send_ad,
         if acks_thisaddr:
             seqs = [adnb[0].ack for adnb in acks_thisaddr]
             acks[addr_text] = seqs
-            d_print(3, "Already have ack for", cls_send_ad,
+            d_print(5, "Already have ack for", cls_send_ad,
                     "from", addr_text, "of", seqs, "in", acks_thisaddr)
 
     ### Determine whether there is a second phase of sending acks
@@ -422,12 +450,24 @@ def broadcastAndReceive(send_ad,
     d_print(1, "Listening for", ss_rx_ad_classes)
     for adv_ss in ble.start_scan(*ss_rx_ad_classes,
                                  ## minimum_rssi=-127,
-                                 active=True,   ### TODO - change this to False and check effect
+                                 active=scan_response_request,
                                  timeout=max_time):
         received_ns = time.monotonic_ns()
-        addr_text = "".join(["{:02x}".format(b) for b in reversed(adv_ss.address.address_bytes)])
+        addr_text = addr_to_text(adv_ss.address.address_bytes)
+
+        ### Add name of the device to dict limiting
+        ### this to devices of interest by checking received_ads_by_addr
+        ### plus pass data to any callback function
+        if (addr_text not in blenames_by_addr
+            and addr_text in received_ads_by_addr):
+            name = adv_ss.complete_name  ### None indicates no value
+            if name:  ### This test ignores any empty strings too
+                blenames_by_addr[addr_text] = name
+                if name_cb is not None:
+                    name_cb(name, addr_text, adv_ss.address, adv_ss)
+
         if match_locally:
-            d_print(3, "RXed RTA", addr_text, repr(adv_ss))
+            d_print(5, "RXed RTA", addr_text, repr(adv_ss))
             adv_ss_as_bytes = adafruit_ble.advertising.standard.encode_data(adv_ss.data_dict)
             adv = None
             for cls in rx_ad_classes:
@@ -435,22 +475,23 @@ def broadcastAndReceive(send_ad,
                 ### TODO - this does not implement proper matching
                 ### proper matching would involve parsing prefix and then matching each
                 ### resulting prefix against each dict entry from decode_data()
+                ### starting at 1 skips over the message length value
                 if adv_ss_as_bytes[1:len(prefix)] == prefix[1:]:
                     adv = cls()
-                    ### Only popuplating fields in use
+                    ### Only populating fields in use
                     adv.data_dict = adafruit_ble.advertising.standard.decode_data(adv_ss_as_bytes)
                     adv.address = adv_ss.address
-                    d_print(2, "RXed mm RTA", addr_text, adv)
+                    d_print(4, "RXed mm RTA", addr_text, adv)
                     break
             if adv is None:
                 continue
         else:
             adv = adv_ss
-            d_print(2, "RXed RTA", addr_text, adv)
+            d_print(4, "RXed RTA", addr_text, adv)
 
         ### Look for an ack and add it if not already there
         if hasattr(adv, "ack") and isinstance(adv.ack, int):
-            d_print(2, "Found ackall")
+            d_print(4, "Found ackall")
             if addr_text not in acks:
                 acks[addr_text] = [adv.ack]
             elif adv.ack not in acks[addr_text]:
@@ -470,7 +511,7 @@ def broadcastAndReceive(send_ad,
             if isinstance(adv, cls_send_ad):
                 rxs[addr_text] = True
 
-        d_print(3, "rxs", len(rxs), "ack", len(acks))
+        d_print(5, "rxs", len(rxs), "ack", len(acks))
 
         if awaiting_allrx:
             if receive_n > 0 and len(rxs) == receive_n:
@@ -480,7 +521,7 @@ def broadcastAndReceive(send_ad,
                     ble.stop_advertising()
                     send_ad.ack = sequence_number
                     ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
-                    d_print(2, "TXing with ack for all", send_ad,
+                    d_print(4, "TXing with ack for all", send_ad,
                             "ack_count", len(acks))
                 else:
                     break  ### packets received but not sending ack nor waiting for acks
@@ -492,6 +533,10 @@ def broadcastAndReceive(send_ad,
                         ack_count += 1
                 if ack_count == receive_n:
                     break  ### all acks received, can stop now
+
+        if endscan_cb is not None:
+            if endscan_cb(addr_text, adv_ss.address, adv_ss):
+                break
 
     ble.stop_scan()
 
@@ -506,7 +551,7 @@ def broadcastAndReceive(send_ad,
         ### negative one too so this caters for this
         if extra_ad_time_ns > 0:
             sleep_t  = extra_ad_time_ns / NS_IN_S
-            d_print(2, "Additional {:f} seconds of advertising".format(sleep_t))
+            d_print(4, "Additional {:f} seconds of advertising".format(sleep_t))
             time.sleep(sleep_t)
     else:
         timeout = True
@@ -518,7 +563,9 @@ def broadcastAndReceive(send_ad,
     for ads in received_ads_by_addr.values():
         ### Pick out the first value, second value is just bytes() version
         received_ads.extend([a[0] for a in ads])
-    return (received_ads, received_ads_by_addr)
+    return (received_ads, received_ads_by_addr, blenames_by_addr)
+
+### Networking bits END
 
 
 def bytes_pad(text, size=8, pad=0):
@@ -572,36 +619,74 @@ def decrypt(cipher_text, key, algorithm):
     else:
         return ValueError("Algorithm not implemented")
 
-### TODO - check if this is configurable
-tx_power = 3 ### 13 for testing, I think it's currently fixed at 0dBm
+
+if display is not None:
+    ### The 6x14 terminalio classic font
+    FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
+    playerlist_group = Group(max_size=MAX_PLAYERS)
+
+    pl_x_pos = 20
+    pl_y_cur_pos = 7
+    pl_y_off = 2 * FONT_HEIGHT + 1
+    display.show(playerlist_group)
+
+
+def add_player_dob(name, p_group):
+    global pl_y_cur_pos
+
+    pname_dob = Label(terminalio.FONT,
+                      text=name,
+                      scale=2,
+                      color=DEFAULT_TXT_COL_FG)
+    pname_dob.x = pl_x_pos
+    pname_dob.y = pl_y_cur_pos
+    pl_y_cur_pos += pl_y_off
+    p_group.append(pname_dob)
+
+
+def add_player(name, addr_text, address, ad):
+    global player_names
+    global playerlist_group  ### Not strictly needed
+
+    players.append((name, addr_text))
+    if display is not None:
+        add_player_dob(name, playerlist_group)
+
+
+def addr_to_text(mac_addr, big_endian=False, sep=""):
+    """Convert a mac_addr in bytes to text."""
+    return sep.join(["{:02x}".format(b)
+                     for b in (mac_addr if big_endian else reversed(mac_addr))])
+
+
+### Make a list of all the player's (name, mac address as text)
+### with this player as first entry
+players = []
+my_name = ble.name
+add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 
 ### Join Game
 ### TODO - could have a callback to check for player terminate, i.e. 
 ###        could allow player to press button to say "i have got everyone"
 jg_msg = JoinGameAdvertisement(game="RPS")
-
-### jg_msg.tx_power = tx_power  ### Setting this breaks prefix matching
-other_player_ads, other_player_ads_by_addr = broadcastAndReceive(jg_msg,
-                                                                 max_time=MAX_SEND_TIME_S)
-
-### Make a list of all the player's mac addr_text
-### with this player as first entry
-### Lots of things assume this is mac addr so take care with any changes here
-players = (["".join(["{:02x}".format(b) for b in reversed(ble.address_bytes)])]
-           + list(other_player_ads_by_addr.keys()))
+other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
+                                                                    max_time=MAX_SEND_TIME_S,
+                                                                    scan_response_request=True,
+                                                                    endscan_cb=lambda _a, _b, _c: button_left(),
+                                                                    name_cb=add_player)
 
 num_other_players = len(players) - 1
+d_print(2, "PLAYER ADS", other_player_ads_by_addr)
+d_print(1, "PLAYERS", players)
 
 ### Sequence numbers - real packets start at 1
 seq_tx = [1]  ### The next number to send
-seq_rx_by_addr = {p: 0 for p in players[1:]}  ### Per address received all up to
-
-d_print(1, "PLAYERS", players)
+seq_rx_by_addr = {pma: 0 for pn, pma in players[1:]}  ### Per address received all up to
 
 ### Advertise for 20 seconds maximum and if a packet is received
 ### for 5 seconds after that
 while True:
-    if round > TOTAL_ROUND:
+    if round > TOTAL_ROUNDS:
         print("Summary: ",
               "wins {:d}, losses {:d}, draws {:d}, void {:d}\n\n".format(wins, losses, draws, voids))
 
@@ -634,25 +719,25 @@ while True:
                                                round=round)
         ### Players will not be synchronised at this point as they do not
         ### have to make their choices simultaneously
-        _, enc_data_by_addr = broadcastAndReceive(enc_data_msg,
-                                                  RpsEncDataAdvertisement,
-                                                  RpsKeyDataAdvertisement,
-                                                  max_time=REG_SEND_TIME_S*2,
-                                                  receive_n=num_other_players,
-                                                  seq_tx=seq_tx,
-                                                  seq_rx_by_addr=seq_rx_by_addr)
+        _, enc_data_by_addr, _ = broadcastAndReceive(enc_data_msg,
+                                                     RpsEncDataAdvertisement,
+                                                     RpsKeyDataAdvertisement,
+                                                     max_time=REG_SEND_TIME_S*2,
+                                                     receive_n=num_other_players,
+                                                     seq_tx=seq_tx,
+                                                     seq_rx_by_addr=seq_rx_by_addr)
 
         key_data_msg = RpsKeyDataAdvertisement(key_data=otpad_key, round=round)
         ### All of the programs will be loosely synchronised now
-        _, key_data_by_addr = broadcastAndReceive(key_data_msg,
-                                                  RpsEncDataAdvertisement,
-                                                  RpsKeyDataAdvertisement,
-                                                  RpsRoundEndAdvertisement,
-                                                  max_time=REG_SEND_TIME_S,
-                                                  receive_n=num_other_players,
-                                                  seq_tx=seq_tx,
-                                                  seq_rx_by_addr=seq_rx_by_addr,
-                                                  ads_by_addr=enc_data_by_addr)
+        _, key_data_by_addr, _ = broadcastAndReceive(key_data_msg,
+                                                     RpsEncDataAdvertisement,
+                                                     RpsKeyDataAdvertisement,
+                                                     RpsRoundEndAdvertisement,
+                                                     max_time=REG_SEND_TIME_S,
+                                                     receive_n=num_other_players,
+                                                     seq_tx=seq_tx,
+                                                     seq_rx_by_addr=seq_rx_by_addr,
+                                                     ads_by_addr=enc_data_by_addr)
 
         ### TODO maybe this could be used with a minimum tx time of 1s
         ### to just tidy up acks
@@ -678,13 +763,14 @@ while True:
 
         ### Decrypt results
         ### - if any data is incorrect the opponent_choice is left as None
-        for p_idx1, player in enumerate(players[1:], 1):
+        for p_idx1, playernm in enumerate(players[1:], 1):
+            player_name, player_macaddr = playernm
             opponent_choice = None
             try:
                 cipher_ads = list(filter(lambda ad: isinstance(ad[0], RpsEncDataAdvertisement),
-                                  allmsg_by_addr[player]))
+                                  allmsg_by_addr[player_macaddr]))
                 key_ads = list(filter(lambda ad: isinstance(ad[0], RpsKeyDataAdvertisement),
-                               allmsg_by_addr[player]))
+                               allmsg_by_addr[player_macaddr]))
                 ### Two packets per class will be the packet and then packet
                 ### with ackall set is received
                 ### One packet will be the first packets lost but the second
@@ -698,8 +784,8 @@ while True:
                         plain_bytes = decrypt(cipher_bytes, key_bytes, "xor")
                         opponent_choice = str_unpad(plain_bytes)
                     else:
-                        print("Received wrong round for {:d}: {:d} {:d}",
-                              round, round_msg1, round_msg2)
+                        print("Received wrong round for {:d} {:d}: {:d} {:d}",
+                              player_name, round, round_msg1, round_msg2)
                 else:
                     print("Wrong number of RpsEncDataAdvertisement "
                           "{:d} and RpsKeyDataAdvertisement {:d}".format(len(cipher_ads), len(key_ads)))
@@ -708,9 +794,10 @@ while True:
             player_choices.append(opponent_choice)
 
         ### Chalk up wins and losses
-        for p_idx1, player in enumerate(players[1:], 1):
+        for p_idx1, playernm in enumerate(players[1:], 1):
+            player_name, player_macaddr = playernm
             (win, draw, void) = evaluateGame(my_choice, player_choices[p_idx1])
-            d_print(1, "player", player, "choice", player_choices[p_idx1],
+            d_print(1, "player", player_name, "choice", player_choices[p_idx1],
                     "win", win, "draw", draw, "void", void)
             if void:
                 voids += 1
@@ -723,6 +810,7 @@ while True:
             d_print(1, "wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
             round += 1
 
+print("wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
 
 ### Do something on screen or NeoPixels
 print("GAME OVER")
