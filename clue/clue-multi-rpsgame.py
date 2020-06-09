@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.15
+### clue-multi-rpsgame v0.16
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -36,9 +36,11 @@ import struct
 import random
 
 import board
+import displayio
 from displayio import Group
 import terminalio
 import digitalio
+from audiocore import WaveFile
 
 from adafruit_display_text.label import Label
 
@@ -163,7 +165,7 @@ clue_less = "Circuit Playground" in os.uname().machine
 ###       and not use for buttons
 if clue_less:
     ### CPB with TFT Gizmo (240x240)
-    ##from adafruit_circuitplayground import cp
+    from adafruit_circuitplayground import cp
 
     ### Outputs
     if tftGizmoPresent():
@@ -171,42 +173,93 @@ if clue_less:
         display = tft_gizmo.TFT_Gizmo()
     else:
         display = None
-    ##audio_out = AudioOut(board.SPEAKER)
-    ##pixels = cp.pixels
+    audio_out = AudioOut(board.SPEAKER)
+    pixels = cp.pixels
 
     ### Enable the onboard amplifier for speaker
-    ##cp._speaker_enable.value = True  ### pylint: disable=protected-access
+    cp._speaker_enable.value = True  ### pylint: disable=protected-access
 
     ### Inputs
     ### buttons reversed if it is used upside-down with Gizmo
-    _button_a = digitalio.DigitalInOut(board.BUTTON_A)
-    _button_a.switch_to_input(pull=digitalio.Pull.DOWN)
-    _button_b = digitalio.DigitalInOut(board.BUTTON_B)
-    _button_b.switch_to_input(pull=digitalio.Pull.DOWN)
+    ##_button_a = digitalio.DigitalInOut(board.BUTTON_A)
+    ##_button_a.switch_to_input(pull=digitalio.Pull.DOWN)
+    ##_button_b = digitalio.DigitalInOut(board.BUTTON_B)
+    ##_button_b.switch_to_input(pull=digitalio.Pull.DOWN)
     if display is None:
-        button_left = lambda: _button_a.value
-        button_right = lambda: _button_b.value
+        ##button_left = lambda: _button_a.value
+        ##button_right = lambda: _button_b.value
+        button_left = lambda: cp.button_a
+        button_right = lambda: cp.button_b
+
     else:
-        button_left = lambda: _button_b.value
-        button_right = lambda: _button_a.value
+        ##button_left = lambda: _button_b.value
+        ##button_right = lambda: _button_a.value
+        button_left = lambda: cp.button_b
+        button_right = lambda: cp.button_a
 
 else:
     ### CLUE with builtin screen (240x240)
-    ##from adafruit_clue import clue
+    from adafruit_clue import clue
 
     ### Outputs
     display = board.DISPLAY
-    ##audio_out = AudioOut(board.SPEAKER)
-    ##pixels = clue.pixel
+    audio_out = AudioOut(board.SPEAKER)
+    pixels = clue.pixel
 
     ### Inputs
-    _button_a = digitalio.DigitalInOut(board.BUTTON_A)
-    _button_a.switch_to_input(pull=digitalio.Pull.UP)
-    _button_b = digitalio.DigitalInOut(board.BUTTON_B)
-    _button_b.switch_to_input(pull=digitalio.Pull.UP)
-    button_left = lambda: not _button_a.value
-    button_right = lambda: not _button_b.value
+    ##_button_a = digitalio.DigitalInOut(board.BUTTON_A)
+    ##_button_a.switch_to_input(pull=digitalio.Pull.UP)
+    ##_button_b = digitalio.DigitalInOut(board.BUTTON_B)
+    ##_button_b.switch_to_input(pull=digitalio.Pull.UP)
+    ##button_left = lambda: not _button_a.value
+    ##button_right = lambda: not _button_b.value
+    button_left = lambda: clue.button_a
+    button_right = lambda: clue.button_b
 
+
+IMAGE_DIR = "rps/images"
+AUDIO_DIR = "rps/audio"
+
+### Load horizontal sprite sheet if running with a display
+if display is not None:
+    import adafruit_imageload
+    s_bit, s_pal = adafruit_imageload.load(IMAGE_DIR + "/rps-sprites-ind4.bmp",
+                                           bitmap=displayio.Bitmap,
+                                           palette=displayio.Palette)
+    SPRITE_SIZE = s_bit.height
+    num_sprites = s_bit.width // s_bit.height
+    s_pal.make_transparent(0)  ### Make the first colour (black) transparent
+    
+    sprites = []
+    for idx in range(num_sprites):
+        sprite = displayio.TileGrid(s_bit, pixel_shader=s_pal,
+                                    width=1, height=1,
+                                    tile_width=SPRITE_SIZE, tile_height=SPRITE_SIZE)
+        sprite[0] = idx
+        sprites.append(sprite)
+
+
+def readyAudioSamples():
+    """Open files from AUDIO_DIR and return a dict with FileIO objects
+       or None if file not present."""
+    files = (("searching", "welcome-to", "arena")
+              + ("rock", "paper", "scissors")
+              + ("rock-scissors", "paper-rock", "scissors-paper")
+              + ("you-win", "draw", "you-lose")
+              + ("humiliation", "excellent"))
+
+    fhs = {}
+    for file in files:
+        wav_file = None
+        try:
+            wav_file = open(AUDIO_DIR + "/" + file + ".wav", "rb")
+        except OSError as oe:  ### OSError: [Errno 2] No such file/directory: 'filename.ext'
+            pass
+        fhs[file] = wav_file
+    return fhs
+
+### Check and open up audio wav samples
+audio_files = readyAudioSamples()
 
 choices = ("rock", "paper", "scissors")
 my_choice_idx = 0
@@ -218,9 +271,19 @@ choice_sep = 60
 DIM_TXT_COL_FG = 0x505050
 DEFAULT_TXT_COL_FG = 0xa0a0a0
 CURSOR_COL_FG = 0xc0c000
+IWELCOME_COL_FG = 0x000020
+WELCOME_COL_FG = 0x0000f0
+BWHITE_COL_FG = 0xffffff
 
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
+
+if display is not None:
+    ### The 6x14 terminalio classic font
+    FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
+    DISPLAY_WIDTH = display.width
+    DISPLAY_HEIGHT = display.height
+
 
 def setCursor(idx):
     """Set the position of the cursor on-screen to indicate the player's selection."""
@@ -230,9 +293,85 @@ def setCursor(idx):
         cursor_dob.y = top_y_pos + choice_sep * idx
 
 
+def introduction():
+    """Introduction screen."""
+    if display is not None:
+        intro_group = Group(max_size=5)
+        welcometo_dob = Label(terminalio.FONT,
+                              text="Welcome To",
+                              scale=3,
+                              color=IWELCOME_COL_FG)
+        welcometo_dob.x = (DISPLAY_WIDTH - 10 * 3 * FONT_WIDTH) // 2
+        ### Y pos on screen looks lower than I would expect
+        welcometo_dob.y = 3 * FONT_HEIGHT // 2
+        intro_group.append(welcometo_dob)
+
+        spacing = 3 * SPRITE_SIZE + 4
+        for idx, sprite in enumerate(sprites):
+            s_group = Group(scale=3, max_size=1)
+            s_group.x = -96    
+            s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2 + (idx - 1) * spacing
+            s_group.append(sprite)
+            intro_group.append(s_group)
+
+        arena_dob = Label(terminalio.FONT,
+                          text="Arena",
+                          scale=3,
+                          color=IWELCOME_COL_FG)
+        arena_dob.x = (DISPLAY_WIDTH - 5 * 3 * FONT_WIDTH) // 2
+        arena_dob.y = DISPLAY_HEIGHT - 3 * FONT_HEIGHT // 2
+        intro_group.append(arena_dob)
+
+        display.show(intro_group)
+
+    ### The color modification here is fragile as it only works
+    ### if the text colour is blue, i.e. data is in lsb only
+    audio_out.play(WaveFile(audio_files["welcome-to"]))
+    while audio_out.playing:
+        if display is not None and intro_group[0].color < WELCOME_COL_FG:
+            intro_group[0].color += 0x10
+            time.sleep(0.120)
+
+    onscreen_x_pos = 96
+    audio_out.play(WaveFile(audio_files["rock"]))
+    while audio_out.playing:
+        if display is not None:
+            if intro_group[1].x < onscreen_x_pos:
+                intro_group[1].x += 10
+                time.sleep(0.050)
+
+    audio_out.play(WaveFile(audio_files["paper"]))
+    while audio_out.playing:
+        if display is not None:
+            if intro_group[2].x < onscreen_x_pos:
+                intro_group[2].x += 11
+                time.sleep(0.050) 
+
+    audio_out.play(WaveFile(audio_files["scissors"]))
+    while audio_out.playing:
+        if display is not None:
+            if intro_group[3].x < onscreen_x_pos:
+                intro_group[3].x += 7
+                time.sleep(0.050)
+
+    audio_out.play(WaveFile(audio_files["arena"]))
+    while audio_out.playing:
+        if display is not None and intro_group[4].color < WELCOME_COL_FG:
+            intro_group[4].color += 0x10
+            time.sleep(0.060)
+
+    audio_out.stop()
+    ### TODO - I think I need to explicitly remove the sprites
+    ### from the groups to allow them to be reused or fully empty everything.
+
+    ### TODO - add text to explain how the game actually works!
+    
+
+### Intro screen with audio
+introduction()
+
+
 if display is not None:
-    ### The 6x14 terminalio classic font
-    FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
     gameround_group = Group(max_size=len(choices) * 2 + 1)
 
     for x_pos in (20, display.width // 2 + 20):
@@ -447,6 +586,8 @@ def broadcastAndReceive(send_ad,
     awaiting_allacks = False      
     awaiting_allrx = True
 
+    ### TODO - chop up max_time to allow for checking endscan_cb if no Advertisement are received
+    ### maybe 500 ms lumps?
     d_print(1, "Listening for", ss_rx_ad_classes)
     for adv_ss in ble.start_scan(*ss_rx_ad_classes,
                                  ## minimum_rssi=-127,
@@ -659,6 +800,8 @@ def addr_to_text(mac_addr, big_endian=False, sep=""):
                      for b in (mac_addr if big_endian else reversed(mac_addr))])
 
 
+
+
 ### Make a list of all the player's (name, mac address as text)
 ### with this player as first entry
 players = []
@@ -668,12 +811,17 @@ add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 ### Join Game
 ### TODO - could have a callback to check for player terminate, i.e. 
 ###        could allow player to press button to say "i have got everyone"
+
+
+wav = WaveFile(audio_files["searching"])
+audio_out.play(wav, loop=True)
 jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
                                                                     max_time=MAX_SEND_TIME_S,
                                                                     scan_response_request=True,
                                                                     endscan_cb=lambda _a, _b, _c: button_left(),
                                                                     name_cb=add_player)
+audio_out.stop()
 
 num_other_players = len(players) - 1
 d_print(2, "PLAYER ADS", other_player_ads_by_addr)
@@ -706,6 +854,9 @@ while True:
             setCursor(my_choice_idx)
 
     if button_right():
+        if debug >= 2:
+            d_print(2, "NO collect mem_free ", gc.mem_free())
+
         ### TODO - beep to indicate to other players we have chosen
         my_choice = choices[my_choice_idx]
         player_choices = [my_choice]
@@ -747,15 +898,15 @@ while True:
         ### The round end message is really about acknowledging receipt of the key
         ### by sending a message that holds non-critical information
         ### TODO - this one should only send for a few second, JoinGame should send for loads
-        _, re_by_addr = broadcastAndReceive(re_msg,
-                                            RpsEncDataAdvertisement,
-                                            RpsKeyDataAdvertisement,
-                                            RpsRoundEndAdvertisement,
-                                            max_time=1,
-                                            receive_n=num_other_players,
-                                            seq_tx=seq_tx,
-                                            seq_rx_by_addr=seq_rx_by_addr,
-                                            ads_by_addr=key_data_by_addr)
+        _, re_by_addr, _ = broadcastAndReceive(re_msg,
+                                               RpsEncDataAdvertisement,
+                                               RpsKeyDataAdvertisement,
+                                               RpsRoundEndAdvertisement,
+                                               max_time=1,
+                                               receive_n=num_other_players,
+                                               seq_tx=seq_tx,
+                                               seq_rx_by_addr=seq_rx_by_addr,
+                                               ads_by_addr=key_data_by_addr)
 
         ### This will have accumulated all the messages for this round
         ##allmsg_by_addr = key_data_by_addr
