@@ -25,6 +25,9 @@ import struct
 from adafruit_ble.advertising import Advertisement, LazyObjectField
 from adafruit_ble.advertising.standard import ManufacturerData, ManufacturerDataField
 
+### TODO - this is flawed because of the absence of version numbers to identify the
+###        protocol / message type / type of crypto used
+
 ### These are in adafruit_ble.advertising but are private :(
 MANUFACTURING_DATA_ADT = const(0xFF)
 ADAFRUIT_COMPANY_ID = const(0x0822)
@@ -73,10 +76,7 @@ class RpsEncDataAdvertisement(Advertisement):
     flags = None
 
     _PREFIX_FMT = "<B" "BHBH"
-    ## _SEQ_FMT = "B"
     _DATA_FMT_ENC_DATA = "8s"
-
-    ## _DATA_FMT = "s"  ### this only transfers one byte!
 
     ### prefix appears to be used to determine whether an incoming
     ### packet matches this class
@@ -136,9 +136,7 @@ class RpsKeyDataAdvertisement(Advertisement):
     flags = None
 
     _PREFIX_FMT = "<B" "BHBH"
-    ## _SEQ_FMT = "B"
     _DATA_FMT_KEY_DATA = "8s"
-    ## _DATA_FMT = "s"  ### this only transfers one byte!
 
     ### prefix appears to be used to determine whether an incoming
     ### packet matches this class
@@ -149,9 +147,7 @@ class RpsKeyDataAdvertisement(Advertisement):
         struct.calcsize(_PREFIX_FMT) - 1,
         MANUFACTURING_DATA_ADT,
         ADAFRUIT_COMPANY_ID,
-        ##struct.calcsize("<H" + _SEQ_FMT + _DATA_FMT),
         struct.calcsize("<H" + _DATA_FMT_KEY_DATA),
-        ##struct.calcsize("<H"),
         RPS_KEY_DATA_ID
     )
     manufacturer_data = LazyObjectField(
@@ -192,9 +188,7 @@ class RpsRoundEndAdvertisement(Advertisement):
     flags = None
 
     _PREFIX_FMT = "<B" "BHBH"
-    ## _SEQ_FMT = "B"
     _DATA_FMT_KEY_DATA = "8s"
-    ## _DATA_FMT = "s"  ### this only transfers one byte!
 
     ### prefix appears to be used to determine whether an incoming
     ### packet matches this class
@@ -205,9 +199,7 @@ class RpsRoundEndAdvertisement(Advertisement):
         struct.calcsize(_PREFIX_FMT) - 1,
         MANUFACTURING_DATA_ADT,
         ADAFRUIT_COMPANY_ID,
-        ##struct.calcsize("<H" + _SEQ_FMT + _DATA_FMT),
         struct.calcsize("<H" + _DATA_FMT_KEY_DATA),
-        ##struct.calcsize("<H"),
         RPS_ROUND_ID
     )
     manufacturer_data = LazyObjectField(
@@ -244,9 +236,7 @@ class JoinGameAdvertisement(Advertisement):
     flags = None
 
     _PREFIX_FMT = "<B" "BHBH"
-    ## _SEQ_FMT = "B"
     _DATA_FMT = "8s"  ### this NUL pads for 8s if necessary
-    ## _DATA_FMT = "s"  ### this only transfers one byte!
 
     ### prefix appears to be used to determine whether an incoming
     ### packet matches this class
@@ -277,4 +267,3 @@ class JoinGameAdvertisement(Advertisement):
         super().__init__()
         if game is not None:
             self.game = game
-
