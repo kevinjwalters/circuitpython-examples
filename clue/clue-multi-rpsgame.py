@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.16
+### clue-multi-rpsgame v0.17
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -64,6 +64,8 @@ import adafruit_ble.advertising.standard  ### for encode_data and decode_data
 ### simple version still needs win indicator (flash text?) and a score counter
 
 ### TODO - deal with crypto flaw - maybe use XXTEA?
+
+### TODO - bit of backlight fade down up between screens?
 
 ### TODO - left button to terminate scanning works on all but the penultimate device!!
 
@@ -171,8 +173,11 @@ if clue_less:
     if tftGizmoPresent():
         from adafruit_gizmo import tft_gizmo
         display = tft_gizmo.TFT_Gizmo()
+        JG_RX_COL = 0x0000ff
     else:
         display = None
+        JG_RX_COL = 0x000030  ### dimmer blue for upward facing CPB NeoPixels
+
     audio_out = AudioOut(board.SPEAKER)
     pixels = cp.pixels
 
@@ -205,6 +210,7 @@ else:
     display = board.DISPLAY
     audio_out = AudioOut(board.SPEAKER)
     pixels = clue.pixel
+    JG_RX_COL = 0x0000ff
 
     ### Inputs
     ##_button_a = digitalio.DigitalInOut(board.BUTTON_A)
@@ -253,16 +259,14 @@ def readyAudioSamples():
         wav_file = None
         try:
             wav_file = open(AUDIO_DIR + "/" + file + ".wav", "rb")
-        except OSError as oe:  ### OSError: [Errno 2] No such file/directory: 'filename.ext'
+        except OSError as oe:
+            ### OSError: [Errno 2] No such file/directory: 'filename.ext'
             pass
         fhs[file] = wav_file
     return fhs
 
 ### Check and open up audio wav samples
 audio_files = readyAudioSamples()
-
-choices = ("rock", "paper", "scissors")
-my_choice_idx = 0
 
 ### Top y position of first choice and pixel separate between choices
 top_y_pos = 60
@@ -275,8 +279,23 @@ IWELCOME_COL_FG = 0x000020
 WELCOME_COL_FG = 0x0000f0
 BWHITE_COL_FG = 0xffffff
 
+BLUE=0x0000ff
+BLACK=0x000000
+
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
+
+CHOICES = ("rock", "paper", "scissors")
+### Colours for NeoPixels on display-less CPB
+### Should be dim to avoid an opponent seeing choice from reflected light
+CHOICE_COL = (0x140000,  ### red for rock
+              0x0c000c,  ### purple for paper
+              0x000014   ### sapphire blue for scissors
+             )
+my_choice_idx = 0
+
+### Set to True for blue flashing when devices are annoucing players' names
+JG_FLASH = True  ### TODO DISABLE THIS FOR THE ADAFRUIT RELEASE
 
 if display is not None:
     ### The 6x14 terminalio classic font
@@ -285,17 +304,35 @@ if display is not None:
     DISPLAY_HEIGHT = display.height
 
 
+### TODO - probably no longer used...
 def setCursor(idx):
     """Set the position of the cursor on-screen to indicate the player's selection."""
     global cursor_dob
 
-    if 0 <= idx < len(choices):
+    if 0 <= idx < len(CHOICES):
         cursor_dob.y = top_y_pos + choice_sep * idx
 
 
-def introduction():
+def showChoice(ch_idx, disp, pix):
+    """TODO DOC"""
+    if disp is None:
+        pix.fill(BLACK)
+        pix[ch_idx] = CHOICE_COL[ch_idx]
+    else:
+        choice_group = Group(max_size=1)
+
+        s_group = Group(scale=3, max_size=1)
+        s_group.x = 32
+        s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2 
+       
+        s_group.append(sprites[ch_idx])
+        choice_group.append(s_group)
+        disp.show(choice_group)
+
+
+def introduction(disp, pix):
     """Introduction screen."""
-    if display is not None:
+    if disp is not None:
         intro_group = Group(max_size=5)
         welcometo_dob = Label(terminalio.FONT,
                               text="Welcome To",
@@ -322,41 +359,54 @@ def introduction():
         arena_dob.y = DISPLAY_HEIGHT - 3 * FONT_HEIGHT // 2
         intro_group.append(arena_dob)
 
-        display.show(intro_group)
+        disp.show(intro_group)
 
     ### The color modification here is fragile as it only works
     ### if the text colour is blue, i.e. data is in lsb only
     audio_out.play(WaveFile(audio_files["welcome-to"]))
     while audio_out.playing:
-        if display is not None and intro_group[0].color < WELCOME_COL_FG:
+        if disp is not None and intro_group[0].color < WELCOME_COL_FG:
             intro_group[0].color += 0x10
             time.sleep(0.120)
 
     onscreen_x_pos = 96
+    ### Rock
+    if disp is None:
+        showChoice(0, disp, pix)
     audio_out.play(WaveFile(audio_files["rock"]))
     while audio_out.playing:
-        if display is not None:
+        if disp is not None:
             if intro_group[1].x < onscreen_x_pos:
                 intro_group[1].x += 10
                 time.sleep(0.050)
 
+    ### Paper
+    if disp is None:
+        showChoice(1, disp, pix)
     audio_out.play(WaveFile(audio_files["paper"]))
     while audio_out.playing:
-        if display is not None:
+        if disp is not None:
             if intro_group[2].x < onscreen_x_pos:
                 intro_group[2].x += 11
                 time.sleep(0.050) 
 
+    ### Scissors
     audio_out.play(WaveFile(audio_files["scissors"]))
+    if disp is None:
+        showChoice(2, disp, pix)
     while audio_out.playing:
-        if display is not None:
+        if disp is not None:
             if intro_group[3].x < onscreen_x_pos:
                 intro_group[3].x += 7
                 time.sleep(0.050)
+    
+    ### Set NeoPixels back to black
+    if disp is None:
+        pix.fill(BLACK)
 
     audio_out.play(WaveFile(audio_files["arena"]))
     while audio_out.playing:
-        if display is not None and intro_group[4].color < WELCOME_COL_FG:
+        if disp is not None and intro_group[4].color < WELCOME_COL_FG:
             intro_group[4].color += 0x10
             time.sleep(0.060)
 
@@ -368,15 +418,15 @@ def introduction():
     
 
 ### Intro screen with audio
-introduction()
+introduction(display, pixels)
 
 
 if display is not None:
-    gameround_group = Group(max_size=len(choices) * 2 + 1)
+    gameround_group = Group(max_size=len(CHOICES) * 2 + 1)
 
     for x_pos in (20, display.width // 2 + 20):
         y_pos = top_y_pos
-        for label_text in choices:
+        for label_text in CHOICES:
             rps_dob = Label(terminalio.FONT,
                             text=label_text,
                             scale=2,
@@ -386,14 +436,14 @@ if display is not None:
             y_pos += 60
             gameround_group.append(rps_dob)
 
-    cursor_dob = Label(terminalio.FONT,
-                       text=">",
-                       scale=3,
-                       color=CURSOR_COL_FG)
-    cursor_dob.x = 0
-    setCursor(my_choice_idx)
-    cursor_dob.y = top_y_pos
-    gameround_group.append(cursor_dob)
+    ## cursor_dob = Label(terminalio.FONT,
+    ##                   text=">",
+    ##                   scale=3,
+    ##                   color=CURSOR_COL_FG)
+    ##cursor_dob.x = 0
+    ## setCursor(my_choice_idx)
+    ##cursor_dob.y = top_y_pos
+    ##gameround_group.append(cursor_dob)
     ##display.show(gameround_group)
 
 
@@ -498,6 +548,7 @@ def broadcastAndReceive(send_ad,
                         seq_rx_by_addr=None,
                         match_locally=True,
                         scan_response_request=False,
+                        ad_cb=None,
                         ads_by_addr={},
                         names_by_addr={},
                         name_cb=None,
@@ -607,6 +658,9 @@ def broadcastAndReceive(send_ad,
                 if name_cb is not None:
                     name_cb(name, addr_text, adv_ss.address, adv_ss)
 
+        ### If using application Advertisement type matching then
+        ### check the Advertisement's prefix and continue for loop if it
+        ### does not match
         if match_locally:
             d_print(5, "RXed RTA", addr_text, repr(adv_ss))
             adv_ss_as_bytes = adafruit_ble.advertising.standard.encode_data(adv_ss.data_dict)
@@ -629,6 +683,10 @@ def broadcastAndReceive(send_ad,
         else:
             adv = adv_ss
             d_print(4, "RXed RTA", addr_text, adv)
+
+        ### Must be a match if this is reached
+        if ad_cb is not None:
+            ad_cb(addr_text, adv.address, adv)
 
         ### Look for an ack and add it if not already there
         if hasattr(adv, "ack") and isinstance(adv.ack, int):
@@ -800,6 +858,20 @@ def addr_to_text(mac_addr, big_endian=False, sep=""):
                      for b in (mac_addr if big_endian else reversed(mac_addr))])
 
 
+def flashNP(pix, col):
+    """A very brief flash of the NeoPixels."""
+    pix.fill(col)
+    pix.fill(BLACK)
+
+
+
+
+def showPlayerVPlayer():
+    pass
+
+
+def showGameResult():
+    pass
 
 
 ### Make a list of all the player's (name, mac address as text)
@@ -819,6 +891,7 @@ jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
                                                                     max_time=MAX_SEND_TIME_S,
                                                                     scan_response_request=True,
+                                                                    ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
                                                                     endscan_cb=lambda _a, _b, _c: button_left(),
                                                                     name_cb=add_player)
 audio_out.stop()
@@ -830,6 +903,8 @@ d_print(1, "PLAYERS", players)
 ### Sequence numbers - real packets start at 1
 seq_tx = [1]  ### The next number to send
 seq_rx_by_addr = {pma: 0 for pn, pma in players[1:]}  ### Per address received all up to
+
+showChoice(my_choice_idx, display, pixels)
 
 ### Advertise for 20 seconds maximum and if a packet is received
 ### for 5 seconds after that
@@ -849,16 +924,15 @@ while True:
     if button_left():
         while button_left():
             pass
-        my_choice_idx = (my_choice_idx + 1) % len(choices)
-        if display is not None:
-            setCursor(my_choice_idx)
+        my_choice_idx = (my_choice_idx + 1) % len(CHOICES)
+        showChoice(my_choice_idx)
 
     if button_right():
         if debug >= 2:
             d_print(2, "NO collect mem_free ", gc.mem_free())
 
         ### TODO - beep to indicate to other players we have chosen
-        my_choice = choices[my_choice_idx]
+        my_choice = CHOICES[my_choice_idx]
         player_choices = [my_choice]
 
         otpad_key = generateOTPadKey(8)
@@ -946,9 +1020,10 @@ while True:
 
         ### Chalk up wins and losses
         for p_idx1, playernm in enumerate(players[1:], 1):
-            player_name, player_macaddr = playernm
+            opponent_name, opponent_macaddr = playernm
             (win, draw, void) = evaluateGame(my_choice, player_choices[p_idx1])
-            d_print(1, "player", player_name, "choice", player_choices[p_idx1],
+            d_print(1, players[0][0], player_choices[0], "vs",
+                    player_name, player_choices[p_idx1],
                     "win", win, "draw", draw, "void", void)
             if void:
                 voids += 1
