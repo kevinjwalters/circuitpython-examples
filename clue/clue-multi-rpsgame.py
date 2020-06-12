@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.17
+### clue-multi-rpsgame v0.18
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -55,15 +55,12 @@ from rps_advertisements import JoinGameAdvertisement, \
 from adafruit_ble.advertising import Advertisement  ### ONLY NEEDED FOR DEBUGGING
 import adafruit_ble.advertising.standard  ### for encode_data and decode_data
 
-### BUGS
-### The protocol is flawed, after receiving packets from other players it stops
-### transmitting its own data but this may not have been received
 
 ### TODO
 ### Maybe simple version is clue only
 ### simple version still needs win indicator (flash text?) and a score counter
 
-### TODO - deal with crypto flaw - maybe use XXTEA?
+### TODO - deal with crypto flaw - maybe use XXTEA or ChaCha?
 
 ### TODO - bit of backlight fade down up between screens?
 
@@ -82,17 +79,17 @@ import adafruit_ble.advertising.standard  ### for encode_data and decode_data
 ### need higher level round numbers to detect out of synch
 ### need to work out who is who with N player games
 ### probably not deal with players who join midway?
-### need to allocate player numbers - could sort by MAC
+### need to allocate player numbers - could sort by MAC - ACTUALLY this is not needed?!
 ### avoid election algorithms even if tempted
-### got to decide whether to do the littany of crypto mistakes or not
+### got to decide whether to do the littany of crypto mistakes or not - ALREADY HAVE ONE!
 ### could do own crypto
-### could include the lack of protocol and future proofing and cite
+### could include the lack of protocol versioning and future proofing and cite
 ### LDAP as good example and git perhaps as less good
 ### complex format not compatible with simple format so mixing the two will confuse things
 
-### allow player to set their name - use accelerometer
+### allow player to set their name - use accelerometer? JUST USING optional secrets.py for now 
 
-### How does error detection (checksum) work on the payload?
+### How does error detection (checksum) work on the payload? LOOKS THIS UP
 
 ### Split this into multiple files - could put Advertisement messages in file(s)
 ### Graphics might end up being a big lump of code?
@@ -222,6 +219,8 @@ else:
     button_left = lambda: clue.button_a
     button_right = lambda: clue.button_b
 
+### This will always by the top level group passed to display.show()
+main_display_group = None
 
 IMAGE_DIR = "rps/images"
 AUDIO_DIR = "rps/audio"
@@ -235,7 +234,7 @@ if display is not None:
     SPRITE_SIZE = s_bit.height
     num_sprites = s_bit.width // s_bit.height
     s_pal.make_transparent(0)  ### Make the first colour (black) transparent
-    
+
     sprites = []
     for idx in range(num_sprites):
         sprite = displayio.TileGrid(s_bit, pixel_shader=s_pal,
@@ -304,6 +303,25 @@ if display is not None:
     DISPLAY_HEIGHT = display.height
 
 
+def emptyGroup(dio_group):
+    """Recursive depth first removal of anything in a Group.
+       Intended to be used to clean-up a previous screen
+       which may have elements in the new screen
+       as elements cannot be in two Groups at once since this
+       will cause "ValueError: Layer already in a group".
+       This only deletes Groups, it does not del the non-Group content."""
+    if dio_group is None:
+        return
+
+    ### Go through Group in reverse order
+    for idx in range(len(dio_group) - 1, -1, -1):
+        ### Avoiding isinstance here as Label is a sub-class of Group!
+        if (type(dio_group[idx]) == Group):
+            emptyGroup(dio_group[idx])
+        del dio_group[idx]
+    del dio_group
+
+
 ### TODO - probably no longer used...
 def setCursor(idx):
     """Set the position of the cursor on-screen to indicate the player's selection."""
@@ -315,24 +333,33 @@ def setCursor(idx):
 
 def showChoice(ch_idx, disp, pix):
     """TODO DOC"""
+    global main_display_group
+
     if disp is None:
         pix.fill(BLACK)
         pix[ch_idx] = CHOICE_COL[ch_idx]
     else:
+        emptyGroup(main_display_group)
+        ### Would be slightly better to create this Group once and re-use it
         choice_group = Group(max_size=1)
 
         s_group = Group(scale=3, max_size=1)
         s_group.x = 32
         s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2 
-       
+
         s_group.append(sprites[ch_idx])
         choice_group.append(s_group)
-        disp.show(choice_group)
+
+        main_display_group = choice_group
+        disp.show(main_display_group)
 
 
 def introduction(disp, pix):
     """Introduction screen."""
+    global main_display_group
+
     if disp is not None:
+        emptyGroup(main_display_group)  ### this should already be empty
         intro_group = Group(max_size=5)
         welcometo_dob = Label(terminalio.FONT,
                               text="Welcome To",
@@ -359,7 +386,8 @@ def introduction(disp, pix):
         arena_dob.y = DISPLAY_HEIGHT - 3 * FONT_HEIGHT // 2
         intro_group.append(arena_dob)
 
-        disp.show(intro_group)
+        main_display_group = intro_group
+        disp.show(main_display_group)
 
     ### The color modification here is fragile as it only works
     ### if the text colour is blue, i.e. data is in lsb only
@@ -925,7 +953,7 @@ while True:
         while button_left():
             pass
         my_choice_idx = (my_choice_idx + 1) % len(CHOICES)
-        showChoice(my_choice_idx)
+        showChoice(my_choice_idx, display, pixels)
 
     if button_right():
         if debug >= 2:
