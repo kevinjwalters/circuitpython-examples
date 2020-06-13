@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.19
+### clue-multi-rpsgame v0.20
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -511,8 +511,6 @@ ble = BLERadio()
 if ble_name is not None:
     ble.name = ble_name
 
-opponent_choice = None
-
 msg_seq_last_rx = 255
 msg_seq = 0
 
@@ -603,7 +601,16 @@ def broadcastAndReceive(send_ad,
        This MODIFIES send_ad by setting sequence_number and ack if those
        properties are present."""
 
-    d_print(2, "TXing", send_ad)
+    sequence_number = None
+##    acked = None    ### not used - what was this for?
+    if seq_tx is not None and hasattr(send_ad, "sequence_number"):
+        sequence_number = seq_tx[0]
+        send_ad.sequence_number = sequence_number
+        seq_tx[0] += 1
+
+        ## acked = False   ### not used - what was this for?
+
+
 
     ### Page 126 35.5 recommends an initial 30s of 20ms intervals
     ### https://developer.apple.com/accessories/Accessory-Design-Guidelines.pdf
@@ -611,32 +618,6 @@ def broadcastAndReceive(send_ad,
     ### _bleio.BluetoothError: Unknown soft device error: 0007
     ### 0.037 ok 0.021 ok 0.0201 ok 0.02001 ok - damn FP!!
     ## ble.start_advertising(tx_message, interval=0.02001)
-
-    opponent_choice = None
-    ### TODO review this - using 20ms - maybe less agressive is better with more devices?
-    ### Remember default scanning interval is 100ms and transmit is probably 1 channel
-    ### changing every 5s
-    ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
-    sending_ns = time.monotonic_ns()
-
-    ##print("ssssssssss")
-    ##message.test32bit = "ssssssss"
-    ##ble.start_advertising(message)
-    ##time.sleep(5)
-    ##ble.stop_advertising()
-
-    ### timeout in seconds
-    ### -100 is probably minimum, -128 would be 8bit signed min
-    ### window and interval are 0.1 by default - same value means
-    ### continuous scanning (sending Advertisement will interrupt this)
-
-    sequence_number = None
-    acked = None
-    if seq_tx is not None and hasattr(send_ad, "sequence_number"):
-        sequence_number = seq_tx[0]
-        seq_tx[0] += 1
-        send_ad.sequence_number = sequence_number
-        acked = False
 
     ### A dict to store unique Advertisement indexed by mac address
     ### as text string
@@ -681,11 +662,25 @@ def broadcastAndReceive(send_ad,
     awaiting_allacks = False
     awaiting_allrx = True
 
+    ### timeout in seconds
+    ### -100 is probably minimum, -128 would be 8bit signed min
+    ### window and interval are 0.1 by default - same value means
+    ### continuous scanning (sending Advertisement will interrupt this)
+
+    ### TODO review this - using 20ms - maybe less agressive is better with more devices?
+    ###      could experiment with randomising this per device, remember 0.625ms increments
+    ### TODO experiment with buffer larger than 512 byte default?
+    ### Remember default scanning interval is 100ms and transmit is probably 1 channel
+    ### changing every 5s
+    d_print(2, "TXing", send_ad)
+    ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
+    sending_ns = time.monotonic_ns()
+
     ### TODO - chop up max_time to allow for checking endscan_cb if no Advertisement are received
     ### maybe 500 ms lumps?
     d_print(1, "Listening for", ss_rx_ad_classes)
     for adv_ss in ble.start_scan(*ss_rx_ad_classes,
-                                 ## minimum_rssi=-127,
+                                 minimum_rssi=-120,
                                  active=scan_response_request,
                                  timeout=max_time):
         received_ns = time.monotonic_ns()
@@ -961,7 +956,6 @@ while True:
         losses = 0
         draws = 0 
         voids = 0
-        round = 1
 
     if button_left():
         while button_left():  ### Wait for button release
