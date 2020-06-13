@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.18
+### clue-multi-rpsgame v0.19
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -225,6 +225,14 @@ main_display_group = None
 IMAGE_DIR = "rps/images"
 AUDIO_DIR = "rps/audio"
 
+### Tidy up memory then make one audio buffer for reading files to stop
+### memory allocation per execution of WaveFile which was failing with
+### MemoryError exceptions
+gc.collect()
+### TODO - see if there is a workaround for this serious bug
+### https://github.com/adafruit/circuitpython/issues/3030
+##file_buf = bytearray(2048)
+
 ### Load horizontal sprite sheet if running with a display
 if display is not None:
     import adafruit_imageload
@@ -247,7 +255,7 @@ if display is not None:
 def readyAudioSamples():
     """Open files from AUDIO_DIR and return a dict with FileIO objects
        or None if file not present."""
-    files = (("searching", "welcome-to", "arena")
+    files = (("searching", "welcome-to", "arena", "ready")
               + ("rock", "paper", "scissors")
               + ("rock-scissors", "paper-rock", "scissors-paper")
               + ("you-win", "draw", "you-lose")
@@ -287,10 +295,14 @@ MAX_PLAYERS = 8
 CHOICES = ("rock", "paper", "scissors")
 ### Colours for NeoPixels on display-less CPB
 ### Should be dim to avoid an opponent seeing choice from reflected light
-CHOICE_COL = (0x140000,  ### red for rock
-              0x0c000c,  ### purple for paper
-              0x000014   ### sapphire blue for scissors
+CHOICE_COL = (0x060000,  ### Red for Rock
+              0x040004,  ### Purple for Paper
+              0x000006   ### Sapphire blue for Scissors
              )
+### NeoPixel positions for R, P, S
+CHOICE_POS = (1, 0,  ### The two just left of USB connector
+              9)     ### The one just right
+              
 my_choice_idx = 0
 
 ### Set to True for blue flashing when devices are annoucing players' names
@@ -337,7 +349,7 @@ def showChoice(ch_idx, disp, pix):
 
     if disp is None:
         pix.fill(BLACK)
-        pix[ch_idx] = CHOICE_COL[ch_idx]
+        pix[CHOICE_POS[ch_idx]] = CHOICE_COL[ch_idx]
     else:
         emptyGroup(main_display_group)
         ### Would be slightly better to create this Group once and re-use it
@@ -651,18 +663,22 @@ def broadcastAndReceive(send_ad,
             rxs[addr_text] = True
 
         ### Pick out any Advertisements with an ack field with a value
-        acks_thisaddr = filter(lambda adnb: hasattr(adnb[0], "ack")
-                                            and isinstance(adnb[0].ack, int),
-                               adsnb_per_addr)
+        acks_thisaddr = list(filter(lambda adnb: hasattr(adnb[0], "ack")
+                                                 and isinstance(adnb[0].ack, int),
+                                    adsnb_per_addr))
+        ### list() must have been run on acks_thisaddr to expand iterator
         if acks_thisaddr:
             seqs = [adnb[0].ack for adnb in acks_thisaddr]
             acks[addr_text] = seqs
-            d_print(5, "Already have ack for", cls_send_ad,
-                    "from", addr_text, "of", seqs, "in", acks_thisaddr)
+            d_print(5, "Acks received for", addr_text,
+                    "of", seqs, "in", acks_thisaddr)
 
     ### Determine whether there is a second phase of sending acks
     enable_ack = hasattr(send_ad, "ack")
-    awaiting_allacks = False      
+    ### Set an initial ack for anything previously received
+    if enable_ack and acks:
+        send_ad.ack = max(max(li) for li in acks.values())
+    awaiting_allacks = False
     awaiting_allrx = True
 
     ### TODO - chop up max_time to allow for checking endscan_cb if no Advertisement are received
@@ -716,9 +732,9 @@ def broadcastAndReceive(send_ad,
         if ad_cb is not None:
             ad_cb(addr_text, adv.address, adv)
 
-        ### Look for an ack and add it if not already there
+        ### Look for an ack and record it in acks if not already there
         if hasattr(adv, "ack") and isinstance(adv.ack, int):
-            d_print(4, "Found ackall")
+            d_print(4, "Found ack")
             if addr_text not in acks:
                 acks[addr_text] = [adv.ack]
             elif adv.ack not in acks[addr_text]:
@@ -729,7 +745,7 @@ def broadcastAndReceive(send_ad,
             for existing_ad in received_ads_by_addr[addr_text]:
                 if this_ad_b == existing_ad[1]:
                     break  ### already present
-            else:  ### Python's unusual for/else 
+            else:  ### Python's unusual for/break/else 
                 received_ads_by_addr[addr_text].append((adv, bytes(adv)))
                 if isinstance(adv, cls_send_ad):
                     rxs[addr_text] = True
@@ -748,7 +764,7 @@ def broadcastAndReceive(send_ad,
                     ble.stop_advertising()
                     send_ad.ack = sequence_number
                     ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
-                    d_print(4, "TXing with ack for all", send_ad,
+                    d_print(3, "TXing with ack", send_ad,
                             "ack_count", len(acks))
                 else:
                     break  ### packets received but not sending ack nor waiting for acks
@@ -759,7 +775,7 @@ def broadcastAndReceive(send_ad,
                     if max_ack(acks_for_addr) >= sequence_number:
                         ack_count += 1
                 if ack_count == receive_n:
-                    break  ### all acks received, can stop now
+                    break  ### all acks received, can stop transmitting now
 
         if endscan_cb is not None:
             if endscan_cb(addr_text, adv_ss.address, adv_ss):
@@ -811,7 +827,7 @@ def str_unpad(text_as_bytes, pad=0):
         end_ex = len(text_as_bytes)
         while end_ex > 0 and text_as_bytes[end_ex - 1] == pad:
             end_ex -= 1
-    
+
     return text_as_bytes[0:end_ex].decode("utf-8")
 
 
@@ -912,9 +928,7 @@ add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 ### TODO - could have a callback to check for player terminate, i.e. 
 ###        could allow player to press button to say "i have got everyone"
 
-
-wav = WaveFile(audio_files["searching"])
-audio_out.play(wav, loop=True)
+audio_out.play(WaveFile(audio_files["searching"]), loop=True)
 jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
                                                                     max_time=MAX_SEND_TIME_S,
@@ -950,7 +964,7 @@ while True:
         round = 1
 
     if button_left():
-        while button_left():
+        while button_left():  ### Wait for button release
             pass
         my_choice_idx = (my_choice_idx + 1) % len(CHOICES)
         showChoice(my_choice_idx, display, pixels)
@@ -959,17 +973,28 @@ while True:
         if debug >= 2:
             d_print(2, "NO collect mem_free ", gc.mem_free())
 
-        ### TODO - beep to indicate to other players we have chosen
+        ### TODO - this keeps blowing up with 2k allocation on CLUE despite there being 15-20k free - fragmentation??
+        ###        could stop importing clue and DIY?  Would 16bit samples help?
+        ### This sound cue is really for other players
+        ### TODO file_buf should help massively here but waiting for further analysis on
+        ### https://github.com/adafruit/circuitpython/issues/3030
+        ### audio_out.play(WaveFile(audio_files["ready"]))   ### disable until file_buf ok
+        
         my_choice = CHOICES[my_choice_idx]
         player_choices = [my_choice]
 
-        otpad_key = generateOTPadKey(8)
+        otpad_key = generateOTPadKey(8)  ### TODO - replace with something
         d_print(3, "KEY", otpad_key)  ### TODO - discuss in the Code Discussion
 
         plain_bytes = bytes_pad(my_choice, size=8, pad=0)
         cipher_bytes = encrypt(plain_bytes, otpad_key, "xor")
         enc_data_msg = RpsEncDataAdvertisement(enc_data=cipher_bytes,
                                                round=round)
+        
+        ### Wait for sound sample to stop playing
+        while audio_out.playing:
+            pass
+        audio_out.stop()
         ### Players will not be synchronised at this point as they do not
         ### have to make their choices simultaneously
         _, enc_data_by_addr, _ = broadcastAndReceive(enc_data_msg,
@@ -992,10 +1017,8 @@ while True:
                                                      seq_rx_by_addr=seq_rx_by_addr,
                                                      ads_by_addr=enc_data_by_addr)
 
-        ### TODO maybe this could be used with a minimum tx time of 1s
-        ### to just tidy up acks
-
-        ### With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
+        ### TODO tidy up comments here on the purpose of RoundEnd
+        ### ???? With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
         re_msg = RpsRoundEndAdvertisement(round=round)
         ### The round end message is really about acknowledging receipt of the key
         ### by sending a message that holds non-critical information
@@ -1017,13 +1040,13 @@ while True:
         ### Decrypt results
         ### - if any data is incorrect the opponent_choice is left as None
         for p_idx1, playernm in enumerate(players[1:], 1):
-            player_name, player_macaddr = playernm
+            opponent_name, opponent_macaddr = playernm
             opponent_choice = None
             try:
                 cipher_ads = list(filter(lambda ad: isinstance(ad[0], RpsEncDataAdvertisement),
-                                  allmsg_by_addr[player_macaddr]))
+                                  allmsg_by_addr[opponent_macaddr]))
                 key_ads = list(filter(lambda ad: isinstance(ad[0], RpsKeyDataAdvertisement),
-                               allmsg_by_addr[player_macaddr]))
+                               allmsg_by_addr[opponent_macaddr]))
                 ### Two packets per class will be the packet and then packet
                 ### with ackall set is received
                 ### One packet will be the first packets lost but the second
@@ -1038,7 +1061,7 @@ while True:
                         opponent_choice = str_unpad(plain_bytes)
                     else:
                         print("Received wrong round for {:d} {:d}: {:d} {:d}",
-                              player_name, round, round_msg1, round_msg2)
+                              opponent_name, round, round_msg1, round_msg2)
                 else:
                     print("Wrong number of RpsEncDataAdvertisement "
                           "{:d} and RpsKeyDataAdvertisement {:d}".format(len(cipher_ads), len(key_ads)))
@@ -1051,7 +1074,7 @@ while True:
             opponent_name, opponent_macaddr = playernm
             (win, draw, void) = evaluateGame(my_choice, player_choices[p_idx1])
             d_print(1, players[0][0], player_choices[0], "vs",
-                    player_name, player_choices[p_idx1],
+                    opponent_name, player_choices[p_idx1],
                     "win", win, "draw", draw, "void", void)
             if void:
                 voids += 1
