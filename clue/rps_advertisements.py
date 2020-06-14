@@ -188,7 +188,6 @@ class RpsRoundEndAdvertisement(Advertisement):
     flags = None
 
     _PREFIX_FMT = "<B" "BHBH"
-    _DATA_FMT_KEY_DATA = "8s"
 
     ### prefix appears to be used to determine whether an incoming
     ### packet matches this class
@@ -199,7 +198,7 @@ class RpsRoundEndAdvertisement(Advertisement):
         struct.calcsize(_PREFIX_FMT) - 1,
         MANUFACTURING_DATA_ADT,
         ADAFRUIT_COMPANY_ID,
-        struct.calcsize("<H" + _DATA_FMT_KEY_DATA),
+        struct.calcsize("<H" + _DATA_FMT_ROUND),
         RPS_ROUND_ID
     )
     manufacturer_data = LazyObjectField(
