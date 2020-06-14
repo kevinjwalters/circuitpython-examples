@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.20
+### clue-multi-rpsgame v0.21
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -295,13 +295,13 @@ MAX_PLAYERS = 8
 CHOICES = ("rock", "paper", "scissors")
 ### Colours for NeoPixels on display-less CPB
 ### Should be dim to avoid an opponent seeing choice from reflected light
-CHOICE_COL = (0x060000,  ### Red for Rock
-              0x040004,  ### Purple for Paper
-              0x000006   ### Sapphire blue for Scissors
+CHOICE_COL = (0x040000,  ### Red for Rock
+              0x030004,  ### Purple for Paper
+              0x000004   ### Sapphire blue for Scissors
              )
-### NeoPixel positions for R, P, S
-CHOICE_POS = (1, 0,  ### The two just left of USB connector
-              9)     ### The one just right
+### NeoPixel positions for R, P, S - avoid 2 as it's under finger
+CHOICE_POS = (0,     ### The one just left of USB connector
+              9, 8)  ### The two just right of it
               
 my_choice_idx = 0
 
@@ -498,7 +498,7 @@ def d_print(level, *args, **kwargs):
 NS_IN_S = 1000 * 1000  * 1000
 MIN_SEND_TIME_NS = 6 * NS_IN_S
 MAX_SEND_TIME_S = 20
-REG_SEND_TIME_S = 4
+NORM_SEND_TIME_S = 4
 MAX_SEND_TIME_NS = MAX_SEND_TIME_S * NS_IN_S
 
 ### 20ms is the minimum delay between advertising packets
@@ -580,7 +580,7 @@ def max_ack(acklist):
 def broadcastAndReceive(send_ad,
                         *receive_ads_types,
                         min_time=0,
-                        max_time=REG_SEND_TIME_S,
+                        max_time=NORM_SEND_TIME_S,
                         receive_n=0,
                         seq_tx=None,
                         seq_rx_by_addr=None,
@@ -636,12 +636,12 @@ def broadcastAndReceive(send_ad,
     blenames_by_addr = dict(names_by_addr)  ### Will not be a deep copy
 
     ### Look for packets already received of the cls_send_ad class (type)
-    ### Check for the maximum sequence number ackd across all packets
-    rxs = {}
+    send_ad_rxs = {}
+    ### And make a list of sequence numbers already acknowledged
     acks = {}
     for addr_text, adsnb_per_addr in received_ads_by_addr.items():
         if cls_send_ad in [type(andb[0]) for andb in adsnb_per_addr]:
-            rxs[addr_text] = True
+            send_ad_rxs[addr_text] = True
 
         ### Pick out any Advertisements with an ack field with a value
         acks_thisaddr = list(filter(lambda adnb: hasattr(adnb[0], "ack")
@@ -674,11 +674,12 @@ def broadcastAndReceive(send_ad,
     ### changing every 5s
     d_print(2, "TXing", send_ad)
     ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
-    sending_ns = time.monotonic_ns()
+    start_send_ns = time.monotonic_ns()
 
     ### TODO - chop up max_time to allow for checking endscan_cb if no Advertisement are received
     ### maybe 500 ms lumps?
     d_print(1, "Listening for", ss_rx_ad_classes)
+    matching_ads = 0
     for adv_ss in ble.start_scan(*ss_rx_ad_classes,
                                  minimum_rssi=-120,
                                  active=scan_response_request,
@@ -724,6 +725,7 @@ def broadcastAndReceive(send_ad,
             d_print(4, "RXed RTA", addr_text, adv)
 
         ### Must be a match if this is reached
+        matching_ads += 1
         if ad_cb is not None:
             ad_cb(addr_text, adv.address, adv)
 
@@ -743,20 +745,21 @@ def broadcastAndReceive(send_ad,
             else:  ### Python's unusual for/break/else 
                 received_ads_by_addr[addr_text].append((adv, bytes(adv)))
                 if isinstance(adv, cls_send_ad):
-                    rxs[addr_text] = True
+                    send_ad_rxs[addr_text] = True
         else:
             received_ads_by_addr[addr_text] = [(adv, bytes(adv))]
             if isinstance(adv, cls_send_ad):
-                rxs[addr_text] = True
+                send_ad_rxs[addr_text] = True
 
-        d_print(5, "rxs", len(rxs), "ack", len(acks))
+        d_print(5, "send_ad_rxs", len(send_ad_rxs), "ack", len(acks))
 
         if awaiting_allrx:
-            if receive_n > 0 and len(rxs) == receive_n:
+            if receive_n > 0 and len(send_ad_rxs) == receive_n:
                 if enable_ack and sequence_number is not None:
                     awaiting_allrx = False
                     awaiting_allacks = True
                     ble.stop_advertising()
+                    d_print(4, "old ack", send_ad.ack, "new ack", sequence_number)
                     send_ad.ack = sequence_number
                     ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
                     d_print(3, "TXing with ack", send_ad,
@@ -777,6 +780,7 @@ def broadcastAndReceive(send_ad,
                 break
 
     ble.stop_scan()
+    d_print(2, "Matched ads", matching_ads)
 
     ### Ensure we send our message for a minimum period of time
     ### constrained by the ultimate duration cap
@@ -795,7 +799,9 @@ def broadcastAndReceive(send_ad,
         timeout = True
 
     ble.stop_advertising()
-
+    end_send_ns = time.monotonic_ns()
+    d_print(4, "TX time", (end_send_ns - start_send_ns) / 1e9)
+    
     ### Make a single list of all the received adverts from the dict
     received_ads = []
     for ads in received_ads_by_addr.values():
@@ -994,7 +1000,7 @@ while True:
         _, enc_data_by_addr, _ = broadcastAndReceive(enc_data_msg,
                                                      RpsEncDataAdvertisement,
                                                      RpsKeyDataAdvertisement,
-                                                     max_time=REG_SEND_TIME_S*2,
+                                                     max_time=NORM_SEND_TIME_S*2,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr)
@@ -1005,7 +1011,7 @@ while True:
                                                      RpsEncDataAdvertisement,
                                                      RpsKeyDataAdvertisement,
                                                      RpsRoundEndAdvertisement,
-                                                     max_time=REG_SEND_TIME_S,
+                                                     max_time=NORM_SEND_TIME_S,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr,
@@ -1044,7 +1050,7 @@ while True:
                 ### Two packets per class will be the packet and then packet
                 ### with ackall set is received
                 ### One packet will be the first packets lost but the second
-                ### received with ackall
+                ### received with ack
                 if len(cipher_ads) in (1, 2) and len(key_ads) in (1, 2):
                     cipher_bytes = cipher_ads[0][0].enc_data
                     round_msg1 = cipher_ads[0][0].round
@@ -1057,7 +1063,7 @@ while True:
                         print("Received wrong round for {:d} {:d}: {:d} {:d}",
                               opponent_name, round, round_msg1, round_msg2)
                 else:
-                    print("Wrong number of RpsEncDataAdvertisement "
+                    print("Missing packets: Summary: RpsEncDataAdvertisement"
                           "{:d} and RpsKeyDataAdvertisement {:d}".format(len(cipher_ads), len(key_ads)))
             except KeyError:
                 pass
@@ -1079,8 +1085,9 @@ while True:
             else:
                 losses += 1
             d_print(1, "wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
-            round += 1
+        round += 1
 
+### Not currently reached!
 print("wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
 
 ### Do something on screen or NeoPixels
