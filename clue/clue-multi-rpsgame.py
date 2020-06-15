@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.21
+### clue-multi-rpsgame v0.22
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -505,6 +505,8 @@ MAX_SEND_TIME_NS = MAX_SEND_TIME_S * NS_IN_S
 ### in Bluetooth Low Energy
 ### extra 10us deals with API floating point rounding issues
 MIN_AD_INTERVAL = 0.02001
+INTERVAL_TICKS = (33, 37, 41, 43, 47)  ### Do not use 32 here due to fp issues
+INTERVAL_TICK_MS = 0.625
 
 ### Enable the Bluetooth LE radio and set player's name (from secrets.py)
 ble = BLERadio()
@@ -610,8 +612,6 @@ def broadcastAndReceive(send_ad,
 
         ## acked = False   ### not used - what was this for?
 
-
-
     ### Page 126 35.5 recommends an initial 30s of 20ms intervals
     ### https://developer.apple.com/accessories/Accessory-Design-Guidelines.pdf
     ### So this low value seems appropriate but interval=0.020 gives this
@@ -672,8 +672,9 @@ def broadcastAndReceive(send_ad,
     ### TODO experiment with buffer larger than 512 byte default?
     ### Remember default scanning interval is 100ms and transmit is probably 1 channel
     ### changing every 5s
-    d_print(2, "TXing", send_ad)
-    ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
+    interval = INTERVAL_TICKS[random.randrange(len(INTERVAL_TICKS))] * INTERVAL_TICK_MS / 1e3
+    d_print(2, "TXing", send_ad, "interval", interval)
+    ble.start_advertising(send_ad, interval=interval)
     start_send_ns = time.monotonic_ns()
 
     ### TODO - chop up max_time to allow for checking endscan_cb if no Advertisement are received
@@ -682,6 +683,7 @@ def broadcastAndReceive(send_ad,
     matching_ads = 0
     for adv_ss in ble.start_scan(*ss_rx_ad_classes,
                                  minimum_rssi=-120,
+                                 buffer_size=1536,   ### default is 512 - JoinGame packet loss experiment
                                  active=scan_response_request,
                                  timeout=max_time):
         received_ns = time.monotonic_ns()
@@ -761,7 +763,7 @@ def broadcastAndReceive(send_ad,
                     ble.stop_advertising()
                     d_print(4, "old ack", send_ad.ack, "new ack", sequence_number)
                     send_ad.ack = sequence_number
-                    ble.start_advertising(send_ad, interval=MIN_AD_INTERVAL)
+                    ble.start_advertising(send_ad, interval=interval)
                     d_print(3, "TXing with ack", send_ad,
                             "ack_count", len(acks))
                 else:
