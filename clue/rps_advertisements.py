@@ -110,17 +110,17 @@ class RpsEncDataAdvertisement(Advertisement):
     """Sequence number of the data. Used in acknowledgements."""
 
     enc_data = ManufacturerDataField(RPS_ENC_DATA_ID, "<" + _DATA_FMT_ENC_DATA)
-    round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    round_no = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
     ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, enc_data=None, round=None, ack=None, sequence_number=None):
+    def __init__(self, *, enc_data=None, round_no=None, ack=None, sequence_number=None):
         """ack must be set to () to send this optional, data-less field."""
         super().__init__()
         if enc_data is not None:
             self.enc_data = enc_data
-        if round is not None:
-            self.round = round
+        if round_no is not None:
+            self.round_no = round_no
         if ack is not None:
             self.ack = ack
         if sequence_number is not None:
@@ -162,17 +162,17 @@ class RpsKeyDataAdvertisement(Advertisement):
     """Sequence number of the data. Used in acknowledgements."""
 
     key_data = ManufacturerDataField(RPS_KEY_DATA_ID, "<" + _DATA_FMT_KEY_DATA)
-    round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    round_no = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
     ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, key_data=None, round=None, ack=None, sequence_number=None):
+    def __init__(self, *, key_data=None, round_no=None, ack=None, sequence_number=None):
         """ack must be set to () to send this optional, data-less field."""
         super().__init__()
         if key_data is not None:
             self.key_data = key_data
-        if round is not None:
-            self.round = round
+        if round_no is not None:
+            self.round_no = round_no
         if ack is not None:
             self.ack = ack
         if sequence_number is not None:
@@ -181,7 +181,7 @@ class RpsKeyDataAdvertisement(Advertisement):
 
 class RpsRoundEndAdvertisement(Advertisement):
     """An RPS (broadcast) message.
-       This informs other players the round is complete.
+       This informs other players the round_no is complete.
        This is not connectable and does not elicit a scan response
        based on defaults in Advertisement parent class. 
        """
@@ -212,15 +212,15 @@ class RpsRoundEndAdvertisement(Advertisement):
     sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
     """Sequence number of the data. Used in acknowledgements."""
 
-    round = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    round_no = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
     ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, round=None, ack=None, sequence_number=None):
+    def __init__(self, *, round_no=None, ack=None, sequence_number=None):
         """ack must be set to () to send this optional, data-less field."""
         super().__init__()
-        if round is not None:
-            self.round = round
+        if round_no is not None:
+            self.round_no = round_no
         if ack is not None:
             self.ack = ack
         if sequence_number is not None:

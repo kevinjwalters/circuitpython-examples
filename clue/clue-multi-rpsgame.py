@@ -279,15 +279,20 @@ audio_files = readyAudioSamples()
 top_y_pos = 60
 choice_sep = 60
 
+BLUE=0x0000ff
+BLACK=0x000000
+
 DIM_TXT_COL_FG = 0x505050
 DEFAULT_TXT_COL_FG = 0xa0a0a0
 CURSOR_COL_FG = 0xc0c000
 IWELCOME_COL_FG = 0x000020
 WELCOME_COL_FG = 0x0000f0
 BWHITE_COL_FG = 0xffffff
-
-BLUE=0x0000ff
-BLACK=0x000000
+PLAYER_NAME_COL_FG = 0xc0c000
+PLAYER_NAME_COL_BG = BLACK
+OPP_NAME_COL_FG = 0x00c0c0
+OPP_NAME_COL_BG = BLACK
+ERROR_COL_FG = 0xff4000
 
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
@@ -517,7 +522,7 @@ msg_seq_last_rx = 255
 msg_seq = 0
 
 timeout = False
-round = 1
+round_no = 1
 wins = 0
 losses = 0
 draws = 0 
@@ -911,14 +916,87 @@ def flashNP(pix, col):
     pix.fill(BLACK)
 
 
-
-
-def showPlayerVPlayer():
-    pass
-
-
 def showGameResult():
     pass
+
+
+def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, draw, void):
+    global main_display_group
+    
+    emptyGroup(main_display_group)
+    if void:
+        ### Put error message on screen
+        error_dob = Label(terminalio.FONT,
+                          text="Communication\nError!",
+                          scale=3,
+                          color=ERROR_COL_FG)
+
+        main_display_group = error_dob
+        disp.show(main_display_group)
+    else:
+        ### Would be slightly better to create this Group once and re-use it
+        pvp_group = Group(max_size=3)
+
+        ### Add player's name and sprite just off left side of screen
+        ### and opponent's just off right
+        player_detail = [(me_name, my_ch_idx, -16 - 3 * SPRITE_SIZE,
+                          PLAYER_NAME_COL_FG, PLAYER_NAME_COL_BG),
+                         (op_name, op_ch_idx, 16 + DISPLAY_WIDTH,
+                          OPP_NAME_COL_FG, OPP_NAME_COL_BG)]
+        pvp_spritentxt = []
+        
+        for (name, spr_idx,
+             start_x,
+             fg, bg) in player_detail:
+            s_group = Group(scale=3, max_size=2)
+            p_name_dob = Label(terminalio.FONT,
+                               text=name,
+                               scale=1,
+                               color=fg,
+                               background_color=bg)
+            p_name_dob.y = 20  ### TODO - work out best way to place and centre this
+            s_group.append(p_name_dob)
+            s_group.x = start_x
+            s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2   ### TODO
+            s_group.append(sprites[spr_idx])
+            pvp_spritentxt.append(s_group)
+            
+        ### The order in Group determines which one is on top
+        for spr in (reversed(pvp_spritentxt) if win else pvp_spritentxt):
+            pvp_group.append(spr)
+
+        result_dob = Label(terminalio.FONT,
+                           text="---.----",
+                           scale=2,
+                           color=BLACK)
+        result_dob.y = 200  ### TODO - work out best way to place and centre this
+        pvp_group.append(result_dob)
+
+        main_display_group = pvp_group
+        disp.show(main_display_group)
+        if draw:
+            ### TODO - Sprite bounce off each other
+            for idx in range(16):
+                pvp_spritentxt[0].x += 5
+                pvp_spritentxt[1].x -= 5
+                time.sleep(0.1)
+        else:
+            ### Move sprites together, winning sprite overlaps loser
+            for idx in range(16):
+                pvp_spritentxt[0].x += 10
+                pvp_spritentxt[1].x -= 10
+                time.sleep(0.1)
+
+
+def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx, win, draw, void):
+    pass
+
+
+def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx, win, draw, void):
+    if disp is None:
+        showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx, win, draw, void)
+    else:
+        showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, draw, void)   
 
 
 ### Make a list of all the player's (name, mac address as text)
@@ -954,12 +1032,12 @@ showChoice(my_choice_idx, display, pixels)
 ### Advertise for 20 seconds maximum and if a packet is received
 ### for 5 seconds after that
 while True:
-    if round > TOTAL_ROUNDS:
+    if round_no > TOTAL_ROUNDS:
         print("Summary: ",
               "wins {:d}, losses {:d}, draws {:d}, void {:d}\n\n".format(wins, losses, draws, voids))
 
         ### Reset variables for another game
-        round = 1
+        round_no = 1
         wins = 0
         losses = 0
         draws = 0 
@@ -981,7 +1059,7 @@ while True:
         ### TODO file_buf should help massively here but waiting for further analysis on
         ### https://github.com/adafruit/circuitpython/issues/3030
         ### audio_out.play(WaveFile(audio_files["ready"]))   ### disable until file_buf ok
-        
+
         my_choice = CHOICES[my_choice_idx]
         player_choices = [my_choice]
 
@@ -991,8 +1069,8 @@ while True:
         plain_bytes = bytes_pad(my_choice, size=8, pad=0)
         cipher_bytes = encrypt(plain_bytes, otpad_key, "xor")
         enc_data_msg = RpsEncDataAdvertisement(enc_data=cipher_bytes,
-                                               round=round)
-        
+                                               round_no=round_no)
+
         ### Wait for sound sample to stop playing
         while audio_out.playing:
             pass
@@ -1007,7 +1085,7 @@ while True:
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr)
 
-        key_data_msg = RpsKeyDataAdvertisement(key_data=otpad_key, round=round)
+        key_data_msg = RpsKeyDataAdvertisement(key_data=otpad_key, round_no=round_no)
         ### All of the programs will be loosely synchronised now
         _, key_data_by_addr, _ = broadcastAndReceive(key_data_msg,
                                                      RpsEncDataAdvertisement,
@@ -1021,7 +1099,7 @@ while True:
 
         ### TODO tidy up comments here on the purpose of RoundEnd
         ### ???? With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
-        re_msg = RpsRoundEndAdvertisement(round=round)
+        re_msg = RpsRoundEndAdvertisement(round_no=round_no)
         ### The round end message is really about acknowledging receipt of the key
         ### by sending a message that holds non-critical information
         ### TODO - this one should only send for a few second, JoinGame should send for loads
@@ -1055,15 +1133,15 @@ while True:
                 ### received with ack
                 if len(cipher_ads) in (1, 2) and len(key_ads) in (1, 2):
                     cipher_bytes = cipher_ads[0][0].enc_data
-                    round_msg1 = cipher_ads[0][0].round
+                    round_msg1 = cipher_ads[0][0].round_no
                     key_bytes = key_ads[0][0].key_data
-                    round_msg2 = key_ads[0][0].round
-                    if round == round_msg1 == round_msg2:
+                    round_msg2 = key_ads[0][0].round_no
+                    if round_no == round_msg1 == round_msg2:
                         plain_bytes = decrypt(cipher_bytes, key_bytes, "xor")
                         opponent_choice = str_unpad(plain_bytes)
                     else:
                         print("Received wrong round for {:d} {:d}: {:d} {:d}",
-                              opponent_name, round, round_msg1, round_msg2)
+                              opponent_name, round_no, round_msg1, round_msg2)
                 else:
                     print("Missing packets: Summary: RpsEncDataAdvertisement"
                           "{:d} and RpsKeyDataAdvertisement {:d}".format(len(cipher_ads), len(key_ads)))
@@ -1075,6 +1153,14 @@ while True:
         for p_idx1, playernm in enumerate(players[1:], 1):
             opponent_name, opponent_macaddr = playernm
             (win, draw, void) = evaluateGame(my_choice, player_choices[p_idx1])
+            try:
+                op_choice_idx = CHOICES.index(player_choices[p_idx1])
+            except ValueError:
+                op_choice_idx = None
+            showPlayerVPlayer(display, pixels,
+                              my_name, opponent_name, p_idx1,
+                              my_choice_idx, op_choice_idx,
+                              win, draw, void)
             d_print(1, players[0][0], player_choices[0], "vs",
                     opponent_name, player_choices[p_idx1],
                     "win", win, "draw", draw, "void", void)
@@ -1086,8 +1172,8 @@ while True:
                 wins += 1
             else:
                 losses += 1
-            d_print(1, "wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
-        round += 1
+        print("Round {:d}: wins {:d}, losses {:d}, draws {:d}, void {:d}".format(round_no, wins, losses, draws, voids))
+        round_no += 1
 
 ### Not currently reached!
 print("wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
