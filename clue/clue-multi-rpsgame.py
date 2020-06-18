@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.23
+### clue-multi-rpsgame v0.24
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -302,11 +302,16 @@ PLAYER_NAME_COL_FG = 0xc0c000
 PLAYER_NAME_COL_BG = BLACK
 OPP_NAME_COL_FG = 0x00c0c0
 OPP_NAME_COL_BG = BLACK
-ERROR_COL_FG = 0xff4000
+ERROR_COL_FG = 0xff0000
+
+RED_COL = 0xff0000
+ORANGE_COL = 0xff8000
+YELLOW_COL = 0xffff00
 
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
 
+### Some code is dependent on these being lower-case
 CHOICES = ("rock", "paper", "scissors")
 ### Colours for NeoPixels on display-less CPB
 ### Should be dim to avoid an opponent seeing choice from reflected light
@@ -317,8 +322,6 @@ CHOICE_COL = (0x040000,  ### Red for Rock
 ### NeoPixel positions for R, P, S - avoid 2 as it's under finger
 CHOICE_POS = (0,     ### The one just left of USB connector
               9, 8)  ### The two just right of it
-              
-my_choice_idx = 0
 
 ### Set to True for blue flashing when devices are annoucing players' names
 JG_FLASH = True  ### TODO DISABLE THIS FOR THE ADAFRUIT RELEASE
@@ -454,7 +457,7 @@ def introduction(disp, pix):
             if intro_group[3].x < onscreen_x_pos:
                 intro_group[3].x += 7
                 time.sleep(0.050)
-    
+
     ### Set NeoPixels back to black
     if disp is None:
         pix.fill(BLACK)
@@ -470,7 +473,7 @@ def introduction(disp, pix):
     ### from the groups to allow them to be reused or fully empty everything.
 
     ### TODO - add text to explain how the game actually works!
-    
+
 
 ### Intro screen with audio
 introduction(display, pixels)
@@ -532,6 +535,7 @@ msg_seq_last_rx = 255
 msg_seq = 0
 
 timeout = False
+game_no = 1
 round_no = 1
 wins = 0
 losses = 0
@@ -541,7 +545,7 @@ voids = 0
 TOTAL_ROUNDS = 5
 
 
-def evaluateGame(mine, yours):
+def evaluateRound(mine, yours):
     """Determine who won the game based on the two strings mine and yours.
        Returns three booleans (win, draw, void)."""
     ### Return with void at True if any input is None
@@ -572,6 +576,23 @@ def evaluateGame(mine, yours):
         void = True
 
     return (win, draw, void)
+
+
+wav_victory_name = { "rp": "paper-rock",
+                     "pr": "paper-rock",
+                     "ps": "scissors-paper",
+                     "sp": "scissors-paper",
+                     "sr": "rock-scissors",
+                     "rs": "rock-scissors"}
+
+def winnerWav(mine_idx, yours_idx):
+    """Return the sound file to play to describe victory or None for drawer."""
+
+    ### Take the first characters 
+    mine = CHOICES[mine_idx][0]
+    yours = CHOICES[yours_idx][0]
+
+    return wav_victory_name.get(mine + yours)
 
 
 ### Networking bits BEGIN
@@ -930,10 +951,14 @@ def showGameResult():
     pass
 
 
-def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, draw, void):
+def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
+                            result, summary, win, draw, void):
     global main_display_group
 
     emptyGroup(main_display_group)
+    if result is not None:
+        audio_out.play(WaveFile(audio_files[result]))
+    
     if void:
         ### Put error message on screen
         error_dob = Label(terminalio.FONT,
@@ -977,12 +1002,12 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, d
         for spr in (reversed(pvp_spritentxt) if win else pvp_spritentxt):
             pvp_group.append(spr)
 
-        result_dob = Label(terminalio.FONT,
+        summary_dob = Label(terminalio.FONT,
                            text="---.----",
                            scale=2,
                            color=BLACK)
-        result_dob.y = 200  ### TODO - work out best way to place and centre this
-        pvp_group.append(result_dob)
+        summary_dob.y = 200  ### TODO - work out best way to place and centre this
+        pvp_group.append(summary_dob)
 
         main_display_group = pvp_group
         disp.show(main_display_group)
@@ -998,17 +1023,58 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, d
                 pvp_spritentxt[0].x += 10
                 pvp_spritentxt[1].x -= 10
                 time.sleep(0.1)
+        
+        while audio_out.playing:  ### Wait for first sample to finish
+            pass
 
+        if not void:
+            if summary is not None:
+                audio_out.play(WaveFile(audio_files[summary]))
+            if drawer:
+                sum_text = "You win"
+            elif win:
+                sum_text = "You lose"
+            else:
+                sum_text = "Drawer"
+            summary_dob.text = sum_text
+            ### summary_.x   TODO - centre it
 
-def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx, win, draw, void):
+            if not drawer and not win:
+                colours = [RED_COL, ORANGE_COL, YELLOW_COL] * 5 + [RED_COL]
+            else:
+                colours = [0x0000f0 * sc // 16 for sc in range(1, 16 + 1)]
+            for col in colours:
+                summary_dob.color = col
+                time.sleep(0.1)
+
+            while audio_out.playing:  ### Ensure second sample has completed
+                pass
+        
+        audio_out.stop()
+        
+
+def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
+                               result, summary, win, draw, void):
     pass
 
 
 def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx, win, draw, void):
-    if disp is None:
-        showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx, win, draw, void)
+    if voids:
+        result_wav = "error"
+        summary_wav = None
+    elif draw:
+        result_wav = None
+        summary_wav = "drawer"
     else:
-        showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, draw, void)   
+        result_wav = winnerWav(my_ch_idx, op_ch_idx)
+        summary_wav = "you-win" if win else "you-lose"
+
+    if disp is None:
+        showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
+                                   result_wav, summary_wav, win, draw, void)
+    else:
+        showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
+                                result_wav, summary_wav, win, draw, void)
 
 
 ### Make a list of all the player's (name, mac address as text)
@@ -1039,7 +1105,7 @@ d_print(1, "PLAYERS", players)
 seq_tx = [1]  ### The next number to send
 seq_rx_by_addr = {pma: 0 for pn, pma in players[1:]}  ### Per address received all up to
 
-showChoice(my_choice_idx, display, pixels)
+new_round_init = True
 
 ### Advertise for 20 seconds maximum and if a packet is received
 ### for 5 seconds after that
@@ -1054,6 +1120,13 @@ while True:
         losses = 0
         draws = 0 
         voids = 0
+        game_no += 1
+
+    if new_round_init:
+        ### Make a new initial random choice for the player and show it
+        my_choice_idx = random.randrange(len(CHOICES))
+        showChoice(my_choice_idx, display, pixels)
+        new_round_init = False
 
     if button_left():
         while button_left():  ### Wait for button release
@@ -1164,7 +1237,7 @@ while True:
         ### Chalk up wins and losses
         for p_idx1, playernm in enumerate(players[1:], 1):
             opponent_name, opponent_macaddr = playernm
-            (win, draw, void) = evaluateGame(my_choice, player_choices[p_idx1])
+            (win, draw, void) = evaluateRound(my_choice, player_choices[p_idx1])
             try:
                 op_choice_idx = CHOICES.index(player_choices[p_idx1])
             except ValueError:
@@ -1184,8 +1257,10 @@ while True:
                 wins += 1
             else:
                 losses += 1
-        print("Round {:d}: wins {:d}, losses {:d}, draws {:d}, void {:d}".format(round_no, wins, losses, draws, voids))
+        print("Game {:d}, round {:d}, wins {:d}, losses {:d}, draws {:d},"
+              "void {:d}".format(game_no, round_no, wins, losses, draws, voids))
         round_no += 1
+        new_round_init = True
 
 ### Not currently reached!
 print("wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
