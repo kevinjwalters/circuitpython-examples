@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.22
+### clue-multi-rpsgame v0.23
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -243,13 +243,23 @@ if display is not None:
     num_sprites = s_bit.width // s_bit.height
     s_pal.make_transparent(0)  ### Make the first colour (black) transparent
 
+    ### Make some sprites from the sprite sheet
+    ### Sprites can only be in one layer (Group) at a time, need two copies
+    ### to allow representation of a draw on screen
     sprites = []
+    opp_sprites = []
     for idx in range(num_sprites):
         sprite = displayio.TileGrid(s_bit, pixel_shader=s_pal,
                                     width=1, height=1,
                                     tile_width=SPRITE_SIZE, tile_height=SPRITE_SIZE)
         sprite[0] = idx
         sprites.append(sprite)
+        
+        opp_sprite = displayio.TileGrid(s_bit, pixel_shader=s_pal,
+                                        width=1, height=1,
+                                        tile_width=SPRITE_SIZE, tile_height=SPRITE_SIZE)
+        opp_sprite[0] = idx
+        opp_sprites.append(opp_sprite)
 
 
 def readyAudioSamples():
@@ -922,7 +932,7 @@ def showGameResult():
 
 def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, draw, void):
     global main_display_group
-    
+
     emptyGroup(main_display_group)
     if void:
         ### Put error message on screen
@@ -939,16 +949,20 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, d
 
         ### Add player's name and sprite just off left side of screen
         ### and opponent's just off right
-        player_detail = [(me_name, my_ch_idx, -16 - 3 * SPRITE_SIZE,
+        player_detail = [(me_name, sprites[my_ch_idx], -16 - 3 * SPRITE_SIZE,
                           PLAYER_NAME_COL_FG, PLAYER_NAME_COL_BG),
-                         (op_name, op_ch_idx, 16 + DISPLAY_WIDTH,
+                         (op_name, opp_sprites[op_ch_idx], 16 + DISPLAY_WIDTH,
                           OPP_NAME_COL_FG, OPP_NAME_COL_BG)]
         pvp_spritentxt = []
-        
-        for (name, spr_idx,
+
+        for (name, sprite,
              start_x,
              fg, bg) in player_detail:
             s_group = Group(scale=3, max_size=2)
+            s_group.x = start_x
+            s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2   ### TODO
+
+            s_group.append(sprite)
             p_name_dob = Label(terminalio.FONT,
                                text=name,
                                scale=1,
@@ -956,9 +970,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx, win, d
                                background_color=bg)
             p_name_dob.y = 20  ### TODO - work out best way to place and centre this
             s_group.append(p_name_dob)
-            s_group.x = start_x
-            s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2   ### TODO
-            s_group.append(sprites[spr_idx])
+
             pvp_spritentxt.append(s_group)
             
         ### The order in Group determines which one is on top
