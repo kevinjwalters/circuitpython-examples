@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.25
+### clue-multi-rpsgame v0.26
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -41,12 +41,13 @@ from displayio import Group
 import terminalio
 import digitalio
 from audiocore import WaveFile
+import _bleio  ### just for _bleio.BluetoothError
 
+import neopixel
 from adafruit_display_text.label import Label
-
 ### https://github.com/adafruit/Adafruit_CircuitPython_BLE
 from adafruit_ble import BLERadio
-import _bleio  ### just for _bleio.BluetoothError
+
 
 from rps_advertisements import JoinGameAdvertisement, \
                                RpsEncDataAdvertisement, \
@@ -165,7 +166,7 @@ clue_less = "Circuit Playground" in os.uname().machine
 ###       and not use for buttons
 if clue_less:
     ### CPB with TFT Gizmo (240x240)
-    from adafruit_circuitplayground import cp
+    ### from adafruit_circuitplayground import cp  ### Avoiding to save memory
 
     ### Outputs
     if tftGizmoPresent():
@@ -177,48 +178,53 @@ if clue_less:
         JG_RX_COL = 0x000030  ### dimmer blue for upward facing CPB NeoPixels
 
     audio_out = AudioOut(board.SPEAKER)
-    pixels = cp.pixels
+    ###pixels = cp.pixels
+    pixels = neopixel.NeoPixel(board.NEOPIXEL, 10)
 
     ### Enable the onboard amplifier for speaker
-    cp._speaker_enable.value = True  ### pylint: disable=protected-access
+    ###cp._speaker_enable.value = True  ### pylint: disable=protected-access
+    speaker_enable = digitalio.DigitalInOut(board.SPEAKER_ENABLE)
+    speaker_enable.switch_to_output(value=False)
+    speaker_enable.value = True
 
     ### Inputs
     ### buttons reversed if it is used upside-down with Gizmo
-    ##_button_a = digitalio.DigitalInOut(board.BUTTON_A)
-    ##_button_a.switch_to_input(pull=digitalio.Pull.DOWN)
-    ##_button_b = digitalio.DigitalInOut(board.BUTTON_B)
-    ##_button_b.switch_to_input(pull=digitalio.Pull.DOWN)
+    _button_a = digitalio.DigitalInOut(board.BUTTON_A)
+    _button_a.switch_to_input(pull=digitalio.Pull.DOWN)
+    _button_b = digitalio.DigitalInOut(board.BUTTON_B)
+    _button_b.switch_to_input(pull=digitalio.Pull.DOWN)
     if display is None:
-        ##button_left = lambda: _button_a.value
-        ##button_right = lambda: _button_b.value
-        button_left = lambda: cp.button_a
-        button_right = lambda: cp.button_b
+        button_left = lambda: _button_a.value
+        button_right = lambda: _button_b.value
+        ##button_left = lambda: cp.button_a
+        ##button_right = lambda: cp.button_b
 
     else:
-        ##button_left = lambda: _button_b.value
-        ##button_right = lambda: _button_a.value
-        button_left = lambda: cp.button_b
-        button_right = lambda: cp.button_a
+        button_left = lambda: _button_b.value
+        button_right = lambda: _button_a.value
+        ##button_left = lambda: cp.button_b
+        ##button_right = lambda: cp.button_a
 
 else:
     ### CLUE with builtin screen (240x240)
-    from adafruit_clue import clue
+    ### from adafruit_clue import clue  ### Avoiding to save memory
 
     ### Outputs
     display = board.DISPLAY
     audio_out = AudioOut(board.SPEAKER)
-    pixels = clue.pixel
+    ###pixels = clue.pixel
+    pixels = neopixel.NeoPixel(board.NEOPIXEL, 1)
     JG_RX_COL = 0x0000ff
 
     ### Inputs
-    ##_button_a = digitalio.DigitalInOut(board.BUTTON_A)
-    ##_button_a.switch_to_input(pull=digitalio.Pull.UP)
-    ##_button_b = digitalio.DigitalInOut(board.BUTTON_B)
-    ##_button_b.switch_to_input(pull=digitalio.Pull.UP)
-    ##button_left = lambda: not _button_a.value
-    ##button_right = lambda: not _button_b.value
-    button_left = lambda: clue.button_a
-    button_right = lambda: clue.button_b
+    _button_a = digitalio.DigitalInOut(board.BUTTON_A)
+    _button_a.switch_to_input(pull=digitalio.Pull.UP)
+    _button_b = digitalio.DigitalInOut(board.BUTTON_B)
+    _button_b.switch_to_input(pull=digitalio.Pull.UP)
+    button_left = lambda: not _button_a.value
+    button_right = lambda: not _button_b.value
+    ##button_left = lambda: clue.button_a
+    ##button_right = lambda: clue.button_b
 
 ### This will always by the top level group passed to display.show()
 main_display_group = None
@@ -269,7 +275,7 @@ def readyAudioSamples():
     files = (("searching", "welcome-to", "arena", "ready")
               + ("rock", "paper", "scissors")
               + ("rock-scissors", "paper-rock", "scissors-paper")
-              + ("you-win", "draw", "you-lose")
+              + ("you-win", "draw", "you-lose", "error")
               + ("humiliation", "excellent"))
 
     fhs = {}
@@ -304,6 +310,7 @@ PLAYER_NAME_COL_BG = BLACK
 OPP_NAME_COL_FG = 0x00c0c0
 OPP_NAME_COL_BG = BLACK
 ERROR_COL_FG = 0xff0000
+TITLE_TXT_COL_FG = 0xc000c0
 
 RED_COL = 0xff0000
 ORANGE_COL = 0xff8000
@@ -328,10 +335,35 @@ CHOICE_POS = (0,     ### The one just left of USB connector
 JG_FLASH = True  ### TODO DISABLE THIS FOR THE ADAFRUIT RELEASE
 
 if display is not None:
+    STD_BRIGHTNESS = display.brightness  ### use to fade down/up
+
     ### The 6x14 terminalio classic font
     FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
     DISPLAY_WIDTH = display.width
     DISPLAY_HEIGHT = display.height
+
+
+def fadeUpDown(disp, direction, duration=0.8, steps=10):
+    """Fade the display up or down by varything the brightness of the backlight."""
+
+    if disp is None:
+        return
+
+    if duration == 0.0:
+        disp.brightness = 0.0 if direction == "down" else STD_BRIGHTNESS
+        return
+
+    if direction == "down":
+        step_iter = range(steps - 1, -1, -1)
+    elif direction == "up":
+        step_iter = range(1, steps + 1)
+    else:
+        raise ValueError("up or down")
+
+    time_step = duration / steps
+    for bri in [idx * STD_BRIGHTNESS / steps for idx in step_iter]:
+        disp.brightness = bri
+        time.sleep(time_step)
 
 
 def emptyGroup(dio_group):
@@ -362,7 +394,8 @@ def setCursor(idx):
         cursor_dob.y = top_y_pos + choice_sep * idx
 
 
-def showChoice(ch_idx, disp, pix):
+def showChoice(disp, pix, ch_idx,
+               game_no=None, round_no=None, rounds_tot=None):
     """TODO DOC"""
     global main_display_group
 
@@ -372,16 +405,27 @@ def showChoice(ch_idx, disp, pix):
     else:
         emptyGroup(main_display_group)
         ### Would be slightly better to create this Group once and re-use it
-        choice_group = Group(max_size=1)
+        round_choice_group = Group(max_size=2)
+
+        if round_no is not None:
+            title_dob = Label(terminalio.FONT,
+                              text="Game {:d}  Round {:d}/{:d}".format(game_no,
+                                                                       round_no,
+                                                                       rounds_tot),
+                              scale=2,
+                              color=TITLE_TXT_COL_FG)
+            title_dob.x = (DISPLAY_WIDTH - len(title_dob.text) * 2 * FONT_WIDTH) // 2
+            title_dob.y = FONT_HEIGHT // 2
+            round_choice_group.append(title_dob)
 
         s_group = Group(scale=3, max_size=1)
         s_group.x = 32
         s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2 
-
         s_group.append(sprites[ch_idx])
-        choice_group.append(s_group)
+        
+        round_choice_group.append(s_group)
 
-        main_display_group = choice_group
+        main_display_group = round_choice_group
         disp.show(main_display_group)
 
 
@@ -429,9 +473,12 @@ def introduction(disp, pix):
             time.sleep(0.120)
 
     onscreen_x_pos = 96
+    
+    ### TODO _ turn these into a tuppled for loop
+    
     ### Rock
     if disp is None:
-        showChoice(0, disp, pix)
+        showChoice(disp, pix, 0)
     audio_out.play(WaveFile(audio_files["rock"]))
     while audio_out.playing:
         if disp is not None:
@@ -441,7 +488,7 @@ def introduction(disp, pix):
 
     ### Paper
     if disp is None:
-        showChoice(1, disp, pix)
+        showChoice(disp, pix, 1)
     audio_out.play(WaveFile(audio_files["paper"]))
     while audio_out.playing:
         if disp is not None:
@@ -452,7 +499,7 @@ def introduction(disp, pix):
     ### Scissors
     audio_out.play(WaveFile(audio_files["scissors"]))
     if disp is None:
-        showChoice(2, disp, pix)
+        showChoice(disp, pix, 2)
     while audio_out.playing:
         if disp is not None:
             if intro_group[3].x < onscreen_x_pos:
@@ -993,10 +1040,8 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                             result, summary, win, draw, void):
     global main_display_group
 
+    fadeUpDown(disp, "down")
     emptyGroup(main_display_group)
-    if result is not None:
-        pass  ### audio causing MemoryError due to bug - TODO
-        ### audio_out.play(WaveFile(audio_files[result]))
     
     if void:
         ### Put error message on screen
@@ -1007,6 +1052,8 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
         main_display_group = error_dob
         disp.show(main_display_group)
+        if result is not None:
+            audio_out.play(WaveFile(audio_files[result]))
     else:
         ### Would be slightly better to create this Group once and re-use it
         pvp_group = Group(max_size=3)
@@ -1022,14 +1069,14 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
         for (name, sprite,
              start_x,
              fg, bg) in player_detail:
-            s_group = Group(scale=3, max_size=2)
+            s_group = Group(scale=2, max_size=2)  ### audio is choppy at scale=3
             s_group.x = start_x
             s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2   ### TODO
 
             s_group.append(sprite)
             p_name_dob = Label(terminalio.FONT,
                                text=name,
-                               scale=1,
+                               scale=1,  ### this is scaled by the group
                                color=fg,
                                background_color=bg)
             p_name_dob.y = 20  ### TODO - work out best way to place and centre this
@@ -1050,26 +1097,32 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
         main_display_group = pvp_group
         disp.show(main_display_group)
+        fadeUpDown(disp, "up")
+
+        ### Start audio half way through animations
         if draw:
             ### TODO - Sprite bounce off each other
             for idx in range(16):
                 pvp_spritentxt[0].x += 5
                 pvp_spritentxt[1].x -= 5
-                time.sleep(0.1)
+                if idx == 8 and result is not None:
+                    audio_out.play(WaveFile(audio_files[result]))
+                time.sleep(0.2)
         else:
             ### Move sprites together, winning sprite overlaps loser
             for idx in range(16):
                 pvp_spritentxt[0].x += 10
                 pvp_spritentxt[1].x -= 10
-                time.sleep(0.1)
+                if idx == 8 and result is not None:
+                    audio_out.play(WaveFile(audio_files[result]))
+                time.sleep(0.2)
         
         while audio_out.playing:  ### Wait for first sample to finish
             pass
 
         if not void:
             if summary is not None:
-                pass  ### audio causing MemoryError due to bug - TODO
-                ### audio_out.play(WaveFile(audio_files[summary]))
+                audio_out.play(WaveFile(audio_files[summary]))
             if draw:
                 sum_text = "Draw"
             elif win:
@@ -1079,18 +1132,19 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
             summary_dob.text = sum_text
             ### summary_.x   TODO - centre it
 
-            if not draw and not win:
-                colours = [RED_COL, ORANGE_COL, YELLOW_COL] * 5 + [RED_COL]
+            ### Flash colours for win, fad up to blue for rest
+            if not draw and win:
+                colours = [YELLOW_COL, ORANGE_COL, RED_COL] * 5
             else:
-                colours = [0x0000f0 * sc // 16 for sc in range(1, 16 + 1)]
+                colours = [0x0000f0 * sc // 15 for sc in range(1, 15 + 1)]
             for col in colours:
                 summary_dob.color = col
-                time.sleep(0.1)
+                time.sleep(0.120)
 
-            while audio_out.playing:  ### Ensure second sample has completed
-                pass
+    while audio_out.playing:  ### Ensure second sample has completed
+        pass
         
-        audio_out.stop()
+    audio_out.stop()
         
 
 def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
@@ -1109,6 +1163,8 @@ def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx,
         result_wav = winnerWav(my_ch_idx, op_ch_idx)
         summary_wav = "you-win" if win else "you-lose"
 
+    d_print(2, "Audio:", result_wav, summary_wav)
+
     if disp is None:
         showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
                                    result_wav, summary_wav, win, draw, void)
@@ -1121,6 +1177,7 @@ def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx,
 ### with this player as first entry
 players = []
 my_name = ble.name
+fadeUpDown(display, "down")
 add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 
 ### Join Game
@@ -1128,6 +1185,7 @@ add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 ###        could allow player to press button to say "i have got everyone"
 
 audio_out.play(WaveFile(audio_files["searching"]), loop=True)
+fadeUpDown(display, "up")
 jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
                                                                     scan_time=MAX_SEND_TIME_S,
@@ -1165,25 +1223,29 @@ while True:
     if new_round_init:
         ### Make a new initial random choice for the player and show it
         my_choice_idx = random.randrange(len(CHOICES))
-        showChoice(my_choice_idx, display, pixels)
+        fadeUpDown(display, "down")
+        showChoice(display, pixels, my_choice_idx,
+                   game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS)
+        fadeUpDown(display, "up")
         new_round_init = False
 
     if button_left():
         while button_left():  ### Wait for button release
             pass
         my_choice_idx = (my_choice_idx + 1) % len(CHOICES)
-        showChoice(my_choice_idx, display, pixels)
+        showChoice(display, pixels, my_choice_idx,
+                   game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS)
 
     if button_right():
         if debug >= 2:
-            d_print(2, "NO collect mem_free ", gc.mem_free())
-
+            gc.collect()
+            d_print(2, "GC1", gc.mem_free())
         ### TODO - this keeps blowing up with 2k allocation on CLUE despite there being 15-20k free - fragmentation??
         ###        could stop importing clue and DIY?  Would 16bit samples help?
         ### This sound cue is really for other players
         ### TODO file_buf should help massively here but waiting for further analysis on
         ### https://github.com/adafruit/circuitpython/issues/3030
-        ### audio_out.play(WaveFile(audio_files["ready"]))   ### disable until file_buf ok
+        audio_out.play(WaveFile(audio_files["ready"]))   ### disable until file_buf ok
 
         my_choice = CHOICES[my_choice_idx]
         player_choices = [my_choice]
@@ -1273,6 +1335,13 @@ while True:
             except KeyError:
                 pass
             player_choices.append(opponent_choice)
+
+        ### Free up some memory by deleting data structures no longer needed
+        del _, allmsg_by_addr, re_by_addr, key_data_by_addr, enc_data_by_addr
+        gc.collect()
+        if debug >= 2:
+            gc.collect()
+            d_print(2, "GC2", gc.mem_free())
 
         ### Chalk up wins and losses
         for p_idx1, playernm in enumerate(players[1:], 1):
