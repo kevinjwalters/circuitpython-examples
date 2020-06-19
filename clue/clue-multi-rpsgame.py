@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.24
+### clue-multi-rpsgame v0.25
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -46,6 +46,7 @@ from adafruit_display_text.label import Label
 
 ### https://github.com/adafruit/Adafruit_CircuitPython_BLE
 from adafruit_ble import BLERadio
+import _bleio  ### just for _bleio.BluetoothError
 
 from rps_advertisements import JoinGameAdvertisement, \
                                RpsEncDataAdvertisement, \
@@ -134,7 +135,7 @@ except ImportError:
     pass
 
 
-debug = 5
+debug = 3
 
 
 def tftGizmoPresent():
@@ -586,7 +587,7 @@ wav_victory_name = { "rp": "paper-rock",
                      "rs": "rock-scissors"}
 
 def winnerWav(mine_idx, yours_idx):
-    """Return the sound file to play to describe victory or None for drawer."""
+    """Return the sound file to play to describe victory or None for draw."""
 
     ### Take the first characters 
     mine = CHOICES[mine_idx][0]
@@ -615,10 +616,147 @@ def max_ack(acklist):
     return max_ack_sofar
 
 
+def startScan(send_ad, send_advertising,
+              sequence_number, receive_n,
+              ss_rx_ad_classes, rx_ad_classes,
+              scan_time, interval,
+              match_locally, scan_response_request,
+              enable_ack, awaiting_allrx, awaiting_allacks,
+              ad_cb, name_cb, endscan_cb,
+              received_ads_by_addr, blenames_by_addr,
+              send_ad_rxs, acks):
+    """TODO - explain what this does and think about it writing the explanation
+       to ensure it all makes sense."""
+    complete = False
+
+    if send_advertising:
+        try:
+            ble.start_advertising(send_ad, interval=interval)
+        except _bleio.BluetoothError:
+            pass  ### catch and ignore "Already advertising."
+
+    ### timeout in seconds
+    ### -100 is probably minimum, -128 would be 8bit signed min
+    ### window and interval are 0.1 by default - same value means
+    ### continuous scanning
+    cls_send_ad = type(send_ad)
+    matching_ads = 0
+    for adv_ss in ble.start_scan(*ss_rx_ad_classes,
+                                 ## minimum_rssi=-120,
+                                 buffer_size=1536,   ### default is 512 - JoinGame packet loss experiment
+                                 active=scan_response_request,
+                                 timeout=scan_time):
+        received_ns = time.monotonic_ns()
+        addr_text = addr_to_text(adv_ss.address.address_bytes)
+
+        ### Add name of the device to dict limiting
+        ### this to devices of interest by checking received_ads_by_addr
+        ### plus pass data to any callback function
+        if (addr_text not in blenames_by_addr
+            and addr_text in received_ads_by_addr):
+            name = adv_ss.complete_name  ### None indicates no value
+            if name:  ### This test ignores any empty strings too
+                blenames_by_addr[addr_text] = name
+                if name_cb is not None:
+                    name_cb(name, addr_text, adv_ss.address, adv_ss)
+
+        ### If using application Advertisement type matching then
+        ### check the Advertisement's prefix and continue for loop if it
+        ### does not match
+        if match_locally:
+            d_print(5, "RXed RTA", addr_text, repr(adv_ss))
+            adv_ss_as_bytes = adafruit_ble.advertising.standard.encode_data(adv_ss.data_dict)
+            adv = None
+            for cls in rx_ad_classes:
+                prefix = cls.prefix
+                ### TODO - this does not implement proper matching
+                ### proper matching would involve parsing prefix and then matching each
+                ### resulting prefix against each dict entry from decode_data()
+                ### starting at 1 skips over the message length value
+                if adv_ss_as_bytes[1:len(prefix)] == prefix[1:]:
+                    adv = cls()
+                    ### Only populating fields in use
+                    adv.data_dict = adafruit_ble.advertising.standard.decode_data(adv_ss_as_bytes)
+                    adv.address = adv_ss.address
+                    d_print(4, "RXed mm RTA", addr_text, adv)
+                    break
+
+            if adv is None:
+                if endscan_cb is not None and endscan_cb(addr_text, adv_ss.address, adv_ss):
+                    complete = True
+                    break
+                else:
+                    continue
+        else:
+            adv = adv_ss
+            d_print(4, "RXed RTA", addr_text, adv)
+
+        ### Must be a match if this is reached
+        matching_ads += 1
+        if ad_cb is not None:
+            ad_cb(addr_text, adv.address, adv)
+
+        ### Look for an ack and record it in acks if not already there
+        if hasattr(adv, "ack") and isinstance(adv.ack, int):
+            d_print(4, "Found ack")
+            if addr_text not in acks:
+                acks[addr_text] = [adv.ack]
+            elif adv.ack not in acks[addr_text]:
+                acks[addr_text].append(adv.ack)
+
+        if addr_text in received_ads_by_addr:
+            this_ad_b = bytes(adv)
+            for existing_ad in received_ads_by_addr[addr_text]:
+                if this_ad_b == existing_ad[1]:
+                    break  ### already present
+            else:  ### Python's unusual for/break/else 
+                received_ads_by_addr[addr_text].append((adv, bytes(adv)))
+                if isinstance(adv, cls_send_ad):
+                    send_ad_rxs[addr_text] = True
+        else:
+            received_ads_by_addr[addr_text] = [(adv, bytes(adv))]
+            if isinstance(adv, cls_send_ad):
+                send_ad_rxs[addr_text] = True
+
+        d_print(5, "send_ad_rxs", len(send_ad_rxs), "ack", len(acks))
+
+        if awaiting_allrx:
+            if receive_n > 0 and len(send_ad_rxs) == receive_n:
+                if enable_ack and sequence_number is not None:
+                    awaiting_allrx = False
+                    awaiting_allacks = True
+                    if send_advertising:
+                        ble.stop_advertising()
+                    d_print(4, "old ack", send_ad.ack, "new ack", sequence_number)
+                    send_ad.ack = sequence_number
+                    if send_advertising:
+                        ble.start_advertising(send_ad, interval=interval)
+                    d_print(3, "TXing with ack", send_ad,
+                            "ack_count", len(acks))
+                else:
+                    complete = True
+                    break  ### packets received but not sending ack nor waiting for acks
+        elif awaiting_allacks:
+            if len(acks) == receive_n:
+                ack_count = 0
+                for addr_text, acks_for_addr in acks.items():
+                    if max_ack(acks_for_addr) >= sequence_number:
+                        ack_count += 1
+                if ack_count == receive_n:
+                    complete = True
+                    break  ### all acks received, can stop transmitting now
+
+        if endscan_cb is not None:
+            if endscan_cb(addr_text, adv_ss.address, adv_ss):
+                complete = True
+                break
+
+    return (complete, matching_ads, awaiting_allrx, awaiting_allacks)
+
+
 def broadcastAndReceive(send_ad,
                         *receive_ads_types,
-                        min_time=0,
-                        max_time=NORM_SEND_TIME_S,
+                        scan_time=NORM_SEND_TIME_S,
                         receive_n=0,
                         seq_tx=None,
                         seq_rx_by_addr=None,
@@ -698,148 +836,48 @@ def broadcastAndReceive(send_ad,
     awaiting_allacks = False
     awaiting_allrx = True
 
-    ### timeout in seconds
-    ### -100 is probably minimum, -128 would be 8bit signed min
-    ### window and interval are 0.1 by default - same value means
-    ### continuous scanning (sending Advertisement will interrupt this)
-
-    ### TODO review this - using 20ms - maybe less agressive is better with more devices?
-    ###      could experiment with randomising this per device, remember 0.625ms increments
-    ### TODO experiment with buffer larger than 512 byte default?
-    ### Remember default scanning interval is 100ms and transmit is probably 1 channel
-    ### changing every 5s
-    interval = INTERVAL_TICKS[random.randrange(len(INTERVAL_TICKS))] * INTERVAL_TICK_MS / 1e3
+    ### TODO - leftover from previous experiment playing with interval times
+    ##interval = INTERVAL_TICKS[random.randrange(len(INTERVAL_TICKS))] * INTERVAL_TICK_MS / 1e3
+    interval = MIN_AD_INTERVAL
     d_print(2, "TXing", send_ad, "interval", interval)
-    ble.start_advertising(send_ad, interval=interval)
-    start_send_ns = time.monotonic_ns()
-
-    ### TODO - chop up max_time to allow for checking endscan_cb if no Advertisement are received
-    ### maybe 500 ms lumps?
+    matched_ads = 0
+    complete = False
     d_print(1, "Listening for", ss_rx_ad_classes)
-    matching_ads = 0
-    for adv_ss in ble.start_scan(*ss_rx_ad_classes,
-                                 minimum_rssi=-120,
-                                 buffer_size=1536,   ### default is 512 - JoinGame packet loss experiment
-                                 active=scan_response_request,
-                                 timeout=max_time):
-        received_ns = time.monotonic_ns()
-        addr_text = addr_to_text(adv_ss.address.address_bytes)
-
-        ### Add name of the device to dict limiting
-        ### this to devices of interest by checking received_ads_by_addr
-        ### plus pass data to any callback function
-        if (addr_text not in blenames_by_addr
-            and addr_text in received_ads_by_addr):
-            name = adv_ss.complete_name  ### None indicates no value
-            if name:  ### This test ignores any empty strings too
-                blenames_by_addr[addr_text] = name
-                if name_cb is not None:
-                    name_cb(name, addr_text, adv_ss.address, adv_ss)
-
-        ### If using application Advertisement type matching then
-        ### check the Advertisement's prefix and continue for loop if it
-        ### does not match
-        if match_locally:
-            d_print(5, "RXed RTA", addr_text, repr(adv_ss))
-            adv_ss_as_bytes = adafruit_ble.advertising.standard.encode_data(adv_ss.data_dict)
-            adv = None
-            for cls in rx_ad_classes:
-                prefix = cls.prefix
-                ### TODO - this does not implement proper matching
-                ### proper matching would involve parsing prefix and then matching each
-                ### resulting prefix against each dict entry from decode_data()
-                ### starting at 1 skips over the message length value
-                if adv_ss_as_bytes[1:len(prefix)] == prefix[1:]:
-                    adv = cls()
-                    ### Only populating fields in use
-                    adv.data_dict = adafruit_ble.advertising.standard.decode_data(adv_ss_as_bytes)
-                    adv.address = adv_ss.address
-                    d_print(4, "RXed mm RTA", addr_text, adv)
-                    break
-            if adv is None:
-                continue
-        else:
-            adv = adv_ss
-            d_print(4, "RXed RTA", addr_text, adv)
-
-        ### Must be a match if this is reached
-        matching_ads += 1
-        if ad_cb is not None:
-            ad_cb(addr_text, adv.address, adv)
-
-        ### Look for an ack and record it in acks if not already there
-        if hasattr(adv, "ack") and isinstance(adv.ack, int):
-            d_print(4, "Found ack")
-            if addr_text not in acks:
-                acks[addr_text] = [adv.ack]
-            elif adv.ack not in acks[addr_text]:
-                acks[addr_text].append(adv.ack)
-
-        if addr_text in received_ads_by_addr:
-            this_ad_b = bytes(adv)
-            for existing_ad in received_ads_by_addr[addr_text]:
-                if this_ad_b == existing_ad[1]:
-                    break  ### already present
-            else:  ### Python's unusual for/break/else 
-                received_ads_by_addr[addr_text].append((adv, bytes(adv)))
-                if isinstance(adv, cls_send_ad):
-                    send_ad_rxs[addr_text] = True
-        else:
-            received_ads_by_addr[addr_text] = [(adv, bytes(adv))]
-            if isinstance(adv, cls_send_ad):
-                send_ad_rxs[addr_text] = True
-
-        d_print(5, "send_ad_rxs", len(send_ad_rxs), "ack", len(acks))
-
-        if awaiting_allrx:
-            if receive_n > 0 and len(send_ad_rxs) == receive_n:
-                if enable_ack and sequence_number is not None:
-                    awaiting_allrx = False
-                    awaiting_allacks = True
-                    ble.stop_advertising()
-                    d_print(4, "old ack", send_ad.ack, "new ack", sequence_number)
-                    send_ad.ack = sequence_number
-                    ble.start_advertising(send_ad, interval=interval)
-                    d_print(3, "TXing with ack", send_ad,
-                            "ack_count", len(acks))
-                else:
-                    break  ### packets received but not sending ack nor waiting for acks
-        elif awaiting_allacks:
-            if len(acks) == receive_n:
-                ack_count = 0
-                for addr_text, acks_for_addr in acks.items():
-                    if max_ack(acks_for_addr) >= sequence_number:
-                        ack_count += 1
-                if ack_count == receive_n:
-                    break  ### all acks received, can stop transmitting now
-
-        if endscan_cb is not None:
-            if endscan_cb(addr_text, adv_ss.address, adv_ss):
-                break
-
-    ble.stop_scan()
-    d_print(2, "Matched ads", matching_ads)
-
-    ### Ensure we send our message for a minimum period of time
-    ### constrained by the ultimate duration cap
-    ### TODO - need to rethink this
-    if False:   ### opponent_choice is not None:
-        timeout = False
-        remaining_ns = max_time * NS_IN_S - (received_ns - sending_ns)
-        extra_ad_time_ns = min(remaining_ns, MIN_SEND_TIME_NS)
-        ### Only sleep if we need to, the value here could be a small
-        ### negative one too so this caters for this
-        if extra_ad_time_ns > 0:
-            sleep_t  = extra_ad_time_ns / NS_IN_S
-            d_print(4, "Additional {:f} seconds of advertising".format(sleep_t))
-            time.sleep(sleep_t)
-    else:
-        timeout = True
-
-    ble.stop_advertising()
-    end_send_ns = time.monotonic_ns()
-    d_print(4, "TX time", (end_send_ns - start_send_ns) / 1e9)
+    start_ns = time.monotonic_ns()
+    target_end_ns = start_ns + round(scan_time * NS_IN_S)
+    advertising_duration = 0.0
     
+    while not complete and time.monotonic_ns() < target_end_ns:
+        a_rand = random.random()
+        if a_rand < 0.4:
+            send_advertising = False
+            duration = 0.5 + 1.25 * a_rand  ### 50-100ms
+        else:
+            send_advertising = True
+            duration = 0.9  ### 900ms
+            advertising_duration += duration
+
+        (complete, ss_matched,
+         awaiting_allrx,
+         awaiting_allacks) = startScan(send_ad, send_advertising,
+                                       sequence_number, receive_n,
+                                       ss_rx_ad_classes, rx_ad_classes,
+                                       duration, interval,
+                                       match_locally, scan_response_request,
+                                       enable_ack, awaiting_allrx, awaiting_allacks,
+                                       ad_cb, name_cb, endscan_cb,
+                                       received_ads_by_addr, blenames_by_addr,
+                                       send_ad_rxs, acks)
+        matched_ads += ss_matched
+
+    if advertising_duration > 0.0:
+        ble.stop_advertising()
+    ble.stop_scan()
+    d_print(2, "Matched ads", matched_ads)
+
+    end_send_ns = time.monotonic_ns()
+    d_print(4, "TXRX time", (end_send_ns - start_ns) / 1e9)
+
     ### Make a single list of all the received adverts from the dict
     received_ads = []
     for ads in received_ads_by_addr.values():
@@ -957,7 +995,8 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
     emptyGroup(main_display_group)
     if result is not None:
-        audio_out.play(WaveFile(audio_files[result]))
+        pass  ### audio causing MemoryError due to bug - TODO
+        ### audio_out.play(WaveFile(audio_files[result]))
     
     if void:
         ### Put error message on screen
@@ -1029,17 +1068,18 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
         if not void:
             if summary is not None:
-                audio_out.play(WaveFile(audio_files[summary]))
-            if drawer:
-                sum_text = "You win"
+                pass  ### audio causing MemoryError due to bug - TODO
+                ### audio_out.play(WaveFile(audio_files[summary]))
+            if draw:
+                sum_text = "Draw"
             elif win:
-                sum_text = "You lose"
+                sum_text = "You win"
             else:
-                sum_text = "Drawer"
+                sum_text = "You lose"
             summary_dob.text = sum_text
             ### summary_.x   TODO - centre it
 
-            if not drawer and not win:
+            if not draw and not win:
                 colours = [RED_COL, ORANGE_COL, YELLOW_COL] * 5 + [RED_COL]
             else:
                 colours = [0x0000f0 * sc // 16 for sc in range(1, 16 + 1)]
@@ -1059,12 +1099,12 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
 
 
 def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx, win, draw, void):
-    if voids:
+    if void:
         result_wav = "error"
         summary_wav = None
     elif draw:
         result_wav = None
-        summary_wav = "drawer"
+        summary_wav = "draw"
     else:
         result_wav = winnerWav(my_ch_idx, op_ch_idx)
         summary_wav = "you-win" if win else "you-lose"
@@ -1090,7 +1130,7 @@ add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 audio_out.play(WaveFile(audio_files["searching"]), loop=True)
 jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
-                                                                    max_time=MAX_SEND_TIME_S,
+                                                                    scan_time=MAX_SEND_TIME_S,
                                                                     scan_response_request=True,
                                                                     ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
                                                                     endscan_cb=lambda _a, _b, _c: button_left(),
@@ -1165,7 +1205,7 @@ while True:
         _, enc_data_by_addr, _ = broadcastAndReceive(enc_data_msg,
                                                      RpsEncDataAdvertisement,
                                                      RpsKeyDataAdvertisement,
-                                                     max_time=NORM_SEND_TIME_S*2,
+                                                     scan_time=NORM_SEND_TIME_S*2,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr)
@@ -1176,7 +1216,7 @@ while True:
                                                      RpsEncDataAdvertisement,
                                                      RpsKeyDataAdvertisement,
                                                      RpsRoundEndAdvertisement,
-                                                     max_time=NORM_SEND_TIME_S,
+                                                     scan_time=NORM_SEND_TIME_S,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr,
@@ -1192,7 +1232,7 @@ while True:
                                                RpsEncDataAdvertisement,
                                                RpsKeyDataAdvertisement,
                                                RpsRoundEndAdvertisement,
-                                               max_time=1,
+                                               scan_time=1.5,
                                                receive_n=num_other_players,
                                                seq_tx=seq_tx,
                                                seq_rx_by_addr=seq_rx_by_addr,
@@ -1228,7 +1268,7 @@ while True:
                         print("Received wrong round for {:d} {:d}: {:d} {:d}",
                               opponent_name, round_no, round_msg1, round_msg2)
                 else:
-                    print("Missing packets: Summary: RpsEncDataAdvertisement"
+                    print("Missing packets: Summary: RpsEncDataAdvertisement "
                           "{:d} and RpsKeyDataAdvertisement {:d}".format(len(cipher_ads), len(key_ads)))
             except KeyError:
                 pass
