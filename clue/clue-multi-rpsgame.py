@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.27
+### clue-multi-rpsgame v0.28
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -1053,16 +1053,30 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
     emptyGroup(main_display_group)
 
     if void:
-        ### Put error message on screen
-        error_dob = Label(terminalio.FONT,
-                          text="Communication\nError!",
-                          scale=3,
-                          color=ERROR_COL_FG)
-
-        main_display_group = error_dob
-        disp.show(main_display_group)
+        backlight_off = True
+        error_tot = 3
+        error_group = Group(max_size=error_tot)
         if result is not None:
             audio_out.play(WaveFile(audio_files[result]))
+        ### Put three error messages to go on screen to match sound sample
+        main_display_group = error_group
+        disp.show(main_display_group)
+        font_scale = 2
+        for idx in range(error_tot):
+            error_dob = Label(terminalio.FONT,
+                              text="Error!",
+                              scale=font_scale,
+                              color=ERROR_COL_FG)
+            error_dob.x = 40
+            error_dob.y = 40 + idx * 60
+            error_group.append(error_dob)
+            if backlight_off:
+                fadeUpDown(disp, "up", duration=0.45)
+                backlight_off = False
+            else:
+                time.sleep(0.45)
+            font_scale += 1
+
     else:
         ### Would be slightly better to create this Group once and re-use it
         pvp_group = Group(max_size=3)
@@ -1106,7 +1120,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
         main_display_group = pvp_group
         disp.show(main_display_group)
-        fadeUpDown(disp, "up")
+        fadeUpDown(disp, "up", duration=0.4)
 
         ### Start audio half way through animations
         if draw:
@@ -1152,9 +1166,8 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
     while audio_out.playing:  ### Ensure second sample has completed
         pass
-        fi
     audio_out.stop()
-        
+
 
 def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
                                result, summary, win, draw, void):
@@ -1319,7 +1332,7 @@ while True:
 
         ### Play end transmit sound while doing next decrypt bit
         audio_out.play(WaveFile(audio_files["end-tx"]))
-        
+
         ### Decrypt results
         ### - if any data is incorrect the opponent_choice is left as None
         for p_idx1, playernm in enumerate(players[1:], 1):
