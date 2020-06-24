@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.26
+### clue-multi-rpsgame v0.27
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -274,6 +274,7 @@ def readyAudioSamples():
        or None if file not present."""
     files = (("searching", "welcome-to", "arena", "ready")
               + ("rock", "paper", "scissors")
+              + ("start-tx", "end-tx", "txing")
               + ("rock-scissors", "paper-rock", "scissors-paper")
               + ("you-win", "draw", "you-lose", "error")
               + ("humiliation", "excellent"))
@@ -281,11 +282,12 @@ def readyAudioSamples():
     fhs = {}
     for file in files:
         wav_file = None
+        filename = AUDIO_DIR + "/" + file + ".wav"
         try:
-            wav_file = open(AUDIO_DIR + "/" + file + ".wav", "rb")
+            wav_file = open(filename, "rb")
         except OSError as oe:
             ### OSError: [Errno 2] No such file/directory: 'filename.ext'
-            pass
+            print("ERROR: missing audio file:", filename)
         fhs[file] = wav_file
     return fhs
 
@@ -604,21 +606,21 @@ def evaluateRound(mine, yours):
         return (False, False, True)
 
     win = draw = void = False
-    if (mine == "rock" and yours == "rock" or
-        mine == "paper" and yours == "paper" or
-        mine == "scissors" and yours == "scissors"):
+    if (mine_lc == "rock" and yours_lc == "rock" or
+        mine_lc == "paper" and yours_lc == "paper" or
+        mine_lc == "scissors" and yours_lc == "scissors"):
         draw = True
-    elif (mine == "rock" and yours == "paper"):
+    elif (mine_lc == "rock" and yours_lc == "paper"):
         lose = True
-    elif (mine == "rock" and yours == "scissors"):
+    elif (mine_lc == "rock" and yours_lc == "scissors"):
         win = True
-    elif (mine == "paper" and yours == "rock"):
+    elif (mine_lc == "paper" and yours_lc == "rock"):
         win = True
-    elif (mine == "paper" and yours == "scissors"):
+    elif (mine_lc == "paper" and yours_lc == "scissors"):
         lose = True
-    elif (mine == "scissors" and yours == "rock"):
+    elif (mine_lc == "scissors" and yours_lc == "rock"):
         lose = True
-    elif (mine == "scissors" and yours == "paper"):
+    elif (mine_lc == "scissors" and yours_lc == "paper"):
         win = True
     else:
         void = True
@@ -626,7 +628,9 @@ def evaluateRound(mine, yours):
     return (win, draw, void)
 
 
-wav_victory_name = { "rp": "paper-rock",
+### A lookup table in Dict form for win/lose
+### does not need to cater for draw condition
+WAV_VICTORY_NAME = { "rp": "paper-rock",
                      "pr": "paper-rock",
                      "ps": "scissors-paper",
                      "sp": "scissors-paper",
@@ -640,7 +644,7 @@ def winnerWav(mine_idx, yours_idx):
     mine = CHOICES[mine_idx][0]
     yours = CHOICES[yours_idx][0]
 
-    return wav_victory_name.get(mine + yours)
+    return WAV_VICTORY_NAME.get(mine + yours)
 
 
 ### Networking bits BEGIN
@@ -893,17 +897,22 @@ def broadcastAndReceive(send_ad,
     start_ns = time.monotonic_ns()
     target_end_ns = start_ns + round(scan_time * NS_IN_S)
     advertising_duration = 0.0
-    
+
+    scan_no = 0
     while not complete and time.monotonic_ns() < target_end_ns:
+        scan_no += 1
         a_rand = random.random()
-        if a_rand < 0.4:
+        ### Decide on whether to transmit Advertisement packets
+        ### or not - this is a workaround for reception problems
+        if scan_no > 1 and a_rand < 0.4:
             send_advertising = False
-            duration = 0.5 + 1.25 * a_rand  ### 50-100ms
+            duration = 0.5 + 2.5 * a_rand  ### 50-150ms
         else:
             send_advertising = True
             duration = 0.9  ### 900ms
             advertising_duration += duration
 
+        ### TODO kwargs for startScan
         (complete, ss_matched,
          awaiting_allrx,
          awaiting_allacks) = startScan(send_ad, send_advertising,
@@ -920,7 +929,7 @@ def broadcastAndReceive(send_ad,
     if advertising_duration > 0.0:
         ble.stop_advertising()
     ble.stop_scan()
-    d_print(2, "Matched ads", matched_ads)
+    d_print(2, "Matched ads", matched_ads, "with scans", scan_no)
 
     end_send_ns = time.monotonic_ns()
     d_print(4, "TXRX time", (end_send_ns - start_ns) / 1e9)
@@ -1042,7 +1051,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
     fadeUpDown(disp, "down")
     emptyGroup(main_display_group)
-    
+
     if void:
         ### Put error message on screen
         error_dob = Label(terminalio.FONT,
@@ -1083,7 +1092,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
             s_group.append(p_name_dob)
 
             pvp_spritentxt.append(s_group)
-            
+
         ### The order in Group determines which one is on top
         for spr in (reversed(pvp_spritentxt) if win else pvp_spritentxt):
             pvp_group.append(spr)
@@ -1116,7 +1125,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                 if idx == 8 and result is not None:
                     audio_out.play(WaveFile(audio_files[result]))
                 time.sleep(0.2)
-        
+
         while audio_out.playing:  ### Wait for first sample to finish
             pass
 
@@ -1143,7 +1152,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
     while audio_out.playing:  ### Ensure second sample has completed
         pass
-        
+        fi
     audio_out.stop()
         
 
@@ -1188,7 +1197,7 @@ audio_out.play(WaveFile(audio_files["searching"]), loop=True)
 fadeUpDown(display, "up")
 jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
-                                                                    scan_time=MAX_SEND_TIME_S,
+                                                                    scan_time=20,
                                                                     scan_response_request=True,
                                                                     ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
                                                                     endscan_cb=lambda _a, _b, _c: button_left(),
@@ -1258,16 +1267,20 @@ while True:
         enc_data_msg = RpsEncDataAdvertisement(enc_data=cipher_bytes,
                                                round_no=round_no)
 
-        ### Wait for sound sample to stop playing
+        ### Wait for ready sound sample to stop playing
         while audio_out.playing:
             pass
-        audio_out.stop()
+        audio_out.play(WaveFile(audio_files["start-tx"]))
+        while audio_out.playing:
+            pass
+        audio_out.play(WaveFile(audio_files["txing"]), loop=True)
         ### Players will not be synchronised at this point as they do not
-        ### have to make their choices simultaneously
+        ### have to make their choices simultaneously - much longer 12 second
+        ### time to accomodate this
         _, enc_data_by_addr, _ = broadcastAndReceive(enc_data_msg,
                                                      RpsEncDataAdvertisement,
                                                      RpsKeyDataAdvertisement,
-                                                     scan_time=NORM_SEND_TIME_S*2,
+                                                     scan_time=NORM_SEND_TIME_S * 3,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr)
@@ -1304,6 +1317,9 @@ while True:
         ##allmsg_by_addr = key_data_by_addr
         allmsg_by_addr = re_by_addr
 
+        ### Play end transmit sound while doing next decrypt bit
+        audio_out.play(WaveFile(audio_files["end-tx"]))
+        
         ### Decrypt results
         ### - if any data is incorrect the opponent_choice is left as None
         for p_idx1, playernm in enumerate(players[1:], 1):
@@ -1343,6 +1359,10 @@ while True:
             gc.collect()
             d_print(2, "GC2", gc.mem_free())
 
+        while audio_out.playing:
+            pass
+        audio_out.stop()
+
         ### Chalk up wins and losses
         for p_idx1, playernm in enumerate(players[1:], 1):
             opponent_name, opponent_macaddr = playernm
@@ -1366,10 +1386,13 @@ while True:
                 wins += 1
             else:
                 losses += 1
-        print("Game {:d}, round {:d}, wins {:d}, losses {:d}, draws {:d},"
+        print("Game {:d}, round {:d}, wins {:d}, losses {:d}, draws {:d}, "
               "void {:d}".format(game_no, round_no, wins, losses, draws, voids))
         round_no += 1
         new_round_init = True
+
+
+### TODO - is there an end to the game?
 
 ### Not currently reached!
 print("wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
