@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.28
+### clue-multi-rpsgame v0.29
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -131,7 +131,7 @@ try:
     if ble_name is None:
         ble_name = secrets.get("ble_name")
         if ble_name is None:
-            print("No rps_name or ble_name entry found in secrets dict")
+            print("INFO: No rps_name or ble_name entry found in secrets dict")
 except ImportError:
     pass
 
@@ -304,7 +304,7 @@ BLACK=0x000000
 DIM_TXT_COL_FG = 0x505050
 DEFAULT_TXT_COL_FG = 0xa0a0a0
 CURSOR_COL_FG = 0xc0c000
-IWELCOME_COL_FG = 0x000020
+IWELCOME_COL_FG = 0x000010
 WELCOME_COL_FG = 0x0000f0
 BWHITE_COL_FG = 0xffffff
 PLAYER_NAME_COL_FG = 0xc0c000
@@ -447,11 +447,13 @@ def introduction(disp, pix):
         welcometo_dob.y = 3 * FONT_HEIGHT // 2
         intro_group.append(welcometo_dob)
 
-        spacing = 3 * SPRITE_SIZE + 4
+        extra_space = 8
+        spacing = 3 * SPRITE_SIZE + extra_space
         for idx, sprite in enumerate(sprites):
             s_group = Group(scale=3, max_size=1)
             s_group.x = -96    
-            s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2 + (idx - 1) * spacing
+            s_group.y = round((DISPLAY_HEIGHT - 1.5 * SPRITE_SIZE) // 2
+                              + (idx - 1) * spacing)
             s_group.append(sprite)
             intro_group.append(s_group)
 
@@ -694,7 +696,7 @@ def startScan(send_ad, send_advertising,
     matching_ads = 0
     for adv_ss in ble.start_scan(*ss_rx_ad_classes,
                                  ## minimum_rssi=-120,
-                                 buffer_size=1536,   ### default is 512 - JoinGame packet loss experiment
+                                 buffer_size=1536,   ### default is 512
                                  active=scan_response_request,
                                  timeout=scan_time):
         received_ns = time.monotonic_ns()
@@ -900,6 +902,8 @@ def broadcastAndReceive(send_ad,
 
     scan_no = 0
     while not complete and time.monotonic_ns() < target_end_ns:
+        if endscan_cb is not None and endscan_cb(None, None, None):
+            break
         scan_no += 1
         a_rand = random.random()
         ### Decide on whether to transmit Advertisement packets
@@ -1036,7 +1040,7 @@ def addr_to_text(mac_addr, big_endian=False, sep=""):
 
 
 def flashNP(pix, col):
-    """A very brief flash of the NeoPixels."""
+    """The briefest of flashes on the NeoPixels."""
     pix.fill(col)
     pix.fill(BLACK)
 
@@ -1047,20 +1051,29 @@ def showGameResult():
 
 def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                             result, summary, win, draw, void):
+    """Display a win, draw, lose or error message."""
     global main_display_group
 
     fadeUpDown(disp, "down")
     emptyGroup(main_display_group)
 
     if void:
-        backlight_off = True
         error_tot = 3
-        error_group = Group(max_size=error_tot)
-        if result is not None:
-            audio_out.play(WaveFile(audio_files[result]))
+        error_group = Group(max_size=error_tot + 1)
+        ### TODO - this would benefit from having op_name on the screen
         ### Put three error messages to go on screen to match sound sample
+        op_dob = Label(terminalio.FONT,
+                       text=op_name,
+                       scale=2,
+                       color=OPP_NAME_COL_FG)
+        op_dob.x = 40
+        op_dob.y = FONT_HEIGHT
+        error_group.append(op_dob)
         main_display_group = error_group
         disp.show(main_display_group)
+        fadeUpDown(disp, "up", duration=0.4)
+        if result is not None:
+            audio_out.play(WaveFile(audio_files[result]))
         font_scale = 2
         for idx in range(error_tot):
             error_dob = Label(terminalio.FONT,
@@ -1068,13 +1081,9 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                               scale=font_scale,
                               color=ERROR_COL_FG)
             error_dob.x = 40
-            error_dob.y = 40 + idx * 60
+            error_dob.y = 60 + idx * 60
             error_group.append(error_dob)
-            if backlight_off:
-                fadeUpDown(disp, "up", duration=0.45)
-                backlight_off = False
-            else:
-                time.sleep(0.45)
+            time.sleep(0.5)  ### Small attempt to synchronise audio with text
             font_scale += 1
 
     else:
@@ -1083,18 +1092,24 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
         ### Add player's name and sprite just off left side of screen
         ### and opponent's just off right
-        player_detail = [(me_name, sprites[my_ch_idx], -16 - 3 * SPRITE_SIZE,
-                          PLAYER_NAME_COL_FG, PLAYER_NAME_COL_BG),
-                         (op_name, opp_sprites[op_ch_idx], 16 + DISPLAY_WIDTH,
-                          OPP_NAME_COL_FG, OPP_NAME_COL_BG)]
-        pvp_spritentxt = []
+        player_detail = [[me_name, sprites[my_ch_idx], -16 - 3 * SPRITE_SIZE,
+                          PLAYER_NAME_COL_FG, PLAYER_NAME_COL_BG],
+                         [op_name, opp_sprites[op_ch_idx], 16 + DISPLAY_WIDTH,
+                          OPP_NAME_COL_FG, OPP_NAME_COL_BG]]
+        idx_lr = [0, 1]  ### index for left and right sprite
+        if win:
+            player_detail.reverse()  ### this player is winner so put last
+            idx_lr.reverse()
 
+        ### Add some whitespace around winner's name
+        player_detail[1][0] = " " + player_detail[1][0] + " "
+        
         for (name, sprite,
              start_x,
              fg, bg) in player_detail:
             s_group = Group(scale=2, max_size=2)  ### audio is choppy at scale=3
             s_group.x = start_x
-            s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2   ### TODO
+            s_group.y = (DISPLAY_HEIGHT - 2 * (SPRITE_SIZE + FONT_HEIGHT)) // 2
 
             s_group.append(sprite)
             p_name_dob = Label(terminalio.FONT,
@@ -1102,14 +1117,12 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                                scale=1,  ### this is scaled by the group
                                color=fg,
                                background_color=bg)
-            p_name_dob.y = 20  ### TODO - work out best way to place and centre this
+            ### Centre text below sprite - values are * Group scale
+            p_name_dob.x = (SPRITE_SIZE - len(name) * FONT_WIDTH) // 2
+            p_name_dob.y = SPRITE_SIZE + 4
             s_group.append(p_name_dob)
 
-            pvp_spritentxt.append(s_group)
-
-        ### The order in Group determines which one is on top
-        for spr in (reversed(pvp_spritentxt) if win else pvp_spritentxt):
-            pvp_group.append(spr)
+            pvp_group.append(s_group)
 
         summary_dob = Label(terminalio.FONT,
                            text="---.----",
@@ -1124,18 +1137,18 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
         ### Start audio half way through animations
         if draw:
-            ### TODO - Sprite bounce off each other
+            ### Move sprites onto the screen leaving them at either side
             for idx in range(16):
-                pvp_spritentxt[0].x += 5
-                pvp_spritentxt[1].x -= 5
+                pvp_group[idx_lr[0]].x += 6
+                pvp_group[idx_lr[1]].x -= 6
                 if idx == 8 and result is not None:
                     audio_out.play(WaveFile(audio_files[result]))
                 time.sleep(0.2)
         else:
             ### Move sprites together, winning sprite overlaps loser
             for idx in range(16):
-                pvp_spritentxt[0].x += 10
-                pvp_spritentxt[1].x -= 10
+                pvp_group[idx_lr[0]].x += 10
+                pvp_group[idx_lr[1]].x -= 10
                 if idx == 8 and result is not None:
                     audio_out.play(WaveFile(audio_files[result]))
                 time.sleep(0.2)
@@ -1310,6 +1323,9 @@ while True:
                                                      seq_rx_by_addr=seq_rx_by_addr,
                                                      ads_by_addr=enc_data_by_addr)
 
+        ### Play end transmit sound while doing next decrypt bit
+        audio_out.play(WaveFile(audio_files["end-tx"]))
+        
         ### TODO tidy up comments here on the purpose of RoundEnd
         ### ???? With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
         re_msg = RpsRoundEndAdvertisement(round_no=round_no)
@@ -1329,9 +1345,6 @@ while True:
         ### This will have accumulated all the messages for this round
         ##allmsg_by_addr = key_data_by_addr
         allmsg_by_addr = re_by_addr
-
-        ### Play end transmit sound while doing next decrypt bit
-        audio_out.play(WaveFile(audio_files["end-tx"]))
 
         ### Decrypt results
         ### - if any data is incorrect the opponent_choice is left as None
@@ -1372,9 +1385,9 @@ while True:
             gc.collect()
             d_print(2, "GC2", gc.mem_free())
 
+        ### Ensure end-tx has completed
         while audio_out.playing:
             pass
-        audio_out.stop()
 
         ### Chalk up wins and losses
         for p_idx1, playernm in enumerate(players[1:], 1):
