@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.29
+### clue-multi-rpsgame v0.30
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -64,15 +64,9 @@ import adafruit_ble.advertising.standard  ### for encode_data and decode_data
 
 ### TODO - deal with crypto flaw - maybe use XXTEA or ChaCha?
 
-### TODO - bit of backlight fade down up between screens?
-
-### TODO - left button to terminate scanning works on all but the penultimate device!!
-
 ### Complex version demos how to
-### work on cpb
-### detect gizmo
+
 ### use neopixels as alternative display (light 1, 2, 3 discreetly (discrete joke)
-### and maybe use Red, Purple, Sapphire for rock paper scissors
 
 ### simple version will have a lot of issues
 ### unreliable transport
@@ -89,15 +83,6 @@ import adafruit_ble.advertising.standard  ### for encode_data and decode_data
 ### LDAP as good example and git perhaps as less good
 ### complex format not compatible with simple format so mixing the two will confuse things
 
-### allow player to set their name - use accelerometer? JUST USING optional secrets.py for now 
-
-### How does error detection (checksum) work on the payload? LOOKS THIS UP
-
-### Split this into multiple files - could put Advertisement messages in file(s)
-### Graphics might end up being a big lump of code?
-
-### Going further
-### - port to use Infrared for CPX - time.monotonic_ns need replacing (note CPB do not have infrared)
 
 ### Other things of interest
 ### https://github.com/adafruit/Adafruit_CircuitPython_BLE_Eddystone
@@ -163,7 +148,7 @@ def tftGizmoPresent():
 clue_less = "Circuit Playground" in os.uname().machine
 
 ### Note: difference in pull-up and pull-down
-###       and not use for buttons
+###       and logical not use for buttons
 if clue_less:
     ### CPB with TFT Gizmo (240x240)
     ### from adafruit_circuitplayground import cp  ### Avoiding to save memory
@@ -478,37 +463,20 @@ def introduction(disp, pix):
 
     onscreen_x_pos = 96
     
-    ### TODO _ turn these into a tuppled for loop
-    
-    ### Rock
-    if disp is None:
-        showChoice(disp, pix, 0)
-    audio_out.play(WaveFile(audio_files["rock"]))
-    while audio_out.playing:
-        if disp is not None:
-            if intro_group[1].x < onscreen_x_pos:
-                intro_group[1].x += 10
-                time.sleep(0.050)
-
-    ### Paper
-    if disp is None:
-        showChoice(disp, pix, 1)
-    audio_out.play(WaveFile(audio_files["paper"]))
-    while audio_out.playing:
-        if disp is not None:
-            if intro_group[2].x < onscreen_x_pos:
-                intro_group[2].x += 11
-                time.sleep(0.050) 
-
-    ### Scissors
-    audio_out.play(WaveFile(audio_files["scissors"]))
-    if disp is None:
-        showChoice(disp, pix, 2)
-    while audio_out.playing:
-        if disp is not None:
-            if intro_group[3].x < onscreen_x_pos:
-                intro_group[3].x += 7
-                time.sleep(0.050)
+    ### Move each sprite onto the screen while saying its name with wav file
+    anims = (("rock", 10, 1, 0.050),
+             ("paper", 11, 2, 0.050),
+             ("scissors", 7, 3, 0.050))
+    for idx, (audio_name, x_shift, grp_idx, delay_s) in enumerate(anims):
+        if disp is None:
+            showChoice(disp, pix, idx)
+        audio_out.play(WaveFile(audio_files[audio_name]))
+        ### Audio needs to be long enough to finish movement
+        while audio_out.playing:
+            if disp is not None:
+                if intro_group[grp_idx].x < onscreen_x_pos:
+                    intro_group[grp_idx].x += x_shift
+                    time.sleep(delay_s)
 
     ### Set NeoPixels back to black
     if disp is None:
@@ -521,10 +489,6 @@ def introduction(disp, pix):
             time.sleep(0.060)
 
     audio_out.stop()
-    ### TODO - I think I need to explicitly remove the sprites
-    ### from the groups to allow them to be reused or fully empty everything.
-
-    ### TODO - add text to explain how the game actually works!
 
 
 ### Intro screen with audio
@@ -639,6 +603,7 @@ WAV_VICTORY_NAME = { "rp": "paper-rock",
                      "sr": "rock-scissors",
                      "rs": "rock-scissors"}
 
+
 def winnerWav(mine_idx, yours_idx):
     """Return the sound file to play to describe victory or None for draw."""
 
@@ -662,7 +627,7 @@ def max_ack(acklist):
 
     ordered_acklist = sorted(acklist)
     max_ack_sofar = ordered_acklist[0]
-    for ack in ordered_acklist[1:]:
+    for ack in ordered_acklist[1:]: 
         if ack - max_ack_sofar > 1:
             break
         max_ack_sofar = ack
@@ -1103,7 +1068,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
         ### Add some whitespace around winner's name
         player_detail[1][0] = " " + player_detail[1][0] + " "
-        
+
         for (name, sprite,
              start_x,
              fg, bg) in player_detail:
@@ -1125,10 +1090,11 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
             pvp_group.append(s_group)
 
         summary_dob = Label(terminalio.FONT,
-                           text="---.----",
-                           scale=2,
+                           text="",
+                           max_glyphs=8 + 1,  ### max len of all strings + 1
+                           scale=3,
                            color=BLACK)
-        summary_dob.y = 200  ### TODO - work out best way to place and centre this
+        summary_dob.y = round(DISPLAY_HEIGHT - (3 * FONT_HEIGHT // 2))
         pvp_group.append(summary_dob)
 
         main_display_group = pvp_group
@@ -1156,26 +1122,26 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
         while audio_out.playing:  ### Wait for first sample to finish
             pass
 
-        if not void:
-            if summary is not None:
-                audio_out.play(WaveFile(audio_files[summary]))
-            if draw:
-                sum_text = "Draw"
-            elif win:
-                sum_text = "You win"
-            else:
-                sum_text = "You lose"
-            summary_dob.text = sum_text
-            ### summary_.x   TODO - centre it
+        if summary is not None:
+            audio_out.play(WaveFile(audio_files[summary]))
+        ### max length of sum_text must be set in max_glyphs in summary_dob
+        if draw:
+            sum_text = "Draw"
+        elif win:
+            sum_text = "You win"
+        else:
+            sum_text = "You lose"
+        summary_dob.text = sum_text
+        summary_dob.x = round((DISPLAY_WIDTH - 3 * FONT_WIDTH * len(sum_text)) // 2)
 
-            ### Flash colours for win, fad up to blue for rest
-            if not draw and win:
-                colours = [YELLOW_COL, ORANGE_COL, RED_COL] * 5
-            else:
-                colours = [0x0000f0 * sc // 15 for sc in range(1, 15 + 1)]
-            for col in colours:
-                summary_dob.color = col
-                time.sleep(0.120)
+        ### Flash colours for win, fad up to blue for rest
+        if not draw and win:
+            colours = [YELLOW_COL, ORANGE_COL, RED_COL] * 5
+        else:
+            colours = [0x0000f0 * sc // 15 for sc in range(1, 15 + 1)]
+        for col in colours:
+            summary_dob.color = col
+            time.sleep(0.120)
 
     while audio_out.playing:  ### Ensure second sample has completed
         pass
