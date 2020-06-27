@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.30
+### clue-multi-rpsgame v0.31
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -246,7 +246,7 @@ if display is not None:
                                     tile_width=SPRITE_SIZE, tile_height=SPRITE_SIZE)
         sprite[0] = idx
         sprites.append(sprite)
-        
+
         opp_sprite = displayio.TileGrid(s_bit, pixel_shader=s_pal,
                                         width=1, height=1,
                                         tile_width=SPRITE_SIZE, tile_height=SPRITE_SIZE)
@@ -303,6 +303,10 @@ RED_COL = 0xff0000
 ORANGE_COL = 0xff8000
 YELLOW_COL = 0xffff00
 
+GAMENO_GREEN = 0x002000
+ROUNDNO_WHITE = 0x0202020
+
+
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
 
@@ -314,9 +318,16 @@ CHOICE_COL = (0x040000,  ### Red for Rock
               0x030004,  ### Purple for Paper
               0x000004   ### Sapphire blue for Scissors
              )
-### NeoPixel positions for R, P, S - avoid 2 as it's under finger
-CHOICE_POS = (0,     ### The one just left of USB connector
-              9, 8)  ### The two just right of it
+
+
+def choiceToPixIdx(idx, length=10):
+    """This maps the three choices to three pixels.
+       It is also used for game and round numbers.
+       The starting position is 0 which is just left of USB connector
+       on Circuit Playground boards and going clockwise - this avoids
+       the NeoPixels near the buttons which are likely to be under fingers."""
+    return -idx % length
+
 
 ### Set to True for blue flashing when devices are annoucing players' names
 JG_FLASH = True  ### TODO DISABLE THIS FOR THE ADAFRUIT RELEASE
@@ -372,27 +383,19 @@ def emptyGroup(dio_group):
     del dio_group
 
 
-### TODO - probably no longer used...
-def setCursor(idx):
-    """Set the position of the cursor on-screen to indicate the player's selection."""
-    global cursor_dob
-
-    if 0 <= idx < len(CHOICES):
-        cursor_dob.y = top_y_pos + choice_sep * idx
-
-
 def showChoice(disp, pix, ch_idx,
-               game_no=None, round_no=None, rounds_tot=None):
+               game_no=None, round_no=None, rounds_tot=None,
+               won_sf=None, drew_sf=None, lost_sf=None):
     """TODO DOC"""
     global main_display_group
 
     if disp is None:
         pix.fill(BLACK)
-        pix[CHOICE_POS[ch_idx]] = CHOICE_COL[ch_idx]
+        pix[choiceToPixIdx(ch_idx)] = CHOICE_COL[ch_idx]
     else:
         emptyGroup(main_display_group)
         ### Would be slightly better to create this Group once and re-use it
-        round_choice_group = Group(max_size=2)
+        round_choice_group = Group(max_size=3)
 
         if round_no is not None:
             title_dob = Label(terminalio.FONT,
@@ -401,15 +404,26 @@ def showChoice(disp, pix, ch_idx,
                                                                        rounds_tot),
                               scale=2,
                               color=TITLE_TXT_COL_FG)
-            title_dob.x = (DISPLAY_WIDTH - len(title_dob.text) * 2 * FONT_WIDTH) // 2
-            title_dob.y = FONT_HEIGHT // 2
+            title_dob.x = round((DISPLAY_WIDTH - len(title_dob.text) * 2 * FONT_WIDTH) // 2)
+            title_dob.y = round(FONT_HEIGHT // 2)
             round_choice_group.append(title_dob)
+
+        if won_sf is not None:
+            gamesum_dob = Label(terminalio.FONT,
+                                text="Won {:d} Drew {:d} Lost {:d}".format(won_sf,
+                                                                           drew_sf,
+                                                                           lost_sf),
+                                scale=2,
+                                color=TITLE_TXT_COL_FG)
+            gamesum_dob.x = round((DISPLAY_WIDTH - len(gamesum_dob.text) * 2 * FONT_WIDTH) // 2)
+            gamesum_dob.y = round(DISPLAY_HEIGHT - 2 * FONT_HEIGHT // 2)
+            round_choice_group.append(gamesum_dob)
 
         s_group = Group(scale=3, max_size=1)
         s_group.x = 32
         s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2 
         s_group.append(sprites[ch_idx])
-        
+
         round_choice_group.append(s_group)
 
         main_display_group = round_choice_group
@@ -462,7 +476,7 @@ def introduction(disp, pix):
             time.sleep(0.120)
 
     onscreen_x_pos = 96
-    
+
     ### Move each sprite onto the screen while saying its name with wav file
     anims = (("rock", 10, 1, 0.050),
              ("paper", 11, 2, 0.050),
@@ -509,16 +523,6 @@ if display is not None:
             rps_dob.y = y_pos
             y_pos += 60
             gameround_group.append(rps_dob)
-
-    ## cursor_dob = Label(terminalio.FONT,
-    ##                   text=">",
-    ##                   scale=3,
-    ##                   color=CURSOR_COL_FG)
-    ##cursor_dob.x = 0
-    ## setCursor(my_choice_idx)
-    ##cursor_dob.y = top_y_pos
-    ##gameround_group.append(cursor_dob)
-    ##display.show(gameround_group)
 
 
 def d_print(level, *args, **kwargs):
@@ -1010,6 +1014,30 @@ def flashNP(pix, col):
     pix.fill(BLACK)
 
 
+
+def showGameRound(disp, pix,
+                  game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS):
+
+    if disp is None:
+        ### Gradually light NeoPixels in green to show game number
+        for p_idx in range(game_no):
+            pix[choiceToPixIdx(p_idx)] = GAMENO_GREEN
+            time.sleep(0.5)
+        
+        time.sleep(2)
+        
+        ### Flash white five times at position to indicate round number
+        bg_col = pix[round_no - 1]
+        for _ in range(5):
+            pix_idx = choiceToPixIdx(round_no - 1)
+            pix[pix_idx] = ROUNDNO_WHITE
+            time.sleep(0.1)
+            pix[pix_idx] = bg_col
+            time.sleep(0.3)
+
+        pix.fill(BLACK)
+
+
 def showGameResult():
     pass
 
@@ -1150,7 +1178,48 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
 def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
                                result, summary, win, draw, void):
-    pass
+    """This indicates the choices by putting the colours  
+       associated with rock paper scissors on the first pixel
+       for the player and on subsequent pixels for opponents.
+       A win brightens the winning pixel as the result audio plays.
+       Pixel order is based on the game's definition and not
+       the native NeoPixel list order.
+       Errors are indicated by flashing all pixels but keeping the
+       opponent's one dark."""
+
+    pix_op_idx = choiceToPixIdx(op_idx)
+    if void:
+        if result is not None:
+            audio_out.play(WaveFile(audio_files[result]))
+        ramp_updown = (list(range(8, 128 + 1, 8))
+                       + list(range(128 - 8, 0 - 1, -8)))
+        for _ in range(3):
+            for ramp in ramp_updown:
+                pix.fill((ramp, 0, 0))  ### modulate red led from RGB
+                pix[pix_op_idx] = BLACK  ### blackout the opponent pixel
+                time.sleep(0.013)  ### attempt to to sync with audio
+
+    else:
+        if result is not None:
+            audio_out.play(WaveFile(audio_files[result]))
+
+        pix[0] = CHOICE_COL[my_ch_idx]
+        pix[pix_op_idx] = CHOICE_COL[op_ch_idx]
+
+        if not draw:
+            ### brighten the pixel for winner
+            brigten_idx = 0 if win else pix_op_idx
+            for _ in range(4):
+                rr, gg, bb = pix[brigten_idx]
+                pix[brigten_idx] = (rr << 1, gg << 1, bb << 1)
+                time.sleep(0.35)
+
+        if summary is not None:
+            while audio_out.playing:
+                pass
+            audio_out.play(WaveFile(audio_files[summary]))
+    
+    pix.fill(BLACK)
 
 
 def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx, win, draw, void):
@@ -1172,6 +1241,10 @@ def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx,
     else:
         showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                                 result_wav, summary_wav, win, draw, void)
+
+    while audio_out.playing:  ### Ensure any sound samples have completed
+        pass
+    audio_out.stop()
 
 
 ### Make a list of all the player's (name, mac address as text)
@@ -1222,11 +1295,14 @@ while True:
         game_no += 1
 
     if new_round_init:
+        showGameRound(display, pixels,
+                      game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS)
         ### Make a new initial random choice for the player and show it
         my_choice_idx = random.randrange(len(CHOICES))
         fadeUpDown(display, "down")
         showChoice(display, pixels, my_choice_idx,
-                   game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS)
+                   game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS,
+                   won_sf=wins, drew_sf=draws, lost_sf=losses)
         fadeUpDown(display, "up")
         new_round_init = False
 
