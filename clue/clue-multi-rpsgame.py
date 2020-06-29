@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v0.31
+### clue-multi-rpsgame v1.0
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -158,6 +158,7 @@ if clue_less:
         from adafruit_gizmo import tft_gizmo
         display = tft_gizmo.TFT_Gizmo()
         JG_RX_COL = 0x0000ff
+        BUTTON_Y_POS = 120
     else:
         display = None
         JG_RX_COL = 0x000030  ### dimmer blue for upward facing CPB NeoPixels
@@ -200,6 +201,7 @@ else:
     ###pixels = clue.pixel
     pixels = neopixel.NeoPixel(board.NEOPIXEL, 1)
     JG_RX_COL = 0x0000ff
+    BUTTON_Y_POS = 152
 
     ### Inputs
     _button_a = digitalio.DigitalInOut(board.BUTTON_A)
@@ -221,9 +223,10 @@ AUDIO_DIR = "rps/audio"
 ### memory allocation per execution of WaveFile which was failing with
 ### MemoryError exceptions
 gc.collect()
-### TODO - see if there is a workaround for this serious bug
-### https://github.com/adafruit/circuitpython/issues/3030
+### 2048 triggers bug in https://github.com/adafruit/circuitpython/issues/3030
 ##file_buf = bytearray(2048)
+file_buf = bytearray(512)  ### DO NOT CHANGE until #3030 is understood
+
 
 ### Load horizontal sprite sheet if running with a display
 if display is not None:
@@ -298,6 +301,8 @@ OPP_NAME_COL_FG = 0x00c0c0
 OPP_NAME_COL_BG = BLACK
 ERROR_COL_FG = 0xff0000
 TITLE_TXT_COL_FG = 0xc000c0
+INFO_COL_FG = 0xc0c000
+INFO_COL_BG = 0x000080
 
 RED_COL = 0xff0000
 ORANGE_COL = 0xff8000
@@ -436,7 +441,7 @@ def introduction(disp, pix):
 
     if disp is not None:
         emptyGroup(main_display_group)  ### this should already be empty
-        intro_group = Group(max_size=5)
+        intro_group = Group(max_size=7)
         welcometo_dob = Label(terminalio.FONT,
                               text="Welcome To",
                               scale=3,
@@ -469,7 +474,7 @@ def introduction(disp, pix):
 
     ### The color modification here is fragile as it only works
     ### if the text colour is blue, i.e. data is in lsb only
-    audio_out.play(WaveFile(audio_files["welcome-to"]))
+    audio_out.play(WaveFile(audio_files["welcome-to"], file_buf))
     while audio_out.playing:
         if disp is not None and intro_group[0].color < WELCOME_COL_FG:
             intro_group[0].color += 0x10
@@ -484,7 +489,7 @@ def introduction(disp, pix):
     for idx, (audio_name, x_shift, grp_idx, delay_s) in enumerate(anims):
         if disp is None:
             showChoice(disp, pix, idx)
-        audio_out.play(WaveFile(audio_files[audio_name]))
+        audio_out.play(WaveFile(audio_files[audio_name], file_buf))
         ### Audio needs to be long enough to finish movement
         while audio_out.playing:
             if disp is not None:
@@ -496,13 +501,49 @@ def introduction(disp, pix):
     if disp is None:
         pix.fill(BLACK)
 
-    audio_out.play(WaveFile(audio_files["arena"]))
+    audio_out.play(WaveFile(audio_files["arena"], file_buf))
     while audio_out.playing:
         if disp is not None and intro_group[4].color < WELCOME_COL_FG:
             intro_group[4].color += 0x10
             time.sleep(0.060)
 
     audio_out.stop()
+
+    ### Button Guide for those with a display
+    if disp is not None:
+        left_dob = Label(terminalio.FONT,
+                         text="< Select    ",
+                         scale=2,
+                         color=INFO_COL_FG,
+                         background_color=INFO_COL_BG)
+        left_width = len(left_dob.text) * 2 * FONT_WIDTH
+        left_dob.x = -left_width
+        left_dob.y = BUTTON_Y_POS
+        intro_group.append(left_dob)
+
+        right_dob = Label(terminalio.FONT,
+                          text=" Transmit >",
+                          scale=2,
+                          color=INFO_COL_FG,
+                          background_color=INFO_COL_BG)
+        right_width = len(right_dob.text) * 2 * FONT_WIDTH
+        right_dob.x = DISPLAY_WIDTH
+        right_dob.y = BUTTON_Y_POS
+        intro_group.append(right_dob)
+
+        ### Move left button text onto screen, then right
+        steps = 20
+        for x_pos in [left_dob.x + round(left_width * x / steps)
+                      for x in range(1, steps + 1)]:
+            left_dob.x = x_pos
+            time.sleep(0.06)
+
+        for x_pos in [right_dob.x - round(right_width * x / steps)
+                      for x in range(1, steps + 1)]:
+            right_dob.x = x_pos
+            time.sleep(0.06)
+
+        time.sleep(8)  ### leave on screen for further 6 seconds
 
 
 ### Intro screen with audio
@@ -543,8 +584,6 @@ MAX_SEND_TIME_NS = MAX_SEND_TIME_S * NS_IN_S
 ### in Bluetooth Low Energy
 ### extra 10us deals with API floating point rounding issues
 MIN_AD_INTERVAL = 0.02001
-INTERVAL_TICKS = (33, 37, 41, 43, 47)  ### Do not use 32 here due to fp issues
-INTERVAL_TICK_MS = 0.625
 
 ### Enable the Bluetooth LE radio and set player's name (from secrets.py)
 ble = BLERadio()
@@ -858,8 +897,6 @@ def broadcastAndReceive(send_ad,
     awaiting_allacks = False
     awaiting_allrx = True
 
-    ### TODO - leftover from previous experiment playing with interval times
-    ##interval = INTERVAL_TICKS[random.randrange(len(INTERVAL_TICKS))] * INTERVAL_TICK_MS / 1e3
     interval = MIN_AD_INTERVAL
     d_print(2, "TXing", send_ad, "interval", interval)
     matched_ads = 0
@@ -1038,8 +1075,70 @@ def showGameRound(disp, pix,
         pix.fill(BLACK)
 
 
-def showGameResult():
-    pass
+def showGameResultScreen(disp, pla, sco, rounds_tot=None):
+    """Display a high score table with some visual sorting."""
+    global main_display_group
+
+    fadeUpDown(disp, "down")
+    emptyGroup(main_display_group)
+    
+    ### Players + sort question mark + background
+    hs_group = Group(max_size=len(pla) + 1 + 1)
+    
+    sbg_dob = Label(terminalio.FONT,
+                    text=" HIGH\nSCORES",
+                    scale=6,
+                    color=0x202020)
+    sbg_dob.x = (DISPLAY_WIDTH - 6 * 6 * FONT_WIDTH) // 2
+    sbg_dob.y = DISPLAY_HEIGHT // 2
+    hs_group.append(sbg_dob)
+    main_display_group = hs_group
+    disp.show(main_display_group)
+    fadeUpDown(disp, "up")
+
+    ### Calculate maximum length player name
+    ### and see if scores happen to already be in order
+    max_len = 0
+    prev_score = sco[0]
+    descending = True
+    for idx, (name, macaddr) in enumerate(pla):
+        max_len = max(max_len, len(name))
+        if sco[idx] > prev_score:
+            descending = False
+        prev_score = sco[idx]
+
+    fmt = "{:" + str(max_len) + "s} {:2d}"
+    x_pos = (DISPLAY_WIDTH - (max_len + 3) * 2 * FONT_WIDTH) // 2
+    scale = 2
+    spacing = 4
+    top_y_pos = round((DISPLAY_HEIGHT
+                      - len(pla) * scale * FONT_HEIGHT
+                      - (len(pla) - 1) * spacing) // 2
+                      + scale * FONT_HEIGHT // 2)
+    for idx, (name, macaddr) in enumerate(pla):
+        op_dob = Label(terminalio.FONT,
+                       text=fmt.format(name, sco[idx]),
+                       scale=2,
+                       color=(PLAYER_NAME_COL_FG if idx == 0 else OPP_NAME_COL_FG))
+        op_dob.x = x_pos
+        op_dob.y = top_y_pos + idx * (scale * FONT_HEIGHT + spacing) 
+        hs_group.append(op_dob)
+        time.sleep(0.2)
+
+    ### Sort the entries if needed
+    if not descending:
+       pass
+
+    time.sleep(10)       
+
+
+def showGameResult(disp, pix, pla, sco,
+                   rounds_tot=None):
+
+    if disp is None:
+        pass
+    else:
+        showGameResultScreen(disp, pla, sco, rounds_tot=rounds_tot)
 
 
 def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
@@ -1066,7 +1165,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
         disp.show(main_display_group)
         fadeUpDown(disp, "up", duration=0.4)
         if result is not None:
-            audio_out.play(WaveFile(audio_files[result]))
+            audio_out.play(WaveFile(audio_files[result], file_buf))
         font_scale = 2
         for idx in range(error_tot):
             error_dob = Label(terminalio.FONT,
@@ -1136,7 +1235,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                 pvp_group[idx_lr[0]].x += 6
                 pvp_group[idx_lr[1]].x -= 6
                 if idx == 8 and result is not None:
-                    audio_out.play(WaveFile(audio_files[result]))
+                    audio_out.play(WaveFile(audio_files[result], file_buf))
                 time.sleep(0.2)
         else:
             ### Move sprites together, winning sprite overlaps loser
@@ -1144,14 +1243,14 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                 pvp_group[idx_lr[0]].x += 10
                 pvp_group[idx_lr[1]].x -= 10
                 if idx == 8 and result is not None:
-                    audio_out.play(WaveFile(audio_files[result]))
+                    audio_out.play(WaveFile(audio_files[result], file_buf))
                 time.sleep(0.2)
 
         while audio_out.playing:  ### Wait for first sample to finish
             pass
 
         if summary is not None:
-            audio_out.play(WaveFile(audio_files[summary]))
+            audio_out.play(WaveFile(audio_files[summary], file_buf))
         ### max length of sum_text must be set in max_glyphs in summary_dob
         if draw:
             sum_text = "Draw"
@@ -1190,7 +1289,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
     pix_op_idx = choiceToPixIdx(op_idx)
     if void:
         if result is not None:
-            audio_out.play(WaveFile(audio_files[result]))
+            audio_out.play(WaveFile(audio_files[result], file_buf))
         ramp_updown = (list(range(8, 128 + 1, 8))
                        + list(range(128 - 8, 0 - 1, -8)))
         for _ in range(3):
@@ -1201,7 +1300,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
 
     else:
         if result is not None:
-            audio_out.play(WaveFile(audio_files[result]))
+            audio_out.play(WaveFile(audio_files[result], file_buf))
 
         pix[0] = CHOICE_COL[my_ch_idx]
         pix[pix_op_idx] = CHOICE_COL[op_ch_idx]
@@ -1217,8 +1316,8 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
         if summary is not None:
             while audio_out.playing:
                 pass
-            audio_out.play(WaveFile(audio_files[summary]))
-    
+            audio_out.play(WaveFile(audio_files[summary], file_buf))
+
     pix.fill(BLACK)
 
 
@@ -1258,7 +1357,7 @@ add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 ### TODO - could have a callback to check for player terminate, i.e. 
 ###        could allow player to press button to say "i have got everyone"
 
-audio_out.play(WaveFile(audio_files["searching"]), loop=True)
+audio_out.play(WaveFile(audio_files["searching"], file_buf), loop=True)
 fadeUpDown(display, "up")
 jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
@@ -1269,6 +1368,7 @@ other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
                                                                     name_cb=add_player)
 audio_out.stop()
 
+scores = [0] * len(players)
 num_other_players = len(players) - 1
 d_print(2, "PLAYER ADS", other_player_ads_by_addr)
 d_print(1, "PLAYERS", players)
@@ -1285,6 +1385,9 @@ while True:
     if round_no > TOTAL_ROUNDS:
         print("Summary: ",
               "wins {:d}, losses {:d}, draws {:d}, void {:d}\n\n".format(wins, losses, draws, voids))
+
+        showGameResult(display, pixels, players, scores,
+                       rounds_tot=TOTAL_ROUNDS)
 
         ### Reset variables for another game
         round_no = 1
@@ -1317,12 +1420,9 @@ while True:
         if debug >= 2:
             gc.collect()
             d_print(2, "GC1", gc.mem_free())
-        ### TODO - this keeps blowing up with 2k allocation on CLUE despite there being 15-20k free - fragmentation??
-        ###        could stop importing clue and DIY?  Would 16bit samples help?
+
         ### This sound cue is really for other players
-        ### TODO file_buf should help massively here but waiting for further analysis on
-        ### https://github.com/adafruit/circuitpython/issues/3030
-        audio_out.play(WaveFile(audio_files["ready"]))   ### disable until file_buf ok
+        audio_out.play(WaveFile(audio_files["ready"], file_buf))
 
         my_choice = CHOICES[my_choice_idx]
         player_choices = [my_choice]
@@ -1338,10 +1438,10 @@ while True:
         ### Wait for ready sound sample to stop playing
         while audio_out.playing:
             pass
-        audio_out.play(WaveFile(audio_files["start-tx"]))
+        audio_out.play(WaveFile(audio_files["start-tx"], file_buf))
         while audio_out.playing:
             pass
-        audio_out.play(WaveFile(audio_files["txing"]), loop=True)
+        audio_out.play(WaveFile(audio_files["txing"], file_buf), loop=True)
         ### Players will not be synchronised at this point as they do not
         ### have to make their choices simultaneously - much longer 12 second
         ### time to accomodate this
@@ -1366,7 +1466,7 @@ while True:
                                                      ads_by_addr=enc_data_by_addr)
 
         ### Play end transmit sound while doing next decrypt bit
-        audio_out.play(WaveFile(audio_files["end-tx"]))
+        audio_out.play(WaveFile(audio_files["end-tx"], file_buf))
         
         ### TODO tidy up comments here on the purpose of RoundEnd
         ### ???? With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
@@ -1450,10 +1550,14 @@ while True:
                 voids += 1
             elif draw:
                 draws += 1
+                scores[0] += 1
+                scores[p_idx1] += 1
             elif win:
                 wins += 1
+                scores[0] += 2
             else:
                 losses += 1
+                scores[p_idx1] += 2
         print("Game {:d}, round {:d}, wins {:d}, losses {:d}, draws {:d}, "
               "void {:d}".format(game_no, round_no, wins, losses, draws, voids))
         round_no += 1
