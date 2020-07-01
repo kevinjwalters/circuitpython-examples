@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.0
+### clue-multi-rpsgame v1.1
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -276,8 +276,13 @@ def readyAudioSamples():
         except OSError as oe:
             ### OSError: [Errno 2] No such file/directory: 'filename.ext'
             print("ERROR: missing audio file:", filename)
-        fhs[file] = wav_file
+        fhs[file] = WaveFile(wav_file, file_buf)
     return fhs
+
+
+def wavFile(name):
+    return audio_files.get(name)
+
 
 ### Check and open up audio wav samples
 audio_files = readyAudioSamples()
@@ -303,7 +308,8 @@ ERROR_COL_FG = 0xff0000
 TITLE_TXT_COL_FG = 0xc000c0
 INFO_COL_FG = 0xc0c000
 INFO_COL_BG = 0x000080
-
+QM_SORT_FG = 0x808000
+QM_SORTING_FG = 0xff8000
 RED_COL = 0xff0000
 ORANGE_COL = 0xff8000
 YELLOW_COL = 0xffff00
@@ -474,7 +480,7 @@ def introduction(disp, pix):
 
     ### The color modification here is fragile as it only works
     ### if the text colour is blue, i.e. data is in lsb only
-    audio_out.play(WaveFile(audio_files["welcome-to"], file_buf))
+    audio_out.play(wavFile("welcome-to"))
     while audio_out.playing:
         if disp is not None and intro_group[0].color < WELCOME_COL_FG:
             intro_group[0].color += 0x10
@@ -489,7 +495,7 @@ def introduction(disp, pix):
     for idx, (audio_name, x_shift, grp_idx, delay_s) in enumerate(anims):
         if disp is None:
             showChoice(disp, pix, idx)
-        audio_out.play(WaveFile(audio_files[audio_name], file_buf))
+        audio_out.play(wavFile(audio_name))
         ### Audio needs to be long enough to finish movement
         while audio_out.playing:
             if disp is not None:
@@ -501,7 +507,7 @@ def introduction(disp, pix):
     if disp is None:
         pix.fill(BLACK)
 
-    audio_out.play(WaveFile(audio_files["arena"], file_buf))
+    audio_out.play(wavFile("arena"))
     while audio_out.playing:
         if disp is not None and intro_group[4].color < WELCOME_COL_FG:
             intro_group[4].color += 0x10
@@ -601,7 +607,8 @@ losses = 0
 draws = 0 
 voids = 0
 
-TOTAL_ROUNDS = 5
+### TOTAL_ROUNDS = 5
+TOTAL_ROUNDS = 3
 
 
 def evaluateRound(mine, yours):
@@ -1081,9 +1088,9 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
 
     fadeUpDown(disp, "down")
     emptyGroup(main_display_group)
-    
-    ### Players + sort question mark + background
-    hs_group = Group(max_size=len(pla) + 1 + 1)
+
+    ### score list group + background + question mark for sorting
+    hs_group = Group(max_size=3)
     
     sbg_dob = Label(terminalio.FONT,
                     text=" HIGH\nSCORES",
@@ -1110,11 +1117,13 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
     fmt = "{:" + str(max_len) + "s} {:2d}"
     x_pos = (DISPLAY_WIDTH - (max_len + 3) * 2 * FONT_WIDTH) // 2
     scale = 2
-    spacing = 4
+    spacing = 4 if len(pla) <= 6 else 0
     top_y_pos = round((DISPLAY_HEIGHT
                       - len(pla) * scale * FONT_HEIGHT
                       - (len(pla) - 1) * spacing) // 2
                       + scale * FONT_HEIGHT // 2)
+    scores_group = Group(max_size=len(pla))
+    hs_group.append(scores_group)
     for idx, (name, macaddr) in enumerate(pla):
         op_dob = Label(terminalio.FONT,
                        text=fmt.format(name, sco[idx]),
@@ -1122,14 +1131,64 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                        color=(PLAYER_NAME_COL_FG if idx == 0 else OPP_NAME_COL_FG))
         op_dob.x = x_pos
         op_dob.y = top_y_pos + idx * (scale * FONT_HEIGHT + spacing) 
-        hs_group.append(op_dob)
+        scores_group.append(op_dob)
         time.sleep(0.2)
 
     ### Sort the entries if needed
+    sort_scores = list(sco)  ### Make an independent local copy
     if not descending:
-       pass
+        empty_group = Group()  ### minor hack to aid swaps in scores_group
+        ## TODO - remove? sbg_dob.hidden = True  ### Speed up by getting rid of background text
+        step = 3
+        qm_dob = Label(terminalio.FONT,
+                       text="?",
+                       scale=2,
+                       color=QM_SORT_FG)
+        qm_dob.x = round(x_pos - 1.5 * scale * FONT_WIDTH)
+        hs_group.append(qm_dob)
+        while True:
+            swaps = 0
+            for idx in range(0, len(sort_scores) -1):
+                above_score = sort_scores[idx]
+                above_y = scores_group[idx].y
+                below_y = scores_group[idx + 1].y
+                qm_dob.y = (above_y + below_y) // 2
+                time.sleep(0.25)
+                if above_score < sort_scores[idx + 1]:
+                    qm_dob.color = QM_SORTING_FG
+                    swaps += 1
 
-    time.sleep(10)       
+                    ### make list of steps
+                    range_y = below_y - above_y
+                    offsets = list(range(step, range_y + 1, step))
+                    ### Ensure this goes to the exact final position
+                    if offsets[-1] != range_y:
+                        offsets.append(range_y)
+
+                    for offset in offsets:
+                        scores_group[idx].y = above_y + offset
+                        scores_group[idx + 1].y = below_y - offset
+                        time.sleep(0.040)
+
+                    ### swap the scores around
+                    sort_scores[idx] = sort_scores[idx + 1]
+                    sort_scores[idx + 1] = above_score
+
+                    ### swap the graphical objects around using empty_group
+                    ### to avoid ValueError: Layer already in a group
+                    old_above_dob = scores_group[idx]
+                    old_below_dob = scores_group[idx + 1]
+                    scores_group[idx + 1] = empty_group
+                    scores_group[idx] = old_below_dob
+                    scores_group[idx + 1] = old_above_dob
+
+                    qm_dob.color = QM_SORT_FG
+
+            if swaps == 0:
+                break   ### Sorted if no values were swapped 
+        ## TODO - remove? sbg_dob.hidden = False
+    hs_group.remove(qm_dob)
+    time.sleep(10)
 
 
 def showGameResult(disp, pix, pla, sco,
@@ -1165,7 +1224,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
         disp.show(main_display_group)
         fadeUpDown(disp, "up", duration=0.4)
         if result is not None:
-            audio_out.play(WaveFile(audio_files[result], file_buf))
+            audio_out.play(wavFile(result))
         font_scale = 2
         for idx in range(error_tot):
             error_dob = Label(terminalio.FONT,
@@ -1235,7 +1294,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                 pvp_group[idx_lr[0]].x += 6
                 pvp_group[idx_lr[1]].x -= 6
                 if idx == 8 and result is not None:
-                    audio_out.play(WaveFile(audio_files[result], file_buf))
+                    audio_out.play(wavFile(result))
                 time.sleep(0.2)
         else:
             ### Move sprites together, winning sprite overlaps loser
@@ -1243,14 +1302,14 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                 pvp_group[idx_lr[0]].x += 10
                 pvp_group[idx_lr[1]].x -= 10
                 if idx == 8 and result is not None:
-                    audio_out.play(WaveFile(audio_files[result], file_buf))
+                    audio_out.play(wavFile(result))
                 time.sleep(0.2)
 
         while audio_out.playing:  ### Wait for first sample to finish
             pass
 
         if summary is not None:
-            audio_out.play(WaveFile(audio_files[summary], file_buf))
+            audio_out.play(wavFile(summary))
         ### max length of sum_text must be set in max_glyphs in summary_dob
         if draw:
             sum_text = "Draw"
@@ -1289,7 +1348,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
     pix_op_idx = choiceToPixIdx(op_idx)
     if void:
         if result is not None:
-            audio_out.play(WaveFile(audio_files[result], file_buf))
+            audio_out.play(wavFile(result))
         ramp_updown = (list(range(8, 128 + 1, 8))
                        + list(range(128 - 8, 0 - 1, -8)))
         for _ in range(3):
@@ -1300,7 +1359,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
 
     else:
         if result is not None:
-            audio_out.play(WaveFile(audio_files[result], file_buf))
+            audio_out.play(wavFile(result))
 
         pix[0] = CHOICE_COL[my_ch_idx]
         pix[pix_op_idx] = CHOICE_COL[op_ch_idx]
@@ -1316,7 +1375,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
         if summary is not None:
             while audio_out.playing:
                 pass
-            audio_out.play(WaveFile(audio_files[summary], file_buf))
+            audio_out.play(wavFile(summary))
 
     pix.fill(BLACK)
 
@@ -1357,7 +1416,7 @@ add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 ### TODO - could have a callback to check for player terminate, i.e. 
 ###        could allow player to press button to say "i have got everyone"
 
-audio_out.play(WaveFile(audio_files["searching"], file_buf), loop=True)
+audio_out.play(wavFile("searching"), loop=True)
 fadeUpDown(display, "up")
 jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
@@ -1395,6 +1454,7 @@ while True:
         losses = 0
         draws = 0 
         voids = 0
+        scores = [0] * len(players)
         game_no += 1
 
     if new_round_init:
@@ -1422,7 +1482,7 @@ while True:
             d_print(2, "GC1", gc.mem_free())
 
         ### This sound cue is really for other players
-        audio_out.play(WaveFile(audio_files["ready"], file_buf))
+        audio_out.play(wavFile("ready"))
 
         my_choice = CHOICES[my_choice_idx]
         player_choices = [my_choice]
@@ -1438,10 +1498,10 @@ while True:
         ### Wait for ready sound sample to stop playing
         while audio_out.playing:
             pass
-        audio_out.play(WaveFile(audio_files["start-tx"], file_buf))
+        audio_out.play(wavFile("start-tx"))
         while audio_out.playing:
             pass
-        audio_out.play(WaveFile(audio_files["txing"], file_buf), loop=True)
+        audio_out.play(wavFile("txing"), loop=True)
         ### Players will not be synchronised at this point as they do not
         ### have to make their choices simultaneously - much longer 12 second
         ### time to accomodate this
@@ -1466,7 +1526,7 @@ while True:
                                                      ads_by_addr=enc_data_by_addr)
 
         ### Play end transmit sound while doing next decrypt bit
-        audio_out.play(WaveFile(audio_files["end-tx"], file_buf))
+        audio_out.play(wavFile("end-tx"))
         
         ### TODO tidy up comments here on the purpose of RoundEnd
         ### ???? With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
@@ -1485,11 +1545,10 @@ while True:
                                                ads_by_addr=key_data_by_addr)
 
         ### This will have accumulated all the messages for this round
-        ##allmsg_by_addr = key_data_by_addr
         allmsg_by_addr = re_by_addr
 
         ### Decrypt results
-        ### - if any data is incorrect the opponent_choice is left as None
+        ### If any data is incorrect the opponent_choice is left as None
         for p_idx1, playernm in enumerate(players[1:], 1):
             opponent_name, opponent_macaddr = playernm
             opponent_choice = None
