@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.2
+### clue-multi-rpsgame v1.3
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -47,15 +47,14 @@ import neopixel
 from adafruit_display_text.label import Label
 ### https://github.com/adafruit/Adafruit_CircuitPython_BLE
 from adafruit_ble import BLERadio
-
+from adafruit_ble.advertising import Advertisement  ### ONLY NEEDED FOR DEBUGGING
+import adafruit_ble.advertising.standard  ### for encode_data and decode_data
 
 from rps_advertisements import JoinGameAdvertisement, \
                                RpsEncDataAdvertisement, \
                                RpsKeyDataAdvertisement, \
                                RpsRoundEndAdvertisement
-
-from adafruit_ble.advertising import Advertisement  ### ONLY NEEDED FOR DEBUGGING
-import adafruit_ble.advertising.standard  ### for encode_data and decode_data
+from rps_audio import SampleJukebox
 
 
 ### TODO
@@ -256,69 +255,6 @@ if display is not None:
         opp_sprites.append(opp_sprite)
 
 
-class SampleJukebox():
-    """This plays wav files and tries to control the timing of memory allocations
-       within the nRF52840 PWMAudioOut library to minimise chance of MemoryError
-       exceptions."""
-
-    _file_buf = None  ### Use for WaveFile objects
-
-    def _init_wave_files(self, files, directory):
-        """Open files from AUDIO_DIR and return a dict with FileIO objects
-           or None if file not present."""
-
-        ### 2048 triggers bug in https://github.com/adafruit/circuitpython/issues/3030
-        self._file_buf = bytearray(512)  ### DO NOT CHANGE size til #3030 is fixed
-
-        fhs = {}
-        for file in files:
-            wav_file = None
-            filename = directory + "/" + file + ".wav"
-            try:
-                wav_file = open(filename, "rb")
-            except OSError as oe:
-                ### OSError: [Errno 2] No such file/directory: 'filename.ext'
-                print("ERROR: missing audio file:", filename)
-            fhs[file] = WaveFile(wav_file, self._file_buf)
-        self._wave_files = fhs
-
-    def __init__(self, audio_device, files, directory=""):
-        cls = self.__class__
-        self._audio_device = audio_device
-        self._wave_files = None  ### keep pylint happy
-        self._init_wave_files(files, directory=directory)
-
-        ### play a file that exists to get m_alloc called now
-        ### but immediately stop it with pause()
-        for wave_file in self._wave_files.values():
-            if wave_file is not None:
-                self._audio_device.play(wave_file, loop=True)
-                self._audio_device.pause()
-                break
-
-    def play(self, name, loop=False):
-        wave_file = self._wave_files.get(name)
-        if wave_file is None:
-            return
-        ### This pairing of stop() and play() will cause an m_free
-        ### and immediate m_malloc() which reduces considerably the risk
-        ### of losing the 2048 contiguous bytes needed for this
-        self._audio_device.stop()
-        self._audio_device.play(wave_file, loop=loop)
-        ### https://github.com/adafruit/circuitpython/issues/2036 
-        ### is a general ticket about efficient audio buffering
-
-    def playing(self):
-        return self._audio_device.playing
-
-    def wait(self):
-        while self._audio_device.playing:
-            pass
-
-    def stop(self):
-        self._audio_device.pause() ### This avoid m_free
-
-
 files = (("searching", "welcome-to", "arena", "ready")
           + ("rock", "paper", "scissors")
           + ("start-tx", "end-tx", "txing")
@@ -328,9 +264,9 @@ files = (("searching", "welcome-to", "arena", "ready")
 
 gc.collect()
 d_print(2, "GC before SJ", gc.mem_free())
-            
-sample = SampleJukebox(audio_out, files, directory=AUDIO_DIR)
-
+sample = SampleJukebox(audio_out, files,
+                       directory=AUDIO_DIR, error_output=True)
+del files  ### not needed anymore
 gc.collect()
 d_print(2, "GC after SJ", gc.mem_free())
 
