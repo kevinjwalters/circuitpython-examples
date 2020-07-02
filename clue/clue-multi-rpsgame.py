@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.4
+### clue-multi-rpsgame v1.5
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -1063,16 +1063,16 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
     emptyGroup(main_display_group)
 
     ### score list group + background + question mark for sorting
-    hs_group = Group(max_size=3)
+    gs_group = Group(max_size=3)
     
     sbg_dob = Label(terminalio.FONT,
-                    text=" HIGH\nSCORES",
+                    text=" GAME\nSCORES",
                     scale=6,
                     color=0x202020)
     sbg_dob.x = (DISPLAY_WIDTH - 6 * 6 * FONT_WIDTH) // 2
     sbg_dob.y = DISPLAY_HEIGHT // 2
-    hs_group.append(sbg_dob)
-    main_display_group = hs_group
+    gs_group.append(sbg_dob)
+    main_display_group = gs_group
     disp.show(main_display_group)
     fadeUpDown(disp, "up")
 
@@ -1096,7 +1096,7 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                       - (len(pla) - 1) * spacing) // 2
                       + scale * FONT_HEIGHT // 2)
     scores_group = Group(max_size=len(pla))
-    hs_group.append(scores_group)
+    gs_group.append(scores_group)
     for idx, (name, macaddr) in enumerate(pla):
         op_dob = Label(terminalio.FONT,
                        text=fmt.format(name, sco[idx]),
@@ -1118,7 +1118,7 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                        scale=2,
                        color=QM_SORT_FG)
         qm_dob.x = round(x_pos - 1.5 * scale * FONT_WIDTH)
-        hs_group.append(qm_dob)
+        gs_group.append(qm_dob)
         while True:
             swaps = 0
             for idx in range(0, len(sort_scores) -1):
@@ -1162,8 +1162,8 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
             if swaps == 0:
                 break   ### Sorted if no values were swapped 
         ## TODO - remove? sbg_dob.hidden = False
-        hs_group.remove(qm_dob)
-    
+        gs_group.remove(qm_dob)
+
     time.sleep(10)
 
 
@@ -1392,12 +1392,14 @@ d_print(2, "GC before JG", gc.mem_free())
 sample.play("searching", loop=True)
 fadeUpDown(display, "up")
 jg_msg = JoinGameAdvertisement(game="RPS")
-other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
-                                                                    scan_time=20,
-                                                                    scan_response_request=True,
-                                                                    ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
-                                                                    endscan_cb=lambda _a, _b, _c: button_left(),
-                                                                    name_cb=add_player)
+(other_player_ads,
+ other_player_ads_by_addr,
+ _) = broadcastAndReceive(jg_msg,
+                          scan_time=20,
+                          scan_response_request=True,
+                          ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
+                          endscan_cb=lambda _a, _b, _c: button_left(),
+                          name_cb=add_player)
 ### Wait for button release - this stops a long press
 ### being acted upon in the main loop further down
 while button_left():
@@ -1571,35 +1573,53 @@ while True:
         ### Ensure end-tx has completed
         sample.wait()
 
-        ### Chalk up wins and losses
-        for p_idx1, playernm in enumerate(players[1:], 1):
-            opponent_name, opponent_macaddr = playernm
-            (win, draw, void) = evaluateRound(my_choice, player_choices[p_idx1])
-            try:
-                op_choice_idx = CHOICES.index(player_choices[p_idx1])
-            except ValueError:
-                op_choice_idx = None
-            showPlayerVPlayer(display, pixels,
-                              my_name, opponent_name, p_idx1,
-                              my_choice_idx, op_choice_idx,
-                              win, draw, void)
-            d_print(1, players[0][0], player_choices[0], "vs",
-                    opponent_name, player_choices[p_idx1],
-                    "win", win, "draw", draw, "void", void)
-            if void:
-                voids += 1
-            elif draw:
-                draws += 1
-                scores[0] += 1
-                scores[p_idx1] += 1
-            elif win:
-                wins += 1
-                scores[0] += 2
-            else:
-                losses += 1
-                scores[p_idx1] += 2
+        ### Chalk up wins and losses - checks this player but also has to
+        ### check other players against each other to calculate all the 
+        ### scores for the high score table at the end of game
+        for p_idx0, (p0_name, _) in enumerate(players[:len(players) - 1]):
+            for p_idx1, (p1_name, _) in enumerate(players[p_idx0 + 1:], p_idx0 + 1):
+                ### evaluateRound takes text strings for RPS
+                (win, draw, void) = evaluateRound(player_choices[p_idx0],
+                                                  player_choices[p_idx1])
+
+                ### this_player is used to control incrementing the summary
+                ### for the tally for this local player
+                this_player = 0
+                if p_idx0 == 0:
+                    this_player = 1
+                    try:
+                        p0_ch_idx = CHOICES.index(player_choices[p_idx0])
+                        p1_ch_idx = CHOICES.index(player_choices[p_idx1])
+                        ### showPlayerVPlayer takes int index values for RPS
+                        showPlayerVPlayer(display, pixels,
+                                          p0_name, p1_name, p_idx1,
+                                          p0_ch_idx, p1_ch_idx,
+                                          win, draw, void)
+                    except ValueError:
+                        print("ERROR", "failed to decode",
+                              player_choices[p_idx0], player_choices[p_idx1])
+
+                if void:
+                    voids += this_player
+                elif draw:
+                    draws += this_player
+                    scores[p_idx0] += 1
+                    scores[p_idx1] += 1
+                elif win:
+                    wins += this_player
+                    scores[p_idx0] += 2
+                else:
+                    losses += this_player
+                    scores[p_idx1] += 2
+
+                d_print(2,
+                        p0_name, player_choices[p_idx0], "vs",
+                        p1_name, player_choices[p_idx1],
+                        "win", win, "draw", draw, "void", void)
+
         print("Game {:d}, round {:d}, wins {:d}, losses {:d}, draws {:d}, "
               "void {:d}".format(game_no, round_no, wins, losses, draws, voids))
+
         round_no += 1
         new_round_init = True
 
