@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.1
+### clue-multi-rpsgame v1.2
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -123,6 +123,13 @@ except ImportError:
 
 debug = 3
 
+def d_print(level, *args, **kwargs):
+    """A simple conditional print for debugging based on global debug level."""
+    if not isinstance(level, int):
+        print(level, *args, **kwargs)
+    elif debug >= level:
+        print(*args, **kwargs)
+
 
 def tftGizmoPresent():
     """Determine if the TFT Gizmo is attached.
@@ -219,14 +226,6 @@ main_display_group = None
 IMAGE_DIR = "rps/images"
 AUDIO_DIR = "rps/audio"
 
-### Tidy up memory then make one audio buffer for reading files to stop
-### memory allocation per execution of WaveFile which was failing with
-### MemoryError exceptions
-gc.collect()
-### 2048 triggers bug in https://github.com/adafruit/circuitpython/issues/3030
-##file_buf = bytearray(2048)
-file_buf = bytearray(512)  ### DO NOT CHANGE until #3030 is understood
-
 
 ### Load horizontal sprite sheet if running with a display
 if display is not None:
@@ -257,35 +256,84 @@ if display is not None:
         opp_sprites.append(opp_sprite)
 
 
-def readyAudioSamples():
-    """Open files from AUDIO_DIR and return a dict with FileIO objects
-       or None if file not present."""
-    files = (("searching", "welcome-to", "arena", "ready")
-              + ("rock", "paper", "scissors")
-              + ("start-tx", "end-tx", "txing")
-              + ("rock-scissors", "paper-rock", "scissors-paper")
-              + ("you-win", "draw", "you-lose", "error")
-              + ("humiliation", "excellent"))
+class SampleJukebox():
+    """This plays wav files and tries to control the timing of memory allocations
+       within the nRF52840 PWMAudioOut library to minimise chance of MemoryError
+       exceptions."""
 
-    fhs = {}
-    for file in files:
-        wav_file = None
-        filename = AUDIO_DIR + "/" + file + ".wav"
-        try:
-            wav_file = open(filename, "rb")
-        except OSError as oe:
-            ### OSError: [Errno 2] No such file/directory: 'filename.ext'
-            print("ERROR: missing audio file:", filename)
-        fhs[file] = WaveFile(wav_file, file_buf)
-    return fhs
+    _file_buf = None  ### Use for WaveFile objects
+
+    def _init_wave_files(self, files, directory):
+        """Open files from AUDIO_DIR and return a dict with FileIO objects
+           or None if file not present."""
+
+        ### 2048 triggers bug in https://github.com/adafruit/circuitpython/issues/3030
+        self._file_buf = bytearray(512)  ### DO NOT CHANGE size til #3030 is fixed
+
+        fhs = {}
+        for file in files:
+            wav_file = None
+            filename = directory + "/" + file + ".wav"
+            try:
+                wav_file = open(filename, "rb")
+            except OSError as oe:
+                ### OSError: [Errno 2] No such file/directory: 'filename.ext'
+                print("ERROR: missing audio file:", filename)
+            fhs[file] = WaveFile(wav_file, self._file_buf)
+        self._wave_files = fhs
+
+    def __init__(self, audio_device, files, directory=""):
+        cls = self.__class__
+        self._audio_device = audio_device
+        self._wave_files = None  ### keep pylint happy
+        self._init_wave_files(files, directory=directory)
+
+        ### play a file that exists to get m_alloc called now
+        ### but immediately stop it with pause()
+        for wave_file in self._wave_files.values():
+            if wave_file is not None:
+                self._audio_device.play(wave_file, loop=True)
+                self._audio_device.pause()
+                break
+
+    def play(self, name, loop=False):
+        wave_file = self._wave_files.get(name)
+        if wave_file is None:
+            return
+        ### This pairing of stop() and play() will cause an m_free
+        ### and immediate m_malloc() which reduces considerably the risk
+        ### of losing the 2048 contiguous bytes needed for this
+        self._audio_device.stop()
+        self._audio_device.play(wave_file, loop=loop)
+        ### https://github.com/adafruit/circuitpython/issues/2036 
+        ### is a general ticket about efficient audio buffering
+
+    def playing(self):
+        return self._audio_device.playing
+
+    def wait(self):
+        while self._audio_device.playing:
+            pass
+
+    def stop(self):
+        self._audio_device.pause() ### This avoid m_free
 
 
-def wavFile(name):
-    return audio_files.get(name)
+files = (("searching", "welcome-to", "arena", "ready")
+          + ("rock", "paper", "scissors")
+          + ("start-tx", "end-tx", "txing")
+          + ("rock-scissors", "paper-rock", "scissors-paper")
+          + ("you-win", "draw", "you-lose", "error")
+          + ("humiliation", "excellent"))
 
+gc.collect()
+d_print(2, "GC before SJ", gc.mem_free())
+            
+sample = SampleJukebox(audio_out, files, directory=AUDIO_DIR)
 
-### Check and open up audio wav samples
-audio_files = readyAudioSamples()
+gc.collect()
+d_print(2, "GC after SJ", gc.mem_free())
+
 
 ### Top y position of first choice and pixel separate between choices
 top_y_pos = 60
@@ -480,8 +528,8 @@ def introduction(disp, pix):
 
     ### The color modification here is fragile as it only works
     ### if the text colour is blue, i.e. data is in lsb only
-    audio_out.play(wavFile("welcome-to"))
-    while audio_out.playing:
+    sample.play("welcome-to")
+    while sample.playing():
         if disp is not None and intro_group[0].color < WELCOME_COL_FG:
             intro_group[0].color += 0x10
             time.sleep(0.120)
@@ -495,9 +543,9 @@ def introduction(disp, pix):
     for idx, (audio_name, x_shift, grp_idx, delay_s) in enumerate(anims):
         if disp is None:
             showChoice(disp, pix, idx)
-        audio_out.play(wavFile(audio_name))
+        sample.play(audio_name)
         ### Audio needs to be long enough to finish movement
-        while audio_out.playing:
+        while sample.playing():
             if disp is not None:
                 if intro_group[grp_idx].x < onscreen_x_pos:
                     intro_group[grp_idx].x += x_shift
@@ -507,13 +555,11 @@ def introduction(disp, pix):
     if disp is None:
         pix.fill(BLACK)
 
-    audio_out.play(wavFile("arena"))
-    while audio_out.playing:
+    sample.play("arena")
+    while sample.playing():
         if disp is not None and intro_group[4].color < WELCOME_COL_FG:
             intro_group[4].color += 0x10
             time.sleep(0.060)
-
-    audio_out.stop()
 
     ### Button Guide for those with a display
     if disp is not None:
@@ -570,14 +616,6 @@ if display is not None:
             rps_dob.y = y_pos
             y_pos += 60
             gameround_group.append(rps_dob)
-
-
-def d_print(level, *args, **kwargs):
-    """A simple conditional print for debugging based on global debug level."""
-    if not isinstance(level, int):
-        print(level, *args, **kwargs)
-    elif debug >= level:
-        print(*args, **kwargs)
 
 
 NS_IN_S = 1000 * 1000  * 1000
@@ -1058,7 +1096,6 @@ def flashNP(pix, col):
     pix.fill(BLACK)
 
 
-
 def showGameRound(disp, pix,
                   game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS):
 
@@ -1139,7 +1176,7 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
     if not descending:
         empty_group = Group()  ### minor hack to aid swaps in scores_group
         ## TODO - remove? sbg_dob.hidden = True  ### Speed up by getting rid of background text
-        step = 3
+        step = 4
         qm_dob = Label(terminalio.FONT,
                        text="?",
                        scale=2,
@@ -1153,7 +1190,7 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                 above_y = scores_group[idx].y
                 below_y = scores_group[idx + 1].y
                 qm_dob.y = (above_y + below_y) // 2
-                time.sleep(0.25)
+                time.sleep(0.3)
                 if above_score < sort_scores[idx + 1]:
                     qm_dob.color = QM_SORTING_FG
                     swaps += 1
@@ -1187,7 +1224,8 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
             if swaps == 0:
                 break   ### Sorted if no values were swapped 
         ## TODO - remove? sbg_dob.hidden = False
-    hs_group.remove(qm_dob)
+        hs_group.remove(qm_dob)
+    
     time.sleep(10)
 
 
@@ -1224,7 +1262,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
         disp.show(main_display_group)
         fadeUpDown(disp, "up", duration=0.4)
         if result is not None:
-            audio_out.play(wavFile(result))
+            sample.play(result)
         font_scale = 2
         for idx in range(error_tot):
             error_dob = Label(terminalio.FONT,
@@ -1294,7 +1332,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                 pvp_group[idx_lr[0]].x += 6
                 pvp_group[idx_lr[1]].x -= 6
                 if idx == 8 and result is not None:
-                    audio_out.play(wavFile(result))
+                    sample.play(result)
                 time.sleep(0.2)
         else:
             ### Move sprites together, winning sprite overlaps loser
@@ -1302,14 +1340,13 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                 pvp_group[idx_lr[0]].x += 10
                 pvp_group[idx_lr[1]].x -= 10
                 if idx == 8 and result is not None:
-                    audio_out.play(wavFile(result))
+                    sample.play(result)
                 time.sleep(0.2)
 
-        while audio_out.playing:  ### Wait for first sample to finish
-            pass
+        sample.wait()  ### Wait for first sample to finish
 
         if summary is not None:
-            audio_out.play(wavFile(summary))
+            sample.play(summary)
         ### max length of sum_text must be set in max_glyphs in summary_dob
         if draw:
             sum_text = "Draw"
@@ -1329,9 +1366,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
             summary_dob.color = col
             time.sleep(0.120)
 
-    while audio_out.playing:  ### Ensure second sample has completed
-        pass
-    audio_out.stop()
+    sample.wait()  ### Ensure second sample has completed
 
 
 def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
@@ -1348,7 +1383,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
     pix_op_idx = choiceToPixIdx(op_idx)
     if void:
         if result is not None:
-            audio_out.play(wavFile(result))
+            sample.play(result)
         ramp_updown = (list(range(8, 128 + 1, 8))
                        + list(range(128 - 8, 0 - 1, -8)))
         for _ in range(3):
@@ -1359,7 +1394,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
 
     else:
         if result is not None:
-            audio_out.play(wavFile(result))
+            sample.play(result)
 
         pix[0] = CHOICE_COL[my_ch_idx]
         pix[pix_op_idx] = CHOICE_COL[op_ch_idx]
@@ -1373,9 +1408,8 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
                 time.sleep(0.35)
 
         if summary is not None:
-            while audio_out.playing:
-                pass
-            audio_out.play(wavFile(summary))
+            sample.wait()
+            sample.play(summary)
 
     pix.fill(BLACK)
 
@@ -1400,9 +1434,7 @@ def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx,
         showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                                 result_wav, summary_wav, win, draw, void)
 
-    while audio_out.playing:  ### Ensure any sound samples have completed
-        pass
-    audio_out.stop()
+    sample.wait()  ### Ensure any sound samples have completed
 
 
 ### Make a list of all the player's (name, mac address as text)
@@ -1416,7 +1448,10 @@ add_player(my_name, addr_to_text(ble.address_bytes), None, None)
 ### TODO - could have a callback to check for player terminate, i.e. 
 ###        could allow player to press button to say "i have got everyone"
 
-audio_out.play(wavFile("searching"), loop=True)
+gc.collect()
+d_print(2, "GC before JG", gc.mem_free())
+
+sample.play("searching", loop=True)
 fadeUpDown(display, "up")
 jg_msg = JoinGameAdvertisement(game="RPS")
 other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
@@ -1425,10 +1460,14 @@ other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
                                                                     ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
                                                                     endscan_cb=lambda _a, _b, _c: button_left(),
                                                                     name_cb=add_player)
-audio_out.stop()
+sample.stop()
 
 scores = [0] * len(players)
 num_other_players = len(players) - 1
+
+gc.collect()
+d_print(2, "GC after JG", gc.mem_free())
+
 d_print(2, "PLAYER ADS", other_player_ads_by_addr)
 d_print(1, "PLAYERS", players)
 
@@ -1436,10 +1475,13 @@ d_print(1, "PLAYERS", players)
 seq_tx = [1]  ### The next number to send
 seq_rx_by_addr = {pma: 0 for pn, pma in players[1:]}  ### Per address received all up to
 
+### Important to get rid of playerlist_group variable - this allows GC
+### to dispose of it when the display content is changed
+if display is not None:
+    del playerlist_group
+
 new_round_init = True
 
-### Advertise for 20 seconds maximum and if a packet is received
-### for 5 seconds after that
 while True:
     if round_no > TOTAL_ROUNDS:
         print("Summary: ",
@@ -1477,12 +1519,11 @@ while True:
                    game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS)
 
     if button_right():
-        if debug >= 2:
-            gc.collect()
-            d_print(2, "GC1", gc.mem_free())
+        gc.collect()
+        d_print(2, "GC before comms", gc.mem_free())
 
         ### This sound cue is really for other players
-        audio_out.play(wavFile("ready"))
+        sample.play("ready")
 
         my_choice = CHOICES[my_choice_idx]
         player_choices = [my_choice]
@@ -1496,12 +1537,10 @@ while True:
                                                round_no=round_no)
 
         ### Wait for ready sound sample to stop playing
-        while audio_out.playing:
-            pass
-        audio_out.play(wavFile("start-tx"))
-        while audio_out.playing:
-            pass
-        audio_out.play(wavFile("txing"), loop=True)
+        sample.wait()
+        sample.play("start-tx")
+        sample.wait()
+        sample.play("txing", loop=True)
         ### Players will not be synchronised at this point as they do not
         ### have to make their choices simultaneously - much longer 12 second
         ### time to accomodate this
@@ -1526,8 +1565,8 @@ while True:
                                                      ads_by_addr=enc_data_by_addr)
 
         ### Play end transmit sound while doing next decrypt bit
-        audio_out.play(wavFile("end-tx"))
-        
+        sample.play("end-tx")
+
         ### TODO tidy up comments here on the purpose of RoundEnd
         ### ???? With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
         re_msg = RpsRoundEndAdvertisement(round_no=round_no)
@@ -1582,13 +1621,10 @@ while True:
         ### Free up some memory by deleting data structures no longer needed
         del _, allmsg_by_addr, re_by_addr, key_data_by_addr, enc_data_by_addr
         gc.collect()
-        if debug >= 2:
-            gc.collect()
-            d_print(2, "GC2", gc.mem_free())
+        d_print(2, "GC after comms", gc.mem_free())
 
         ### Ensure end-tx has completed
-        while audio_out.playing:
-            pass
+        sample.wait()
 
         ### Chalk up wins and losses
         for p_idx1, playernm in enumerate(players[1:], 1):
