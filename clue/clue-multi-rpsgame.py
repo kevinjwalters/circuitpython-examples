@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.3
+### clue-multi-rpsgame v1.4
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -1126,8 +1126,9 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                 above_y = scores_group[idx].y
                 below_y = scores_group[idx + 1].y
                 qm_dob.y = (above_y + below_y) // 2
-                time.sleep(0.3)
+                time.sleep(0.35)
                 if above_score < sort_scores[idx + 1]:
+                    qm_dob.text = "<"
                     qm_dob.color = QM_SORTING_FG
                     swaps += 1
 
@@ -1155,6 +1156,7 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                     scores_group[idx] = old_below_dob
                     scores_group[idx + 1] = old_above_dob
 
+                    qm_dob.text = "?"
                     qm_dob.color = QM_SORT_FG
 
             if swaps == 0:
@@ -1396,6 +1398,10 @@ other_player_ads, other_player_ads_by_addr, _ = broadcastAndReceive(jg_msg,
                                                                     ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
                                                                     endscan_cb=lambda _a, _b, _c: button_left(),
                                                                     name_cb=add_player)
+### Wait for button release - this stops a long press
+### being acted upon in the main loop further down
+while button_left():
+    pass
 sample.stop()
 
 scores = [0] * len(players)
@@ -1419,6 +1425,8 @@ if display is not None:
 new_round_init = True
 
 while True:
+    ### TODO - test this for need for debounce on left button
+
     if round_no > TOTAL_ROUNDS:
         print("Summary: ",
               "wins {:d}, losses {:d}, draws {:d}, void {:d}\n\n".format(wins, losses, draws, voids))
@@ -1452,7 +1460,8 @@ while True:
             pass
         my_choice_idx = (my_choice_idx + 1) % len(CHOICES)
         showChoice(display, pixels, my_choice_idx,
-                   game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS)
+                   game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS,
+                   won_sf=wins, drew_sf=draws, lost_sf=losses)
 
     if button_right():
         gc.collect()
