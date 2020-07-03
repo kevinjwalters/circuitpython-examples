@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.5
+### clue-multi-rpsgame v1.6
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -297,10 +297,13 @@ QM_SORTING_FG = 0xff8000
 RED_COL = 0xff0000
 ORANGE_COL = 0xff8000
 YELLOW_COL = 0xffff00
+DRAWLOSE_COL = 0x0000f0
 
+### NeoPixel colours
 GAMENO_GREEN = 0x002000
 ROUNDNO_WHITE = 0x0202020
-
+PLAYER_COL = 0xff0000
+SCORE_COLS = (0x3f1200, 0x3f2c00, 0x002400, 0x00003f, 0x10001c, 0x321232)
 
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
@@ -1167,11 +1170,45 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
     time.sleep(10)
 
 
+def showGameResultNeoPixels(pix, pla, sco, rounds_tot=None):
+    """Display a high score table on NeoPixels.
+       Sorted into highest first order then displayed by
+       flashing position pixel to indicate player number and
+       gradually lighting up pixels in a circle using rainbow
+       colours for each revolution of the NeoPixels starting at orange.
+       """
+    idx_n_score = [(s, sco[s]) for s in range(len(sco))]
+    idx_n_score.sort(key=lambda s: s[1], reverse=True)
+    num_pixels = len(pix)
+    
+    bg_col = BLACK
+    for idx, score in idx_n_score:
+        playerIdx = choiceToPixIdx(idx)
+        for score in range(score):
+            scoreIdx = choiceToPixIdx(score)
+            rev = min(score // num_pixels, len(SCORE_COLS) - 1)
+            pix[scoreIdx] = SCORE_COLS[rev]
+            if scoreIdx == playerIdx:
+                bg_col = SCORE_COLS[rev]
+            time.sleep(0.09)
+            pix[playerIdx] = PLAYER_COL
+            time.sleep(0.09)
+            pix[playerIdx] = bg_col
+            
+        for _ in range(4):
+            pix[playerIdx] = bg_col
+            time.sleep(0.5)
+            pix[playerIdx] = PLAYER_COL
+            time.sleep(0.5)
+
+        pix.fill(BLACK)
+ 
+
 def showGameResult(disp, pix, pla, sco,
                    rounds_tot=None):
 
     if disp is None:
-        pass
+        showGameResultNeoPixels(pix, pla, sco, rounds_tot=rounds_tot)
     else:
         showGameResultScreen(disp, pla, sco, rounds_tot=rounds_tot)
 
@@ -1299,7 +1336,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
         if not draw and win:
             colours = [YELLOW_COL, ORANGE_COL, RED_COL] * 5
         else:
-            colours = [0x0000f0 * sc // 15 for sc in range(1, 15 + 1)]
+            colours = [DRAWLOSE_COL * sc // 15 for sc in range(1, 15 + 1)]
         for col in colours:
             summary_dob.color = col
             time.sleep(0.120)
@@ -1622,15 +1659,3 @@ while True:
 
         round_no += 1
         new_round_init = True
-
-
-### TODO - is there an end to the game?
-
-### Not currently reached!
-print("wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
-
-### Do something on screen or NeoPixels
-print("GAME OVER")
-
-while True:
-    pass
