@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.6
+### clue-multi-rpsgame v1.7
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -55,7 +55,8 @@ from rps_advertisements import JoinGameAdvertisement, \
                                RpsKeyDataAdvertisement, \
                                RpsRoundEndAdvertisement
 from rps_audio import SampleJukebox
-
+from rps_crypto import bytesPad, strUnpad, generateOTPadKey, \
+                       encrypt, decrypt
 
 ### TODO
 ### Maybe simple version is clue only
@@ -938,58 +939,6 @@ def broadcastAndReceive(send_ad,
 ### Networking bits END
 
 
-def bytes_pad(text, size=8, pad=0):
-    """Convert a string to bytes and add pad value if necessary to make the length up to size.
-       """
-    text_as_bytes = text.encode("utf-8")
-    if len(text_as_bytes) >= size:
-        return text_as_bytes
-    else:
-        return text_as_bytes + bytes([pad] * (size - len(text_as_bytes)))
-
-
-def str_unpad(text_as_bytes, pad=0):
-    """Convert a bytes to a str removing trailing characters matching pad."""
-    if pad is not None:
-        end_ex = len(text_as_bytes)
-        while end_ex > 0 and text_as_bytes[end_ex - 1] == pad:
-            end_ex -= 1
-
-    return text_as_bytes[0:end_ex].decode("utf-8")
-
-
-def generateOTPadKey(n_bytes):
-    """Generate a random key of n_bytes bytes returned as type bytes.
-       This uses the hardware TNG on boards using the nRF52840
-       and the PRNG on others.
-       """
-    try:
-        key = os.urandom(n_bytes)
-    except NotImplementedError:
-        key = bytes([random.getrandbits(8) for _ in range(n_bytes)])
-    return key
-
-
-def encrypt(plain_text, key, algorithm):
-    """Encrypt plain_text bytes with key bytes using algorithm.
-       Algorithm "xor" can be used for stream ciphers.
-    """
-    if algorithm == "xor":
-        return bytes([plain_text[i] ^ key[i] for i in range(len(plain_text))])
-    else:
-        return ValueError("Algorithm not implemented")
-
-
-def decrypt(cipher_text, key, algorithm):
-    """Decrypt plain_text bytes with key bytes using algorithm.
-       Algorithm "xor" can be used for stream ciphers.
-    """
-    if algorithm == "xor":
-        return encrypt(cipher_text, key, "xor")  ### enc/dec are same
-    else:
-        return ValueError("Algorithm not implemented")
-
-
 if display is not None:
     ### The 6x14 terminalio classic font
     FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
@@ -1464,7 +1413,7 @@ if display is not None:
 new_round_init = True
 
 while True:
-    ### TODO - test this for need for debounce on left button
+    ### TODO - physically test this for need for debounce on left button
 
     if round_no > TOTAL_ROUNDS:
         print("Summary: ",
@@ -1515,7 +1464,7 @@ while True:
         otpad_key = generateOTPadKey(8)  ### TODO - replace with something
         d_print(3, "KEY", otpad_key)  ### TODO - discuss in the Code Discussion
 
-        plain_bytes = bytes_pad(my_choice, size=8, pad=0)
+        plain_bytes = bytesPad(my_choice, size=8, pad=0)
         cipher_bytes = encrypt(plain_bytes, otpad_key, "xor")
         enc_data_msg = RpsEncDataAdvertisement(enc_data=cipher_bytes,
                                                round_no=round_no)
@@ -1591,7 +1540,7 @@ while True:
                     round_msg2 = key_ads[0][0].round_no
                     if round_no == round_msg1 == round_msg2:
                         plain_bytes = decrypt(cipher_bytes, key_bytes, "xor")
-                        opponent_choice = str_unpad(plain_bytes)
+                        opponent_choice = strUnpad(plain_bytes)
                     else:
                         print("Received wrong round for {:d} {:d}: {:d} {:d}",
                               opponent_name, round_no, round_msg1, round_msg2)
