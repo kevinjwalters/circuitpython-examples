@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.7
+### clue-multi-rpsgame v1.8
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -56,7 +56,8 @@ from rps_advertisements import JoinGameAdvertisement, \
                                RpsRoundEndAdvertisement
 from rps_audio import SampleJukebox
 from rps_crypto import bytesPad, strUnpad, generateOTPadKey, \
-                       encrypt, decrypt
+                       enlargeKey, encrypt, decrypt
+
 
 ### TODO
 ### Maybe simple version is clue only
@@ -1412,6 +1413,10 @@ if display is not None:
 
 new_round_init = True
 
+### A nonce by definition must not be reused but here a random key is
+### generated per round and this is used once per round so unusually it's ok
+nonce = bytes(range(12, 0, -1))
+
 while True:
     ### TODO - physically test this for need for debounce on left button
 
@@ -1461,11 +1466,13 @@ while True:
         my_choice = CHOICES[my_choice_idx]
         player_choices = [my_choice]
 
-        otpad_key = generateOTPadKey(8)  ### TODO - replace with something
-        d_print(3, "KEY", otpad_key)  ### TODO - discuss in the Code Discussion
+        ### Repeating key four times to make key for ChaCha20
+        short_key = generateOTPadKey(8)
+        key = enlargeKey(short_key, 4)
+        d_print(3, "KEY", key)
 
         plain_bytes = bytesPad(my_choice, size=8, pad=0)
-        cipher_bytes = encrypt(plain_bytes, otpad_key, "xor")
+        cipher_bytes = encrypt(plain_bytes, key, "chacha20", nonce=nonce)
         enc_data_msg = RpsEncDataAdvertisement(enc_data=cipher_bytes,
                                                round_no=round_no)
 
@@ -1485,7 +1492,7 @@ while True:
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr)
 
-        key_data_msg = RpsKeyDataAdvertisement(key_data=otpad_key, round_no=round_no)
+        key_data_msg = RpsKeyDataAdvertisement(key_data=short_key, round_no=round_no)
         ### All of the programs will be loosely synchronised now
         _, key_data_by_addr, _ = broadcastAndReceive(key_data_msg,
                                                      RpsEncDataAdvertisement,
@@ -1539,7 +1546,8 @@ while True:
                     key_bytes = key_ads[0][0].key_data
                     round_msg2 = key_ads[0][0].round_no
                     if round_no == round_msg1 == round_msg2:
-                        plain_bytes = decrypt(cipher_bytes, key_bytes, "xor")
+                        key = enlargeKey(key_bytes, 4)
+                        plain_bytes = decrypt(cipher_bytes, key, "chacha20", nonce=nonce)
                         opponent_choice = strUnpad(plain_bytes)
                     else:
                         print("Received wrong round for {:d} {:d}: {:d} {:d}",
