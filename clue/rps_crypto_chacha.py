@@ -1,25 +1,8 @@
-### MIT License
+### Copyright (c) 2015 Hubert Kario (code from tlslite-ng library)
+### Copyright (c) 2020 Kevin J. Walters (very minor CP tweaks)
 
-### Copyright (c) 2015 Hubert Kario (public domain license from tlslite-ng library)
-### Copyright (c) 2020 Kevin J. Walters
-
-### Permission is hereby granted, free of charge, to any person obtaining a copy
-### of this software and associated documentation files (the "Software"), to deal
-### in the Software without restriction, including without limitation the rights
-### to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-### copies of the Software, and to permit persons to whom the Software is
-### furnished to do so, subject to the following conditions:
-
-### The above copyright notice and this permission notice shall be included in all
-### copies or substantial portions of the Software.
-
-### THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-### IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-### FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-### AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-### LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-### SOFTWARE.
+### GNU Lesser General Public License, version 2.1
+### https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
 
 
 """Pure Python implementation of ChaCha cipher
@@ -28,18 +11,19 @@ Implementation that follows RFC 7539 closely.
 
 import struct
 
-mask32 = 0xffffffff
+MASK32 = const(0xffffffff)
 
 
-class ChaCha(object):
+class ChaCha():
     """Pure python implementation of ChaCha cipher"""
 
     constants = [0x61707865, 0x3320646e, 0x79622d32, 0x6b206574]
 
+    ### pylint: disable=invalid-name
     @staticmethod
     def rotl32(v, c):
         """Rotate left a 32 bit integer v by c bits"""
-        return ((v << c) & mask32) | (v >> (32 - c))
+        return ((v << c) & MASK32) | (v >> (32 - c))
 
     @staticmethod
     def quarter_round(x, a, b, c, d):
@@ -49,21 +33,21 @@ class ChaCha(object):
         xc = x[c]
         xd = x[d]
 
-        xa = (xa + xb) & mask32
+        xa = (xa + xb) & MASK32
         xd = xd ^ xa
-        xd = ((xd << 16) & mask32 | (xd >> 16))
+        xd = ((xd << 16) & MASK32 | (xd >> 16))
 
-        xc = (xc + xd) & mask32
+        xc = (xc + xd) & MASK32
         xb = xb ^ xc
-        xb = ((xb << 12) & mask32 | (xb >> 20))
+        xb = ((xb << 12) & MASK32 | (xb >> 20))
 
-        xa = (xa + xb) & mask32
+        xa = (xa + xb) & MASK32
         xd = xd ^ xa
-        xd = ((xd << 8) & mask32 | (xd >> 24))
+        xd = ((xd << 8) & MASK32 | (xd >> 24))
 
-        xc = (xc + xd) & mask32
+        xc = (xc + xd) & MASK32
         xb = xb ^ xc
-        xb = ((xb << 7) & mask32 | (xb >> 25))
+        xb = ((xb << 7) & MASK32 | (xb >> 25))
 
         x[a] = xa
         x[b] = xb
@@ -88,21 +72,21 @@ class ChaCha(object):
             xc = x[c]
             xd = x[d]
 
-            xa = (xa + xb) & mask32
+            xa = (xa + xb) & MASK32
             xd = xd ^ xa
-            xd = ((xd << 16) & mask32 | (xd >> 16))
+            xd = ((xd << 16) & MASK32 | (xd >> 16))
 
-            xc = (xc + xd) & mask32
+            xc = (xc + xd) & MASK32
             xb = xb ^ xc
-            xb = ((xb << 12) & mask32 | (xb >> 20))
+            xb = ((xb << 12) & MASK32 | (xb >> 20))
 
-            xa = (xa + xb) & mask32
+            xa = (xa + xb) & MASK32
             xd = xd ^ xa
-            xd = ((xd << 8) & mask32 | (xd >> 24))
+            xd = ((xd << 8) & MASK32 | (xd >> 24))
 
-            xc = (xc + xd) & mask32
+            xc = (xc + xd) & MASK32
             xb = xb ^ xc
-            xb = ((xb << 7) & mask32 | (xb >> 25))
+            xb = ((xb << 7) & MASK32 | (xb >> 25))
 
             x[a] = xa
             x[b] = xb
@@ -119,7 +103,7 @@ class ChaCha(object):
         for _ in range(0, rounds // 2):
             dbl_round(working_state)
 
-        return [(st + wrkSt) & mask32 for st, wrkSt
+        return [(st + wrkSt) & MASK32 for st, wrkSt
                 in zip(state, working_state)]
 
     @staticmethod
@@ -153,7 +137,7 @@ class ChaCha(object):
     def encrypt(self, plaintext):
         """Encrypt the data"""
         encrypted_message = bytearray()
-        for i, block in enumerate(plaintext[i:i+64] for i
+        for i, block in enumerate(plaintext[i:i + 64] for i
                                   in range(0, len(plaintext), 64)):
             key_stream = ChaCha.chacha_block(self.key,
                                              self.counter + i,
