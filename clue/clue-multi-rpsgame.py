@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.8
+### clue-multi-rpsgame v1.9
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -1226,7 +1226,10 @@ while True:
         ### Decrypt results
         ### If any data is incorrect the opponent_choice is left as None
         # TODO - get ride of [:]
-        for p_idx1, playernm in enumerate(players[1:], 1):
+        for p_idx1, playernm in enumerate(players):
+            if p_idx1 == 0:
+                continue  ### Only need to decrypt other players' data
+
             opponent_name, opponent_macaddr = playernm
             opponent_choice = None
             try:
