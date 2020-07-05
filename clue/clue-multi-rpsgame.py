@@ -1109,7 +1109,7 @@ if display is not None:
 new_round_init = True
 
 ### A nonce by definition must not be reused but here a random key is
-### generated per round and this is used once per round so unusually it's ok
+### generated per round and this is used once per round so this is ok
 nonce = bytes(range(12, 0, -1))
 
 while True:
@@ -1224,14 +1224,14 @@ while True:
         ### This will have accumulated all the messages for this round
         allmsg_by_addr = re_by_addr
 
+        ### Allow old value of _ to be GC'd - del does not work on _
+        _ = None
+
         ### Decrypt results
         ### If any data is incorrect the opponent_choice is left as None
-        # TODO - get ride of [:]
-        for p_idx1, playernm in enumerate(players):
-            if p_idx1 == 0:
-                continue  ### Only need to decrypt other players' data
-
-            opponent_name, opponent_macaddr = playernm
+        for p_idx1 in range(1, len(players)):
+            opponent_name = players[p_idx1][0]
+            opponent_macaddr = players[p_idx1][1]
             opponent_choice = None
             try:
                 cipher_ads = list(filter(lambda ad: isinstance(ad[0], RpsEncDataAdvertisement),
@@ -1239,9 +1239,9 @@ while True:
                 key_ads = list(filter(lambda ad: isinstance(ad[0], RpsKeyDataAdvertisement),
                                allmsg_by_addr[opponent_macaddr]))
                 ### Two packets per class will be the packet and then packet
-                ### with ackall set is received
-                ### One packet will be the first packets lost but the second
-                ### received with ack
+                ### with ack set 
+                ### One packet per class means the first packet was lost
+                ### leaving just the second packet with ack set
                 if len(cipher_ads) in (1, 2) and len(key_ads) in (1, 2):
                     cipher_bytes = cipher_ads[0][0].enc_data
                     round_msg1 = cipher_ads[0][0].round_no
@@ -1262,7 +1262,7 @@ while True:
             player_choices.append(opponent_choice)
 
         ### Free up some memory by deleting data structures no longer needed
-        del _, allmsg_by_addr, re_by_addr, key_data_by_addr, enc_data_by_addr
+        del allmsg_by_addr, re_by_addr, key_data_by_addr, enc_data_by_addr
         gc.collect()
         d_print(2, "GC after comms", gc.mem_free())
 
