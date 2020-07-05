@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.9
+### clue-multi-rpsgame v1.10
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -1081,11 +1081,12 @@ jg_msg = JoinGameAdvertisement(game="RPS")
                           ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
                           endscan_cb=lambda _a, _b, _c: button_left(),
                           name_cb=add_player)
+sample.stop()
 ### Wait for button release - this stops a long press
 ### being acted upon in the main loop further down
 while button_left():
     pass
-sample.stop()
+
 
 scores = [0] * len(players)
 num_other_players = len(players) - 1
