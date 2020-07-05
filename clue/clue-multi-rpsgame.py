@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.10
+### clue-multi-rpsgame v1.11
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -317,6 +317,7 @@ MAX_PLAYERS = 8
 CHOICES = ("rock", "paper", "scissors")
 ### Colours for NeoPixels on display-less CPB
 ### Should be dim to avoid an opponent seeing choice from reflected light
+### NB: these get << 5 in showPlayerVPlayerNeoPixels
 CHOICE_COL = (0x040000,  ### Red for Rock
               0x030004,  ### Purple for Paper
               0x000004   ### Sapphire blue for Scissors
@@ -338,7 +339,7 @@ JG_FLASH = True  ### TODO DISABLE THIS FOR THE ADAFRUIT RELEASE
 if display is not None:
     STD_BRIGHTNESS = display.brightness  ### use to fade down/up
 
-    ### The 6x14 terminalio classic font
+    ### The 6x14 terminalio classic monospaced font
     FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
     DISPLAY_WIDTH = display.width
     DISPLAY_HEIGHT = display.height
@@ -757,7 +758,6 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
     sort_scores = list(sco)  ### Make an independent local copy
     if not descending:
         empty_group = Group()  ### minor hack to aid swaps in scores_group
-        ## TODO - remove? sbg_dob.hidden = True  ### Speed up by getting rid of background text
         step = 4
         qm_dob = Label(terminalio.FONT,
                        text="?",
@@ -806,8 +806,7 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                     qm_dob.color = QM_SORT_FG
 
             if swaps == 0:
-                break   ### Sorted if no values were swapped 
-        ## TODO - remove? sbg_dob.hidden = False
+                break   ### Sort complete if no values were swapped
         gs_group.remove(qm_dob)
 
     time.sleep(10)
@@ -823,7 +822,7 @@ def showGameResultNeoPixels(pix, pla, sco, rounds_tot=None):
     idx_n_score = [(s, sco[s]) for s in range(len(sco))]
     idx_n_score.sort(key=lambda s: s[1], reverse=True)
     num_pixels = len(pix)
-    
+
     bg_col = BLACK
     for idx, score in idx_n_score:
         playerIdx = choiceToPixIdx(idx)
@@ -845,7 +844,7 @@ def showGameResultNeoPixels(pix, pla, sco, rounds_tot=None):
             time.sleep(0.5)
 
         pix.fill(BLACK)
- 
+
 
 def showGameResult(disp, pix, pla, sco,
                    rounds_tot=None):
@@ -914,14 +913,14 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
         for (name, sprite,
              start_x,
              fg, bg) in player_detail:
-            s_group = Group(scale=2, max_size=2)  ### audio is choppy at scale=3
+            s_group = Group(scale=2, max_size=2)  ### Audio is choppy at scale=3
             s_group.x = start_x
             s_group.y = (DISPLAY_HEIGHT - 2 * (SPRITE_SIZE + FONT_HEIGHT)) // 2
 
             s_group.append(sprite)
             p_name_dob = Label(terminalio.FONT,
                                text=name,
-                               scale=1,  ### this is scaled by the group
+                               scale=1,  ### This is scaled by the group
                                color=fg,
                                background_color=bg)
             ### Centre text below sprite - values are * Group scale
@@ -931,9 +930,11 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
 
             pvp_group.append(s_group)
 
+        ### max_glyphs is set to the maximum len of all the possible strings
+        ### the + 1 is workaround in case a buggy version of library is used
         summary_dob = Label(terminalio.FONT,
                            text="",
-                           max_glyphs=8 + 1,  ### max len of all strings + 1
+                           max_glyphs=8 + 1,
                            scale=3,
                            color=BLACK)
         summary_dob.y = round(DISPLAY_HEIGHT - (3 * FONT_HEIGHT // 2))
@@ -953,7 +954,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                     sample.play(result)
                 time.sleep(0.2)
         else:
-            ### Move sprites together, winning sprite overlaps loser
+            ### Move sprites together, winning sprite overlaps and covers loser
             for idx in range(16):
                 pvp_group[idx_lr[0]].x += 10
                 pvp_group[idx_lr[1]].x -= 10
@@ -1004,6 +1005,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
             sample.play(result)
         ramp_updown = (list(range(8, 128 + 1, 8))
                        + list(range(128 - 8, 0 - 1, -8)))
+        ### This fills all NeoPixels so will clear the RPS choice
         for _ in range(3):
             for ramp in ramp_updown:
                 pix.fill((ramp, 0, 0))  ### modulate red led from RGB
@@ -1014,16 +1016,21 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
         if result is not None:
             sample.play(result)
 
-        pix[0] = CHOICE_COL[my_ch_idx]
-        pix[pix_op_idx] = CHOICE_COL[op_ch_idx]
-
-        if not draw:
-            ### brighten the pixel for winner
+        ### Clear the RPS choice and show the player and opponent choices
+        pix.fill(BLACK)
+        if draw:
+            pix[0] = CHOICE_COL[my_ch_idx] << 2
+            pix[pix_op_idx] = CHOICE_COL[op_ch_idx] << 2
+            time.sleep(2.5)
+        else:
+            pix[0] = CHOICE_COL[my_ch_idx]
+            pix[pix_op_idx] = CHOICE_COL[op_ch_idx]
+            ### Brighten the pixel for winner
             brigten_idx = 0 if win else pix_op_idx
-            for _ in range(4):
+            for _ in range(5):
                 rr, gg, bb = pix[brigten_idx]
                 pix[brigten_idx] = (rr << 1, gg << 1, bb << 1)
-                time.sleep(0.35)
+                time.sleep(0.45)
 
         if summary is not None:
             sample.wait()
@@ -1224,7 +1231,7 @@ while True:
         ### This will have accumulated all the messages for this round
         allmsg_by_addr = re_by_addr
 
-        ### Allow old value of _ to be GC'd - del does not work on _
+        ### Allow old value of _ to be GC'd, del does not work on _
         _ = None
 
         ### Decrypt results
