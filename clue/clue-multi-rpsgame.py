@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.11
+### clue-multi-rpsgame v1.12
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -709,14 +709,16 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
     fadeUpDown(disp, "down")
     emptyGroup(main_display_group)
 
-    ### score list group + background + question mark for sorting
+    ### Score list group + background + question mark for sorting
     gs_group = Group(max_size=3)
     
+    ### Add a background with centered GAME over SCORES
+    bg_scale = 6
     sbg_dob = Label(terminalio.FONT,
                     text=" GAME\nSCORES",
-                    scale=6,
+                    scale=bg_scale,
                     color=0x202020)
-    sbg_dob.x = (DISPLAY_WIDTH - 6 * 6 * FONT_WIDTH) // 2
+    sbg_dob.x = (DISPLAY_WIDTH - 6 * bg_scale * FONT_WIDTH) // 2
     sbg_dob.y = DISPLAY_HEIGHT // 2
     gs_group.append(sbg_dob)
     main_display_group = gs_group
@@ -772,7 +774,6 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                 above_y = scores_group[idx].y
                 below_y = scores_group[idx + 1].y
                 qm_dob.y = (above_y + below_y) // 2
-                time.sleep(0.35)
                 if above_score < sort_scores[idx + 1]:
                     qm_dob.text = "<"
                     qm_dob.color = QM_SORTING_FG
@@ -804,6 +805,9 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
 
                     qm_dob.text = "?"
                     qm_dob.color = QM_SORT_FG
+                    time.sleep(0.2)
+                else:
+                    time.sleep(0.6)
 
             if swaps == 0:
                 break   ### Sort complete if no values were swapped
@@ -1021,7 +1025,7 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
         if draw:
             pix[0] = CHOICE_COL[my_ch_idx] << 2
             pix[pix_op_idx] = CHOICE_COL[op_ch_idx] << 2
-            time.sleep(2.5)
+            time.sleep(0.25)
         else:
             pix[0] = CHOICE_COL[my_ch_idx]
             pix[pix_op_idx] = CHOICE_COL[op_ch_idx]
@@ -1035,7 +1039,8 @@ def showPlayerVPlayerNeoPixels(pix, op_idx, my_ch_idx, op_ch_idx,
         if summary is not None:
             sample.wait()
             sample.play(summary)
-
+    sample.wait()  ### Ensure first or second sample have completed
+    time.sleep(0.5)
     pix.fill(BLACK)
 
 
@@ -1059,11 +1064,10 @@ def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx,
         showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                                 result_wav, summary_wav, win, draw, void)
 
-    sample.wait()  ### Ensure any sound samples have completed
 
 
 ### Make a list of all the player's (name, mac address as text)
-### with this player as first entry
+### where both are strings with this player as first entry 
 players = []
 my_name = ble.name
 fadeUpDown(display, "down")
@@ -1079,21 +1083,19 @@ d_print(2, "GC before JG", gc.mem_free())
 sample.play("searching", loop=True)
 fadeUpDown(display, "up")
 jg_msg = JoinGameAdvertisement(game="RPS")
-(other_player_ads,
- other_player_ads_by_addr,
- _) = broadcastAndReceive(ble,
-                          jg_msg,
-                          scan_time=JG_MSG_TIME_S,
-                          scan_response_request=True,
-                          ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
-                          endscan_cb=lambda _a, _b, _c: button_left(),
-                          name_cb=add_player)
+(_, _, _) = broadcastAndReceive(ble,
+                                jg_msg,
+                                scan_time=JG_MSG_TIME_S,
+                                scan_response_request=True,
+                                ad_cb=lambda _a, _b, _c: flashNP(pixels, JG_RX_COL) if JG_FLASH else None,
+                                endscan_cb=lambda _a, _b, _c: button_left(),
+                                name_cb=add_player)
+_ = None  ### Clear to allow GC
 sample.stop()
 ### Wait for button release - this stops a long press
 ### being acted upon in the main loop further down
 while button_left():
     pass
-
 
 scores = [0] * len(players)
 num_other_players = len(players) - 1
@@ -1101,7 +1103,6 @@ num_other_players = len(players) - 1
 gc.collect()
 d_print(2, "GC after JG", gc.mem_free())
 
-d_print(2, "PLAYER ADS", other_player_ads_by_addr)
 d_print(1, "PLAYERS", players)
 
 ### Sequence numbers - real packets start at 1
@@ -1117,7 +1118,7 @@ new_round_init = True
 
 ### A nonce by definition must not be reused but here a random key is
 ### generated per round and this is used once per round so this is ok
-nonce = bytes(range(12, 0, -1))
+static_nonce = bytes(range(12, 0, -1))
 
 while True:
     ### TODO - physically test this for need for debounce on left button
@@ -1174,7 +1175,7 @@ while True:
         d_print(3, "KEY", key)
 
         plain_bytes = bytesPad(my_choice, size=8, pad=0)
-        cipher_bytes = encrypt(plain_bytes, key, "chacha20", nonce=nonce)
+        cipher_bytes = encrypt(plain_bytes, key, "chacha20", nonce=static_nonce)
         enc_data_msg = RpsEncDataAdvertisement(enc_data=cipher_bytes,
                                                round_no=round_no)
 
@@ -1256,7 +1257,7 @@ while True:
                     round_msg2 = key_ads[0][0].round_no
                     if round_no == round_msg1 == round_msg2:
                         key = enlargeKey(key_bytes, 4)
-                        plain_bytes = decrypt(cipher_bytes, key, "chacha20", nonce=nonce)
+                        plain_bytes = decrypt(cipher_bytes, key, "chacha20", nonce=static_nonce)
                         opponent_choice = strUnpad(plain_bytes)
                     else:
                         print("Received wrong round for {:d} {:d}: {:d} {:d}",
