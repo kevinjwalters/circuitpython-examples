@@ -102,7 +102,7 @@ def startScan(radio, send_ad, send_advertising,
     matching_ads = 0
     for adv_ss in radio.start_scan(*ss_rx_ad_classes,
                                    ## minimum_rssi=-120,
-                                   buffer_size=1536,   ### default is 512
+                                   buffer_size=1800,   ### default is 512, was 1536
                                    active=scan_response_request,
                                    timeout=scan_time):
         received_ns = time.monotonic_ns()

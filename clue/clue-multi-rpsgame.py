@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.12
+### clue-multi-rpsgame v1.13
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -58,14 +58,12 @@ from rps_crypto import bytesPad, strUnpad, generateOTPadKey, \
 from rps_comms import broadcastAndReceive, addr_to_text
 
 
-### TODO - clear NeoPixel on CPB only at end of round before scores are shown
-### TODO - try one extra shift on brightness
-### TODO - humiliation on 0 and excellent on >= int((players-1) * rounds * 1.5)
-
-
 ### TODO
 ### Maybe simple version is clue only
 ### simple version still needs win indicator (flash text?) and a score counter
+
+
+### TODO - lost the error reporting - voice True does show up.
 
 
 ### Complex version demos how to
@@ -297,6 +295,7 @@ ERROR_COL_FG = 0xff0000
 TITLE_TXT_COL_FG = 0xc000c0
 INFO_COL_FG = 0xc0c000
 INFO_COL_BG = 0x000080
+GS_COL = 0x202020
 QM_SORT_FG = 0x808000
 QM_SORTING_FG = 0xff8000
 RED_COL = 0xff0000
@@ -304,11 +303,12 @@ ORANGE_COL = 0xff8000
 YELLOW_COL = 0xffff00
 DRAWLOSE_COL = 0x0000f0
 
+
 ### NeoPixel colours
 GAMENO_GREEN = 0x002000
 ROUNDNO_WHITE = 0x0202020
 PLAYER_COL = 0xff0000
-SCORE_COLS = (0x3f1200, 0x3f2c00, 0x002400, 0x00003f, 0x10001c, 0x321232)
+SCORE_COLS = (0x200600, 0x201300, 0x001200, 0x000020, 0x08000e, 0x140618)
 
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
@@ -586,6 +586,9 @@ voids = 0
 ### TOTAL_ROUNDS = 5
 TOTAL_ROUNDS = 3
 
+CRYPTO_ALGO = "chacha20"
+KEY_SIZE = 8  ### in bytes
+KEY_ENLARGE = 256 // KEY_SIZE // 8
 
 def evaluateRound(mine, yours):
     """Determine who won the game based on the two strings mine and yours.
@@ -710,17 +713,25 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
     emptyGroup(main_display_group)
 
     ### Score list group + background + question mark for sorting
-    gs_group = Group(max_size=3)
-    
+    gs_group = Group(max_size=4)
+
+    ### TODO increase size and split this into two
     ### Add a background with centered GAME over SCORES
     bg_scale = 6
-    sbg_dob = Label(terminalio.FONT,
-                    text=" GAME\nSCORES",
-                    scale=bg_scale,
-                    color=0x202020)
-    sbg_dob.x = (DISPLAY_WIDTH - 6 * bg_scale * FONT_WIDTH) // 2
-    sbg_dob.y = DISPLAY_HEIGHT // 2
-    gs_group.append(sbg_dob)
+    sbg_dob1 = Label(terminalio.FONT,
+                     text="GAME",
+                     scale=bg_scale,
+                     color=GS_COL)
+    sbg_dob1.x = (DISPLAY_WIDTH - 4 * bg_scale * FONT_WIDTH) // 2
+    sbg_dob1.y = DISPLAY_HEIGHT // 3
+    sbg_dob2 = Label(terminalio.FONT,
+                     text="SCORES",
+                     scale=bg_scale,
+                     color=GS_COL)
+    sbg_dob2.x = (DISPLAY_WIDTH - 6 * bg_scale * FONT_WIDTH) // 2
+    sbg_dob2.y = DISPLAY_HEIGHT // 3 * 2
+    gs_group.append(sbg_dob1)
+    gs_group.append(sbg_dob2)
     main_display_group = gs_group
     disp.show(main_display_group)
     fadeUpDown(disp, "up")
@@ -813,8 +824,6 @@ def showGameResultScreen(disp, pla, sco, rounds_tot=None):
                 break   ### Sort complete if no values were swapped
         gs_group.remove(qm_dob)
 
-    time.sleep(10)
-
 
 def showGameResultNeoPixels(pix, pla, sco, rounds_tot=None):
     """Display a high score table on NeoPixels.
@@ -857,6 +866,16 @@ def showGameResult(disp, pix, pla, sco,
         showGameResultNeoPixels(pix, pla, sco, rounds_tot=rounds_tot)
     else:
         showGameResultScreen(disp, pla, sco, rounds_tot=rounds_tot)
+
+    if sco[0] == 0:
+        sample.play("humiliation")
+    elif sco[0] >= int((len(sco) - 1) * rounds_tot * 1.5):
+        sample.play("excellent")
+    
+    if disp is not None:
+        time.sleep(10)  ### Leave displayed scores visible
+    
+    sample.wait()
 
 
 def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
@@ -941,7 +960,7 @@ def showPlayerVPlayerScreen(disp, me_name, op_name, my_ch_idx, op_ch_idx,
                            max_glyphs=8 + 1,
                            scale=3,
                            color=BLACK)
-        summary_dob.y = round(DISPLAY_HEIGHT - (3 * FONT_HEIGHT // 2))
+        summary_dob.y = round(DISPLAY_HEIGHT - (3 * FONT_HEIGHT / 2))
         pvp_group.append(summary_dob)
 
         main_display_group = pvp_group
@@ -1065,7 +1084,6 @@ def showPlayerVPlayer(disp, pix, me_name, op_name, op_idx, my_ch_idx, op_ch_idx,
                                 result_wav, summary_wav, win, draw, void)
 
 
-
 ### Make a list of all the player's (name, mac address as text)
 ### where both are strings with this player as first entry 
 players = []
@@ -1170,12 +1188,13 @@ while True:
         player_choices = [my_choice]
 
         ### Repeating key four times to make key for ChaCha20
-        short_key = generateOTPadKey(8)
-        key = enlargeKey(short_key, 4)
+        short_key = generateOTPadKey(KEY_SIZE)
+        key = enlargeKey(short_key, KEY_ENLARGE)
         d_print(3, "KEY", key)
 
         plain_bytes = bytesPad(my_choice, size=8, pad=0)
-        cipher_bytes = encrypt(plain_bytes, key, "chacha20", nonce=static_nonce)
+        cipher_bytes = encrypt(plain_bytes, key, CRYPTO_ALGO,
+                               nonce=static_nonce)
         enc_data_msg = RpsEncDataAdvertisement(enc_data=cipher_bytes,
                                                round_no=round_no)
 
@@ -1208,6 +1227,7 @@ while True:
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr,
                                                      ads_by_addr=enc_data_by_addr)
+        del enc_data_by_addr
 
         ### Play end transmit sound while doing next decrypt bit
         sample.play("end-tx")
@@ -1228,50 +1248,59 @@ while True:
                                                seq_tx=seq_tx,
                                                seq_rx_by_addr=seq_rx_by_addr,
                                                ads_by_addr=key_data_by_addr)
-
+        del key_data_by_addr
+        _ = None  ### Allow old value of _ to be GC'd, del does not work on _
         ### This will have accumulated all the messages for this round
         allmsg_by_addr = re_by_addr
-
-        ### Allow old value of _ to be GC'd, del does not work on _
-        _ = None
+        del re_by_addr
 
         ### Decrypt results
         ### If any data is incorrect the opponent_choice is left as None
         for p_idx1 in range(1, len(players)):
+            print("DECRYPT GC", p_idx1, gc.mem_free())
             opponent_name = players[p_idx1][0]
             opponent_macaddr = players[p_idx1][1]
             opponent_choice = None
-            try:
-                cipher_ads = list(filter(lambda ad: isinstance(ad[0], RpsEncDataAdvertisement),
-                                  allmsg_by_addr[opponent_macaddr]))
-                key_ads = list(filter(lambda ad: isinstance(ad[0], RpsKeyDataAdvertisement),
-                               allmsg_by_addr[opponent_macaddr]))
-                ### Two packets per class will be the packet and then packet
-                ### with ack set 
-                ### One packet per class means the first packet was lost
-                ### leaving just the second packet with ack set
-                if len(cipher_ads) in (1, 2) and len(key_ads) in (1, 2):
-                    cipher_bytes = cipher_ads[0][0].enc_data
-                    round_msg1 = cipher_ads[0][0].round_no
-                    key_bytes = key_ads[0][0].key_data
-                    round_msg2 = key_ads[0][0].round_no
-                    if round_no == round_msg1 == round_msg2:
-                        key = enlargeKey(key_bytes, 4)
-                        plain_bytes = decrypt(cipher_bytes, key, "chacha20", nonce=static_nonce)
-                        opponent_choice = strUnpad(plain_bytes)
-                    else:
-                        print("Received wrong round for {:d} {:d}: {:d} {:d}",
-                              opponent_name, round_no, round_msg1, round_msg2)
+            opponent_msgs = allmsg_by_addr.get(opponent_macaddr)
+            if opponent_msgs is None:
+                opponent_msgs = []
+            cipher_ad = None
+            cipher_bytes = None
+            cipher_round = None
+            key_ad = None
+            key_bytes = None
+            key_round = None
+            ### There should be either one or two messges per type
+            ### two occurs when there 
+            for msg_idx in range(len(opponent_msgs)):
+                if (cipher_ad is None
+                    and isinstance(opponent_msgs[msg_idx][0], RpsEncDataAdvertisement)):
+                    cipher_ad = opponent_msgs[msg_idx][0]
+                    cipher_bytes = cipher_ad.enc_data
+                    cipher_round = cipher_ad.round_no
+                elif (key_ad is None
+                      and isinstance(opponent_msgs[msg_idx][0], RpsKeyDataAdvertisement)):
+                    key_ad = opponent_msgs[msg_idx][0]
+                    key_bytes = key_ad.key_data
+                    key_round = key_ad.round_no
+
+            if cipher_ad and key_ad:
+                if round_no == cipher_round == key_round:
+                    key = enlargeKey(key_bytes, KEY_ENLARGE)
+                    plain_bytes = decrypt(cipher_bytes, key, CRYPTO_ALGO,
+                                          nonce=static_nonce)
+                    opponent_choice = strUnpad(plain_bytes)
                 else:
-                    print("Missing packets: Summary: RpsEncDataAdvertisement "
-                          "{:d} and RpsKeyDataAdvertisement {:d}".format(len(cipher_ads), len(key_ads)))
-            except KeyError:
-                pass
+                    print("Received wrong round for {:d} {:d}: {:d} {:d}",
+                          opponent_name, round_no, cipher_round, key_round)
+            else:
+                print("Missing packets: RpsEncDataAdvertisement "
+                      "and RpsKeyDataAdvertisement:", cipher_ad, key_ad)
             player_choices.append(opponent_choice)
 
-        ### Free up some memory by deleting data structures no longer needed
-        del allmsg_by_addr, re_by_addr, key_data_by_addr, enc_data_by_addr
-        gc.collect()
+        ### Free up some memory by deleting any data that's no longer needed
+        del allmsg_by_addr
+        gc.collect()  ### TODO - try removing this
         d_print(2, "GC after comms", gc.mem_free())
 
         ### Ensure end-tx has completed
@@ -1291,17 +1320,21 @@ while True:
                 this_player = 0
                 if p_idx0 == 0:
                     this_player = 1
+                    p0_ch_idx = None
+                    p1_ch_idx = None
                     try:
                         p0_ch_idx = CHOICES.index(player_choices[p_idx0])
                         p1_ch_idx = CHOICES.index(player_choices[p_idx1])
-                        ### showPlayerVPlayer takes int index values for RPS
-                        showPlayerVPlayer(display, pixels,
-                                          p0_name, p1_name, p_idx1,
-                                          p0_ch_idx, p1_ch_idx,
-                                          win, draw, void)
                     except ValueError:
+                        void = True  ### Ensure this is marked void
                         print("ERROR", "failed to decode",
                               player_choices[p_idx0], player_choices[p_idx1])
+
+                    ### showPlayerVPlayer takes int index values for RPS
+                    showPlayerVPlayer(display, pixels,
+                                      p0_name, p1_name, p_idx1,
+                                      p0_ch_idx, p1_ch_idx,
+                                      win, draw, void)
 
                 if void:
                     voids += this_player
