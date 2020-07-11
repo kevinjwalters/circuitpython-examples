@@ -37,9 +37,6 @@ import neopixel
 from adafruit_display_text.label import Label
 
 
-### Set to True for blue flashing when devices are annoucing players' names
-JG_FLASH = True  ### TODO DISABLE THIS FOR THE ADAFRUIT RELEASE
-
 ### Top y position of first choice and pixel separate between choices
 top_y_pos = 60
 choice_sep = 60
@@ -102,21 +99,27 @@ def blankScreen(disp, pix):
 
 class RPSDisplay():
 
-    def __init__(self, disp, pix, sample,
+    def __init__(self, disp, pix,
+                 choices, sample, sample_victory,
                  max_players, button_y_pos,
-                 sprite_filename, sprite_transparent=0):
+                 sprite_filename,
+                 sprite_transparent=0,
+                 ble_color=0x000010):
 
         self.disp = disp
-        self.std_brightness = self.disp.brightness
-        self.width = self.disp.width
-        self.height = self.disp.height
+        self.std_brightness = self.disp.brightness if disp else None
+        self.width = self.disp.width if disp else None
+        self.height = self.disp.height if disp else None
         self.pix = pix
         self.pix_len = len(pix)
         self.sample = sample  ### a SampleJukebox object
+        self.choices = tuple(choices)
+        self.sample_victory = dict(sample_victory)
         self.disp_group = None
         self.font = terminalio.FONT
         self.max_players = max_players
         self.button_y_pos = button_y_pos
+        self.ble_color = ble_color
 
         ### Top y position of first choice and pixel separate between choices
         self.top_y_pos = 60
@@ -129,18 +132,19 @@ class RPSDisplay():
         self.pl_y_cur_pos = 7
         self.pl_y_off = 2 * self.font_height + 1
 
-        (self.sprites,
-         self.opp_sprites,
-         self.sprite_size) = self.loadSprites(sprite_filename,
-                                              transparent=sprite_transparent)
+        if disp is None:
+            self.sprites = self.opp_sprites = self.sprite_size = None
+        else:
+            (self.sprites,
+             self.opp_sprites,
+             self.sprite_size) = self.loadSprites(sprite_filename,
+                                                  transparent=sprite_transparent)
+
 
     @staticmethod
     def loadSprites(filename, transparent=0):
         """Load horizontal sprite sheet if running with a display
         """
-        if disp is None:
-            return (None, None, None)
-
         import adafruit_imageload
         s_bit, s_pal = adafruit_imageload.load(filename,
                                                bitmap=displayio.Bitmap,
@@ -207,7 +211,7 @@ class RPSDisplay():
 
     def showGroup(self, new_group):
         self.disp_group = new_group
-        self.(new_group)
+        self.disp.show(new_group)
 
 
     def emptyGroup(self, dio_group):
@@ -235,10 +239,10 @@ class RPSDisplay():
         """TODO DOC"""
         if self.disp is None:
             self.pix.fill(BLACK)
-            self.pix[choiceToPixIdx(ch_idx)] = CHOICE_COL[ch_idx]
+            self.pix[self.choiceToPixIdx(ch_idx)] = CHOICE_COL[ch_idx]
             return
 
-        emptyGroup(self.disp_group)
+        self.emptyGroup(self.disp_group)
         ### Would be slightly better to create this Group once and re-use it
         round_choice_group = Group(max_size=3)
 
@@ -267,8 +271,7 @@ class RPSDisplay():
         s_group = Group(scale=3, max_size=1)
         s_group.x = 32
         s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2
-        s_group.append(sprites[ch_idx])
-
+        s_group.append(self.sprites[ch_idx])
         round_choice_group.append(s_group)
 
         self.showGroup(round_choice_group)
@@ -276,8 +279,8 @@ class RPSDisplay():
 
     def introductionScreen(self):
         """Introduction screen."""
-        if disp is not None:
-            emptyGroup(disp_group)
+        if self.disp is not None:
+            self.emptyGroup(self.disp_group)
             intro_group = Group(max_size=7)
             welcometo_dob = Label(self.font,
                                   text="Welcome To",
@@ -290,7 +293,7 @@ class RPSDisplay():
 
             extra_space = 8
             spacing = 3 * SPRITE_SIZE + extra_space
-            for idx, sprite in enumerate(sprites):
+            for idx, sprite in enumerate(self.sprites):
                 s_group = Group(scale=3, max_size=1)
                 s_group.x = -96
                 s_group.y = round((DISPLAY_HEIGHT - 1.5 * SPRITE_SIZE) // 2
@@ -312,7 +315,7 @@ class RPSDisplay():
         ### if the text colour is blue, i.e. data is in lsb only
         self.sample.play("welcome-to")
         while self.sample.playing():
-            if disp is not None and intro_group[0].color < WELCOME_COL_FG:
+            if self.disp is not None and intro_group[0].color < WELCOME_COL_FG:
                 intro_group[0].color += 0x10
                 time.sleep(0.120)
 
@@ -323,28 +326,28 @@ class RPSDisplay():
                  ("paper", 11, 2, 0.050),
                  ("scissors", 7, 3, 0.050))
         for idx, (audio_name, x_shift, grp_idx, delay_s) in enumerate(anims):
-            if disp is None:
+            if self.disp is None:
                 self.showChoice(idx)  ### Use for NeoPixels
             self.sample.play(audio_name)
             ### Audio needs to be long enough to finish movement
             while self.sample.playing():
-                if disp is not None:
+                if self.disp is not None:
                     if intro_group[grp_idx].x < onscreen_x_pos:
                         intro_group[grp_idx].x += x_shift
                         time.sleep(delay_s)
 
         ### Set NeoPixels back to black
-        if disp is None:
+        if self.disp is None:
             self.pix.fill(BLACK)
 
         self.sample.play("arena")
         while self.sample.playing():
-            if disp is not None and intro_group[4].color < WELCOME_COL_FG:
+            if self.disp is not None and intro_group[4].color < WELCOME_COL_FG:
                 intro_group[4].color += 0x10
                 time.sleep(0.060)
 
         ### Button Guide for those with a display
-        if disp is not None:
+        if self.disp is not None:
             left_dob = Label(self.font,
                              text="< Select    ",
                              scale=2,
@@ -352,7 +355,7 @@ class RPSDisplay():
                              background_color=INFO_COL_BG)
             left_width = len(left_dob.text) * 2 * FONT_WIDTH
             left_dob.x = -left_width
-            left_dob.y = button_y_pos
+            left_dob.y = self.button_y_pos
             intro_group.append(left_dob)
 
             right_dob = Label(self.font,
@@ -362,7 +365,7 @@ class RPSDisplay():
                               background_color=INFO_COL_BG)
             right_width = len(right_dob.text) * 2 * FONT_WIDTH
             right_dob.x = DISPLAY_WIDTH
-            right_dob.y = button_y_pos
+            right_dob.y = self.button_y_pos
             intro_group.append(right_dob)
 
             ### Move left button text onto screen, then right
@@ -384,18 +387,22 @@ class RPSDisplay():
         if self.disp is None:
             return
 
-        emptyGroup(self.disp_group)
+        self.emptyGroup(self.disp_group)
         playerlist_group = Group(max_size=self.max_players)
         self.showGroup(playerlist_group)
 
 
-    def addPlayer(name, rssi=None):
+    def addPlayer(self, name, rssi=None):
         """Add a player to the player list.
            playerListScreen must be called prior to use."""
+        if self.disp is None:
+            return
+
+        text_color = OPP_NAME_COL_FG if len(self.disp_group) else PLAYER_NAME_COL_FG
         pname_dob = Label(self.font,
                           text=name,
                           scale=2,
-                          color=DEFAULT_TXT_COL_FG)
+                          color=text_color)
         pname_dob.x = self.pl_x_pos
         pname_dob.y = self.pl_y_cur_pos
         self.pl_y_cur_pos += self.pl_y_off
@@ -408,23 +415,28 @@ class RPSDisplay():
         self.pix.fill(BLACK)
 
 
+    def flashBLE(self):
+        """A brief blue flash to indicate Bluetooth Low Energy activity."""
+        self.flashNeoPixels(self.ble_color)
+
+
     def showGameRound(self, game_no=0, round_no=0, rounds_tot=None):
         """Show the game and round number on NeoPixels for screenless devices.
            Only used for Gizmo-less CPB."""
-        if disp is not None:
+        if self.disp is not None:
             return
 
         ### Gradually light NeoPixels in green to show game number
         for p_idx in range(game_no):
-            self.pix[choiceToPixIdx(p_idx)] = GAMENO_GREEN
+            self.pix[self.choiceToPixIdx(p_idx)] = GAMENO_GREEN
             time.sleep(0.5)
 
         time.sleep(2)
 
         ### Flash white five times at position to indicate round number
-        bg_col = pix[round_no - 1]
+        bg_col = self.pix[round_no - 1]
         for _ in range(5):
-            pix_idx = choiceToPixIdx(round_no - 1)
+            pix_idx = self.choiceToPixIdx(round_no - 1)
             self.pix[pix_idx] = ROUNDNO_WHITE
             time.sleep(0.1)
             self.pix[pix_idx] = bg_col
@@ -449,17 +461,17 @@ class RPSDisplay():
                          scale=bg_scale,
                          color=GS_COL)
         sbg_dob1.x = (DISPLAY_WIDTH - 4 * bg_scale * FONT_WIDTH) // 2
-        sbg_dob1.y = DISPLAY_HEIGHT // 3
+        sbg_dob1.y = DISPLAY_HEIGHT // 4
         sbg_dob2 = Label(self.font,
                          text="SCORES",
                          scale=bg_scale,
                          color=GS_COL)
         sbg_dob2.x = (DISPLAY_WIDTH - 6 * bg_scale * FONT_WIDTH) // 2
-        sbg_dob2.y = DISPLAY_HEIGHT // 3 * 2
+        sbg_dob2.y = DISPLAY_HEIGHT // 4 * 3
         gs_group.append(sbg_dob1)
         gs_group.append(sbg_dob2)
         self.showGroup(gs_group)
-        self.fadeUpDown"up")
+        self.fadeUpDown("up")
 
         ### Calculate maximum length player name
         ### and see if scores happen to already be in order
@@ -559,34 +571,33 @@ class RPSDisplay():
            """
         idx_n_score = [(s, sco[s]) for s in range(len(sco))]
         idx_n_score.sort(key=lambda s: s[1], reverse=True)
-        num_pixels = len(pix)
 
         bg_col = BLACK
         for idx, score in idx_n_score:
-            playerIdx = choiceToPixIdx(idx)
+            playerIdx = self.choiceToPixIdx(idx)
             for score in range(score):
-                scoreIdx = choiceToPixIdx(score)
-                rev = min(score // num_pixels, len(SCORE_COLS) - 1)
-                pix[scoreIdx] = SCORE_COLS[rev]
+                scoreIdx = self.choiceToPixIdx(score)
+                rev = min(score // self.pix_len, len(SCORE_COLS) - 1)
+                self.pix[scoreIdx] = SCORE_COLS[rev]
                 if scoreIdx == playerIdx:
                     bg_col = SCORE_COLS[rev]
                 time.sleep(0.09)
-                pix[playerIdx] = PLAYER_COL
+                self.pix[playerIdx] = PLAYER_COL
                 time.sleep(0.09)
-                pix[playerIdx] = bg_col
+                self.pix[playerIdx] = bg_col
 
             for _ in range(4):
-                pix[playerIdx] = bg_col
+                self.pix[playerIdx] = bg_col
                 time.sleep(0.5)
-                pix[playerIdx] = PLAYER_COL
+                self.pix[playerIdx] = PLAYER_COL
                 time.sleep(0.5)
 
-            pix.fill(BLACK)
+            self.pix.fill(BLACK)
 
 
     def showGameResult(self, pla, sco, rounds_tot=None):
 
-        if disp is None:
+        if self.disp is None:
             self.showGameResultNeoPixels(pla, sco, rounds_tot=rounds_tot)
         else:
             self.showGameResultScreen(pla, sco, rounds_tot=rounds_tot)
@@ -596,17 +607,27 @@ class RPSDisplay():
         elif sco[0] >= int((len(sco) - 1) * rounds_tot * 1.5):
             self.sample.play("excellent")
 
-        if disp is not None:
+        if self.disp is not None:
             time.sleep(10)  ### Leave displayed scores visible
 
         self.sample.wait()
 
 
+    def winnerWav(self, mine_idx, yours_idx):
+        """Return the sound file to play to describe victory or None for draw."""
+
+        ### Take the first characters
+        mine = self.choices[mine_idx][0]
+        yours = self.choices[yours_idx][0]
+
+        return self.sample_victory.get(mine + yours)
+
+
     def showPlayerVPlayerScreen(self, me_name, op_name, my_ch_idx, op_ch_idx,
                                 result, summary, win, draw, void):
         """Display a win, draw, lose or error message."""
-        self.fadeUpDown"down")
-        emptyGroup(self.disp_group)
+        self.fadeUpDown("down")
+        self.emptyGroup(self.disp_group)
 
         if void:
             error_tot = 3
@@ -621,7 +642,7 @@ class RPSDisplay():
             op_dob.y = FONT_HEIGHT
             error_group.append(op_dob)
             self.showGroup(error_group)
-            self.fadeUpDown"up", duration=0.4)
+            self.fadeUpDown("up", duration=0.4)
             if result is not None:
                 self.sample.play(result)
             font_scale = 2
@@ -642,9 +663,9 @@ class RPSDisplay():
 
             ### Add player's name and sprite just off left side of screen
             ### and opponent's just off right
-            player_detail = [[me_name, sprites[my_ch_idx], -16 - 3 * SPRITE_SIZE,
+            player_detail = [[me_name, self.sprites[my_ch_idx], -16 - 3 * SPRITE_SIZE,
                               PLAYER_NAME_COL_FG, PLAYER_NAME_COL_BG],
-                             [op_name, opp_sprites[op_ch_idx], 16 + DISPLAY_WIDTH,
+                             [op_name, self.opp_sprites[op_ch_idx], 16 + DISPLAY_WIDTH,
                               OPP_NAME_COL_FG, OPP_NAME_COL_BG]]
             idx_lr = [0, 1]  ### index for left and right sprite
             if win:
@@ -685,7 +706,7 @@ class RPSDisplay():
             pvp_group.append(summary_dob)
 
             self.showGroup(pvp_group)
-            self.fadeUpDown"up", duration=0.4)
+            self.fadeUpDown("up", duration=0.4)
 
             ### Start audio half way through animations
             if draw:
@@ -771,7 +792,7 @@ class RPSDisplay():
                 ### Brighten the pixel for winner
                 brigten_idx = 0 if win else pix_op_idx
                 for _ in range(5):
-                    rr, gg, bb = pix[brigten_idx]
+                    rr, gg, bb = self.pix[brigten_idx]
                     self.pix[brigten_idx] = (rr << 1, gg << 1, bb << 1)
                     time.sleep(0.45)
 
@@ -793,10 +814,10 @@ class RPSDisplay():
             result_wav = None
             summary_wav = "draw"
         else:
-            result_wav = winnerWav(my_ch_idx, op_ch_idx)
+            result_wav = self.winnerWav(my_ch_idx, op_ch_idx)
             summary_wav = "you-win" if win else "you-lose"
 
-        if disp is None:
+        if self.disp is None:
             self.showPlayerVPlayerNeoPixels(op_idx,
                                             my_ch_idx, op_ch_idx,
                                             result_wav, summary_wav, win, draw, void)

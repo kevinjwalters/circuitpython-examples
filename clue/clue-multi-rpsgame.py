@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.14
+### clue-multi-rpsgame v1.15
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -170,6 +170,7 @@ if clue_less:
     else:
         display = None
         JG_RX_COL = 0x000030  ### dimmer blue for upward facing CPB NeoPixels
+        BUTTON_Y_POS = None
 
     audio_out = AudioOut(board.SPEAKER)
     ###pixels = cp.pixels
@@ -223,6 +224,9 @@ else:
 
 blankScreen(display, pixels)
 
+### Set to True for blue flashing when devices are joining the playing group
+JG_FLASH = True  ### TODO DISABLE THIS FOR THE ADAFRUIT RELEASE
+
 IMAGE_DIR = "rps/images"
 AUDIO_DIR = "rps/audio"
 
@@ -241,16 +245,24 @@ del files  ### not needed anymore
 gc.collect()
 d_print(2, "GC after SJ", gc.mem_free())
 
+### A lookup table in Dict form for win/lose
+### does not need to cater for draw condition
+WAV_VICTORY_NAME = { "rp": "paper-rock",
+                     "pr": "paper-rock",
+                     "ps": "scissors-paper",
+                     "sp": "scissors-paper",
+                     "sr": "rock-scissors",
+                     "rs": "rock-scissors"}
+
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
-
-rps_display = RPSDisplay(display, pixels, 
-                         sample,
-                         MAX_PLAYERS, BUTTON_Y_POS,
-                         IMAGE_DIR + "/rps-sprites-ind4.bmp")
-
 ### Some code is dependent on these being lower-case
 CHOICES = ("rock", "paper", "scissors")
+
+rps_display = RPSDisplay(display, pixels, 
+                         CHOICES, sample, WAV_VICTORY_NAME,
+                         MAX_PLAYERS, BUTTON_Y_POS,
+                         IMAGE_DIR + "/rps-sprites-ind4.bmp")
 
 ### Transmit maximum times in seconds
 JG_MSG_TIME_S = 20
@@ -316,25 +328,7 @@ def evaluateRound(mine, yours):
     return (win, draw, void)
 
 
-### A lookup table in Dict form for win/lose
-### does not need to cater for draw condition
-WAV_VICTORY_NAME = { "rp": "paper-rock",
-                     "pr": "paper-rock",
-                     "ps": "scissors-paper",
-                     "sp": "scissors-paper",
-                     "sr": "rock-scissors",
-                     "rs": "rock-scissors"}
-
-def winnerWav(mine_idx, yours_idx):
-    """Return the sound file to play to describe victory or None for draw."""
-
-    ### Take the first characters
-    mine = CHOICES[mine_idx][0]
-    yours = CHOICES[yours_idx][0]
-
-    return WAV_VICTORY_NAME.get(mine + yours)
-
-playerlist_group = playerListScreen(display)
+rps_display.playerListScreen()
 
 def addPlayer(name, addr_text, address, ad):
     global players
@@ -361,7 +355,7 @@ jg_msg = JoinGameAdvertisement(game="RPS")
                                 jg_msg,
                                 scan_time=JG_MSG_TIME_S,
                                 scan_response_request=True,
-                                ad_cb=lambda _a, _b, _c: rps_display.flashNeoPixels(JG_RX_COL) if JG_FLASH else None,
+                                ad_cb=(lambda _a, _b, _c: rps_display.flashBLE()) if JG_FLASH else None,
                                 endscan_cb=lambda _a, _b, _c: button_left(),
                                 name_cb=addPlayer)
 _ = None  ### Clear to allow GC
@@ -552,8 +546,7 @@ while True:
         gc.collect()  ### TODO - try removing this
         d_print(2, "GC after comms", gc.mem_free())
 
-        ### Ensure end-tx has completed
-        sample.wait()
+        sample.wait()  ### Ensure end-tx has completed
 
         ### Chalk up wins and losses - checks this player but also has to
         ### check other players against each other to calculate all the
