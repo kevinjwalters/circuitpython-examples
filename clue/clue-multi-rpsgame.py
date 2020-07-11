@@ -56,28 +56,15 @@ from rps_audio import SampleJukebox
 from rps_crypto import bytesPad, strUnpad, generateOTPadKey, \
                        enlargeKey, encrypt, decrypt
 from rps_comms import broadcastAndReceive, addrToText
-from rps_display import showPlayerVPlayer, \
-                        showGameResult, \
-                        showGameRound, \
-                        flashNeoPixels, \
-                        addPlayerDOB, \
-                        choiceToPixIdx, \
-                        fadeUpDown, \
-                        blankScreen, \
-                        introductionScreen, \
-                        getDisplayInfo, \
-                        getFontInfo, \
-                        loadSprites, \
-                        playerListScreen, \
-                        showChoice
+from rps_display import RPSDisplay, blankScreen
 
 ### TODO
 ### Maybe simple version is clue only
 ### simple version still needs win indicator (flash text?) and a score counter
 
+### TODO - all specifying interval and reduce this for > 4 players
 
-### TODO - lost the error reporting - voice True does show up.
-
+### TODO - player list screen - use yellow cyan colour coding for consistency
 
 ### Complex version demos how to
 
@@ -97,7 +84,6 @@ from rps_display import showPlayerVPlayer, \
 ### could include the lack of protocol versioning and future proofing and cite
 ### LDAP as good example and git perhaps as less good
 ### complex format not compatible with simple format so mixing the two will confuse things
-
 
 ### Other things of interest
 ### https://github.com/adafruit/Adafruit_CircuitPython_BLE_Eddystone
@@ -235,21 +221,10 @@ else:
     ##button_left = lambda: clue.button_a
     ##button_right = lambda: clue.button_b
 
-### This will always by the top level group passed to display.show()
-main_display_group = None
-blankScreen(display, pixels)   ### TODO - need to change loads of stuff to pass main_display_group
-
-### TODO - need to change loads of stuff to pass main_display_group
-### TODO - need to change loads of stuff to pass main_display_group
-### TODO - need to change loads of stuff to pass main_display_group
+blankScreen(display, pixels)
 
 IMAGE_DIR = "rps/images"
 AUDIO_DIR = "rps/audio"
-
-### None, None, None for no display
-(sprites,
- opp_sprites,
- SPRITE_SIZE) = loadSprites(display, IMAGE_DIR + "/rps-sprites-ind4.bmp")
 
 files = (("searching", "welcome-to", "arena", "ready")
           + ("rock", "paper", "scissors")
@@ -266,12 +241,13 @@ del files  ### not needed anymore
 gc.collect()
 d_print(2, "GC after SJ", gc.mem_free())
 
-### Top y position of first choice and pixel separate between choices
-top_y_pos = 60
-choice_sep = 60
-
 ### This limit is based on displaying names on screen with scale=2 font
 MAX_PLAYERS = 8
+
+rps_display = RPSDisplay(display, pixels, 
+                         sample,
+                         MAX_PLAYERS, BUTTON_Y_POS,
+                         IMAGE_DIR + "/rps-sprites-ind4.bmp")
 
 ### Some code is dependent on these being lower-case
 CHOICES = ("rock", "paper", "scissors")
@@ -282,16 +258,9 @@ FIRST_MSG_TIME_S = 12
 STD_MSG_TIME_S = 4
 LAST_ACK_TIME_S = 1.5
 
-(DISPLAY_WIDTH,
- DISPLAY_HEIGHT,
- STD_BRIGHTNESS) = getDisplayInfo(display)
-
-### The 6x14 terminalio classic monospaced font
-(FONT_WIDTH, FONT_HEIGHT) = getFontInfo()
 
 ### Intro screen with audio
-main_display_group = introductionScreen(display, pixels, main_display_group,
-                                        sample, sprites, BUTTON_Y_POS)
+rps_display.introductionScreen()
 
 ### Enable the Bluetooth LE radio and set player's name (from secrets.py)
 ble = BLERadio()
@@ -369,18 +338,16 @@ playerlist_group = playerListScreen(display)
 
 def addPlayer(name, addr_text, address, ad):
     global players
-    global playerlist_group
 
     players.append((name, addr_text))
-    if display is not None:
-        addPlayerDOB(name, playerlist_group)
+    rps_display.addPlayer(name)
 
 
 ### Make a list of all the player's (name, mac address as text)
 ### where both are strings with this player as first entry
 players = []
 my_name = ble.name
-fadeUpDown(display, "down", STD_BRIGHTNESS)
+rps_display.fadeUpDown("down")
 addPlayer(my_name, addrToText(ble.address_bytes), None, None)
 
 ### Join Game
@@ -388,13 +355,13 @@ gc.collect()
 d_print(2, "GC before JG", gc.mem_free())
 
 sample.play("searching", loop=True)
-fadeUpDown(display, "up", STD_BRIGHTNESS)
+rps_display.fadeUpDown("up")
 jg_msg = JoinGameAdvertisement(game="RPS")
 (_, _, _) = broadcastAndReceive(ble,
                                 jg_msg,
                                 scan_time=JG_MSG_TIME_S,
                                 scan_response_request=True,
-                                ad_cb=lambda _a, _b, _c: flashNeoPixels(pixels, JG_RX_COL) if JG_FLASH else None,
+                                ad_cb=lambda _a, _b, _c: rps_display.flashNeoPixels(JG_RX_COL) if JG_FLASH else None,
                                 endscan_cb=lambda _a, _b, _c: button_left(),
                                 name_cb=addPlayer)
 _ = None  ### Clear to allow GC
@@ -416,11 +383,6 @@ d_print(1, "PLAYERS", players)
 seq_tx = [1]  ### The next number to send
 seq_rx_by_addr = {pma: 0 for pn, pma in players[1:]}  ### Per address received all up to
 
-### Important to get rid of playerlist_group variable - this allows GC
-### to dispose of it when the display content is changed
-if playerlist_group is not None:
-    del playerlist_group
-
 new_round_init = True
 
 ### A nonce by definition must not be reused but here a random key is
@@ -434,8 +396,7 @@ while True:
         print("Summary: ",
               "wins {:d}, losses {:d}, draws {:d}, void {:d}\n\n".format(wins, losses, draws, voids))
 
-        showGameResult(display, pixels, players, scores,
-                       rounds_tot=TOTAL_ROUNDS)
+        rps_display.showGameResult(players, scores, rounds_tot=TOTAL_ROUNDS)
 
         ### Reset variables for another game
         round_no = 1
@@ -447,26 +408,23 @@ while True:
         game_no += 1
 
     if new_round_init:
-        showGameRound(display, pixels,
-                      game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS)
+        rps_display.showGameRound(game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS)
         ### Make a new initial random choice for the player and show it
         my_choice_idx = random.randrange(len(CHOICES))
-        fadeUpDown(display, "down", STD_BRIGHTNESS)
-        main_display_group = showChoice(display, pixels, main_display_group, sprites,
-                                        my_choice_idx,
-                                        game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS,
-                                        won_sf=wins, drew_sf=draws, lost_sf=losses)
-        fadeUpDown(display, "up", STD_BRIGHTNESS)
+        rps_display.fadeUpDown("down")
+        rps_display.showChoice(my_choice_idx,
+                               game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS,
+                               won_sf=wins, drew_sf=draws, lost_sf=losses)
+        rps_display.fadeUpDown("up")
         new_round_init = False
 
     if button_left():
         while button_left():  ### Wait for button release
             pass
         my_choice_idx = (my_choice_idx + 1) % len(CHOICES)
-        main_display_group = showChoice(display, pixels, main_display_group, sprites,
-                                        my_choice_idx,
-                                        game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS,
-                                        won_sf=wins, drew_sf=draws, lost_sf=losses)
+        rps_display.showChoice(my_choice_idx,
+                               game_no=game_no, round_no=round_no, rounds_tot=TOTAL_ROUNDS,
+                               won_sf=wins, drew_sf=draws, lost_sf=losses)
 
     if button_right():
         gc.collect()
@@ -622,10 +580,9 @@ while True:
                               player_choices[p_idx0], player_choices[p_idx1])
 
                     ### showPlayerVPlayer takes int index values for RPS
-                    showPlayerVPlayer(display, pixels,
-                                      p0_name, p1_name, p_idx1,
-                                      p0_ch_idx, p1_ch_idx,
-                                      win, draw, void)
+                    rps_display.showPlayerVPlayer(p0_name, p1_name, p_idx1,
+                                                  p0_ch_idx, p1_ch_idx,
+                                                  win, draw, void)
 
                 if void:
                     voids += this_player
