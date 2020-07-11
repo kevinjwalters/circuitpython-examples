@@ -128,7 +128,8 @@ class RPSDisplay():
         (self.font_width,
          self.font_height) = self.font.get_bounding_box()
 
-        self.pl_x_pos = 20
+        self.pl_x_pos = 10
+        self.plrssi_x_rpos = self.width - 10 if self.width else None
         self.pl_y_cur_pos = 7
         self.pl_y_off = 2 * self.font_height + 1
 
@@ -388,7 +389,8 @@ class RPSDisplay():
             return
 
         self.emptyGroup(self.disp_group)
-        playerlist_group = Group(max_size=self.max_players)
+        ### The two multiplier allows for rssi as separate label
+        playerlist_group = Group(max_size=self.max_players * 2)
         self.showGroup(playerlist_group)
 
 
@@ -405,8 +407,18 @@ class RPSDisplay():
                           color=text_color)
         pname_dob.x = self.pl_x_pos
         pname_dob.y = self.pl_y_cur_pos
-        self.pl_y_cur_pos += self.pl_y_off
         self.disp_group.append(pname_dob)
+
+        if rssi is not None:
+            prssi_dob = Label(self.font,
+                              text="{:4d}".format(round(rssi)),
+                              scale=2,
+                              color=text_color)
+            prssi_dob.x = self.plrssi_x_rpos - 4 * 2 * self.font_width
+            prssi_dob.y = self.pl_y_cur_pos
+            self.disp_group.append(prssi_dob)
+        
+        self.pl_y_cur_pos += self.pl_y_off
 
 
     def flashNeoPixels(self, col):

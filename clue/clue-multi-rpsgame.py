@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.16
+### clue-multi-rpsgame v1.17
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -55,32 +55,21 @@ from rps_advertisements import JoinGameAdvertisement, \
 from rps_audio import SampleJukebox
 from rps_crypto import bytesPad, strUnpad, generateOTPadKey, \
                        enlargeKey, encrypt, decrypt
-from rps_comms import broadcastAndReceive, addrToText
+from rps_comms import broadcastAndReceive, addrToText, MIN_AD_INTERVAL
 from rps_display import RPSDisplay, blankScreen
 
 ### TODO
 ### Maybe simple version is clue only
 ### simple version still needs win indicator (flash text?) and a score counter
 
-### TODO - all specifying interval and reduce this for > 4 players
-
-### TODO - player list screen - use yellow cyan colour coding for consistency
-
 ### Complex version demos how to
-
-### use neopixels as alternative display (light 1, 2, 3 discreetly (discrete joke)
 
 ### simple version will have a lot of issues
 ### unreliable transport
 ### lack of synchronised win announcement
-### need sequence number for packets and acks
-### need higher level round numbers to detect out of synch
-### need to work out who is who with N player games
 ### probably not deal with players who join midway?
 ### need to allocate player numbers - could sort by MAC - ACTUALLY this is not needed?!
 ### avoid election algorithms even if tempted
-### got to decide whether to do the littany of crypto mistakes or not - ALREADY HAVE ONE!
-### could do own crypto
 ### could include the lack of protocol versioning and future proofing and cite
 ### LDAP as good example and git perhaps as less good
 ### complex format not compatible with simple format so mixing the two will confuse things
@@ -259,7 +248,7 @@ MAX_PLAYERS = 8
 ### Some code is dependent on these being lower-case
 CHOICES = ("rock", "paper", "scissors")
 
-rps_display = RPSDisplay(display, pixels, 
+rps_display = RPSDisplay(display, pixels,
                          CHOICES, sample, WAV_VICTORY_NAME,
                          MAX_PLAYERS, BUTTON_Y_POS,
                          IMAGE_DIR + "/rps-sprites-ind4.bmp",
@@ -334,8 +323,10 @@ rps_display.playerListScreen()
 def addPlayer(name, addr_text, address, ad):
     global players
 
+    rssi = ad.rssi if ad else None
+
     players.append((name, addr_text))
-    rps_display.addPlayer(name)
+    rps_display.addPlayer(name, rssi=rssi)
 
 
 ### Make a list of all the player's (name, mac address as text)
@@ -361,6 +352,9 @@ jg_msg = JoinGameAdvertisement(game="RPS")
                                 name_cb=addPlayer)
 _ = None  ### Clear to allow GC
 sample.stop()
+gc.collect()
+d_print(2, "GC after JG", gc.mem_free())
+
 ### Wait for button release - this stops a long press
 ### being acted upon in the main loop further down
 while button_left():
@@ -369,8 +363,9 @@ while button_left():
 scores = [0] * len(players)
 num_other_players = len(players) - 1
 
-gc.collect()
-d_print(2, "GC after JG", gc.mem_free())
+### Set the advertising interval to the minimum for four or fewer players
+### and above that extend value by players multiplied by 7ms
+ad_interval = MIN_AD_INTERVAL if len(players) <= 4 else len(players) * 0.007
 
 d_print(1, "PLAYERS", players)
 
@@ -455,6 +450,7 @@ while True:
                                                      RpsEncDataAdvertisement,
                                                      RpsKeyDataAdvertisement,
                                                      scan_time=FIRST_MSG_TIME_S,
+                                                     ad_interval=ad_interval,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr)
@@ -467,6 +463,7 @@ while True:
                                                      RpsKeyDataAdvertisement,
                                                      RpsRoundEndAdvertisement,
                                                      scan_time=STD_MSG_TIME_S,
+                                                     ad_interval=ad_interval,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr,
@@ -488,6 +485,7 @@ while True:
                                                RpsKeyDataAdvertisement,
                                                RpsRoundEndAdvertisement,
                                                scan_time=LAST_ACK_TIME_S,
+                                               ad_interval=ad_interval,
                                                receive_n=num_other_players,
                                                seq_tx=seq_tx,
                                                seq_rx_by_addr=seq_rx_by_addr,

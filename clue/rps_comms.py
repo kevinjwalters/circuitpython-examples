@@ -79,7 +79,7 @@ def max_ack(acklist):
 def startScan(radio, send_ad, send_advertising,
               sequence_number, receive_n,
               ss_rx_ad_classes, rx_ad_classes,
-              scan_time, interval,
+              scan_time, ad_interval, minimum_rssi,
               match_locally, scan_response_request,
               enable_ack, awaiting_allrx, awaiting_allacks,
               ad_cb, name_cb, endscan_cb,
@@ -91,12 +91,12 @@ def startScan(radio, send_ad, send_advertising,
 
     if send_advertising:
         try:
-            radio.start_advertising(send_ad, interval=interval)
+            radio.start_advertising(send_ad, interval=ad_interval)
         except _bleio.BluetoothError:
             pass  ### catch and ignore "Already advertising."
 
-    ### Timeout in seconds
-    ### -100 is probably minimum, -128 would be 8bit signed min
+    ### Timeout value is in seconds
+    ### RSSI -100 is probably minimum, -128 would be 8bit signed min
     ### window and interval are 0.1 by default - same value means
     ### continuous scanning
     ### The 1800 byte buffer_size is a quirky workaround for
@@ -105,7 +105,7 @@ def startScan(radio, send_ad, send_advertising,
     cls_send_ad = type(send_ad)
     matching_ads = 0
     for adv_ss in radio.start_scan(*ss_rx_ad_classes,
-                                   ## minimum_rssi=-120,
+                                   minimum_rssi=minimum_rssi,
                                    buffer_size=1800,   ### default is 512, was 1536
                                    active=scan_response_request,
                                    timeout=scan_time):
@@ -193,7 +193,7 @@ def startScan(radio, send_ad, send_advertising,
                     d_print(4, "old ack", send_ad.ack, "new ack", sequence_number)
                     send_ad.ack = sequence_number
                     if send_advertising:
-                        radio.start_advertising(send_ad, interval=interval)
+                        radio.start_advertising(send_ad, interval=ad_interval)
                     d_print(3, "TXing with ack", send_ad,
                             "ack_count", len(acks))
                 else:
@@ -221,6 +221,8 @@ def broadcastAndReceive(radio,
                         send_ad,
                         *receive_ads_types,
                         scan_time=DEF_SEND_TIME_S,
+                        minimum_rssi=-90,
+                        ad_interval=MIN_AD_INTERVAL,
                         receive_n=0,
                         seq_tx=None,
                         seq_rx_by_addr=None,
@@ -299,8 +301,7 @@ def broadcastAndReceive(radio,
     awaiting_allacks = False
     awaiting_allrx = True
 
-    interval = MIN_AD_INTERVAL
-    d_print(2, "TXing", send_ad, "interval", interval)
+    d_print(2, "TXing", send_ad, "interval", ad_interval)
     matched_ads = 0
     complete = False
     d_print(1, "Listening for", ss_rx_ad_classes)
@@ -330,7 +331,7 @@ def broadcastAndReceive(radio,
          awaiting_allacks) = startScan(radio, send_ad, send_advertising,
                                        sequence_number, receive_n,
                                        ss_rx_ad_classes, rx_ad_classes,
-                                       duration, interval,
+                                       duration, ad_interval, minimum_rssi,
                                        match_locally, scan_response_request,
                                        enable_ack, awaiting_allrx, awaiting_allacks,
                                        ad_cb, name_cb, endscan_cb,
