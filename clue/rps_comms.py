@@ -51,8 +51,9 @@ def d_print(level, *args, **kwargs):
         print(*args, **kwargs)
 
 
-def addr_to_text(mac_addr, big_endian=False, sep=""):
+def addrToText(mac_addr, big_endian=False, sep=""):
     """Convert a mac_addr in bytes to text."""
+    ### Note use of reversed() - macs are returned in an unusual LSB order
     return sep.join(["{:02x}".format(b)
                      for b in (mac_addr if big_endian else reversed(mac_addr))])
 
@@ -94,10 +95,13 @@ def startScan(radio, send_ad, send_advertising,
         except _bleio.BluetoothError:
             pass  ### catch and ignore "Already advertising."
 
-    ### timeout in seconds
+    ### Timeout in seconds
     ### -100 is probably minimum, -128 would be 8bit signed min
     ### window and interval are 0.1 by default - same value means
     ### continuous scanning
+    ### The 1800 byte buffer_size is a quirky workaround for
+    ### MemoryError: memory allocation failed, allocating 1784 bytes
+    ### from CP's symbol table growing as the program executes
     cls_send_ad = type(send_ad)
     matching_ads = 0
     for adv_ss in radio.start_scan(*ss_rx_ad_classes,
@@ -106,7 +110,7 @@ def startScan(radio, send_ad, send_advertising,
                                    active=scan_response_request,
                                    timeout=scan_time):
         received_ns = time.monotonic_ns()
-        addr_text = addr_to_text(adv_ss.address.address_bytes)
+        addr_text = addrToText(adv_ss.address.address_bytes)
 
         ### Add name of the device to dict limiting
         ### this to devices of interest by checking received_ads_by_addr
