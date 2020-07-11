@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.15
+### clue-multi-rpsgame v1.16
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -262,7 +262,8 @@ CHOICES = ("rock", "paper", "scissors")
 rps_display = RPSDisplay(display, pixels, 
                          CHOICES, sample, WAV_VICTORY_NAME,
                          MAX_PLAYERS, BUTTON_Y_POS,
-                         IMAGE_DIR + "/rps-sprites-ind4.bmp")
+                         IMAGE_DIR + "/rps-sprites-ind4.bmp",
+                         ble_color=JG_RX_COL)
 
 ### Transmit maximum times in seconds
 JG_MSG_TIME_S = 20
