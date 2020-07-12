@@ -79,7 +79,8 @@ def max_ack(acklist):
 def startScan(radio, send_ad, send_advertising,
               sequence_number, receive_n,
               ss_rx_ad_classes, rx_ad_classes,
-              scan_time, ad_interval, minimum_rssi,
+              scan_time, ad_interval, 
+              buffer_size, minimum_rssi,
               match_locally, scan_response_request,
               enable_ack, awaiting_allrx, awaiting_allacks,
               ad_cb, name_cb, endscan_cb,
@@ -106,7 +107,7 @@ def startScan(radio, send_ad, send_advertising,
     matching_ads = 0
     for adv_ss in radio.start_scan(*ss_rx_ad_classes,
                                    minimum_rssi=minimum_rssi,
-                                   buffer_size=1800,   ### default is 512, was 1536
+                                   buffer_size=buffer_size,  ### default is 512, was 1536
                                    active=scan_response_request,
                                    timeout=scan_time):
         received_ns = time.monotonic_ns()
@@ -221,8 +222,9 @@ def broadcastAndReceive(radio,
                         send_ad,
                         *receive_ads_types,
                         scan_time=DEF_SEND_TIME_S,
-                        minimum_rssi=-90,
                         ad_interval=MIN_AD_INTERVAL,
+                        buffer_size=1800,
+                        minimum_rssi=-90,
                         receive_n=0,
                         seq_tx=None,
                         seq_rx_by_addr=None,
@@ -243,6 +245,8 @@ def broadcastAndReceive(radio,
        This MODIFIES send_ad by setting sequence_number and ack if those
        properties are present.
        This is likely to run for a fraction of second longer than scan_time.
+       The buffer_size of 1800 helps to prevent 1784 MemoryError
+       from dict enlargement including the interpreter's symbol table.
        """
 
     sequence_number = None
@@ -331,7 +335,8 @@ def broadcastAndReceive(radio,
          awaiting_allacks) = startScan(radio, send_ad, send_advertising,
                                        sequence_number, receive_n,
                                        ss_rx_ad_classes, rx_ad_classes,
-                                       duration, ad_interval, minimum_rssi,
+                                       duration, ad_interval,
+                                       buffer_size, minimum_rssi,
                                        match_locally, scan_response_request,
                                        enable_ack, awaiting_allrx, awaiting_allacks,
                                        ad_cb, name_cb, endscan_cb,

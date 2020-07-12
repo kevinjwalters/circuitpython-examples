@@ -1,5 +1,6 @@
-### bar-hammer v1.0
+### bar-hammer v2.0
 ### Trying to recreate MemoryError with broadcastAndReceive
+### v2 introduces variable buffer sizes
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
 ### using CircuitPython and 5.3.0
@@ -417,6 +418,7 @@ while True:
         key = enlargeKey(short_key, KEY_ENLARGE)
         d_print(3, "KEY", key)
 
+        buffer_size = random.randint(512, 1800)
         plain_bytes = bytesPad(my_choice, size=8, pad=0)
         cipher_bytes = encrypt(plain_bytes, key, CRYPTO_ALGO,
                                nonce=static_nonce)
@@ -426,6 +428,7 @@ while True:
 
         ### Wait for ready sound sample to stop playing
         sample.wait()
+        print("HAMMER TEST bar START sampleGame {:d}, round {:d}, buffer_size {:d}".format(game_no, round_no, buffer_size))
         sample.play("start-tx")
         sample.wait()
         sample.play("txing", loop=True)
@@ -440,6 +443,7 @@ while True:
                                                      RpsEncDataAdvertisement,
                                                      RpsKeyDataAdvertisement,
                                                      scan_time=SHORTER_FIRST_MSG_TIME_S,
+                                                     buffer_size=buffer_size,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
                                                      seq_rx_by_addr=seq_rx_by_addr)
@@ -448,7 +452,7 @@ while True:
         sample.play("end-tx")
         sample.wait()
 
-        print("HAMMER TEST Game {:d}, round {:d}".format(game_no, round_no))
+        print("HAMMER TEST bar END")
 
         round_no += 1
         new_round_init = True
