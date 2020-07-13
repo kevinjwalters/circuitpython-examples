@@ -1,4 +1,4 @@
-### clue-rpsgame v0.3
+### clue-simple-rpsgame v0.5
 ### CircuitPython rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -28,26 +28,23 @@
 ### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ### SOFTWARE.
 
-
 import time
-import gc
 import os
 import struct
-import random
 
 import board
 from displayio import Group
 import terminalio
 import digitalio
 
-from adafruit_display_text.label import Label
-
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE
 from adafruit_ble import BLERadio
 from adafruit_ble.advertising import Advertisement, LazyObjectField
 from adafruit_ble.advertising.standard import ManufacturerData, ManufacturerDataField
 
-### TODO 
+from adafruit_display_text.label import Label
+
+
+### TODO
 ### Maybe simple version is clue only
 ### simple version still needs win indicator (flash text?) and a score counter
 
@@ -65,35 +62,15 @@ from adafruit_ble.advertising.standard import ManufacturerData, ManufacturerData
 ### LDAP as good example and git perhaps as less good
 ### complex format not compatible with simple format so mixing the two will confuse things
 
-### Going further
-### - port to use Infrared for CPX - time.monotonic_ns need replacing (note CPB do not have infrared)
-
-### Other things of interest
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_Eddystone
-### A Service: https://github.com/adafruit/Adafruit_CircuitPython_BLE_iBBQ/blob/master/adafruit_ble_ibbq.py
-### Yet another UART, implements TransparentUARTService(Service) https://github.com/adafruit/Adafruit_CircuitPython_BLE_BerryMed_Pulse_Oximeter
-### A Service: https://github.com/adafruit/Adafruit_CircuitPython_BLE_Heart_Rate/blob/master/adafruit_ble_heart_rate.py
-### EddystoneAdvertisement(Advertisement): https://github.com/adafruit/Adafruit_CircuitPython_BLE_Eddystone/blob/master/adafruit_ble_eddystone/__init__.py
-
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_Apple_Notification_Center
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_MIDI
-
-### Dan's latest handiwork
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_Adafruit
-
-### https://learn.adafruit.com/bluetooth-le-broadcastnet-sensor-node-raspberry-pi-wifi-bridge
-### explains the https://github.com/adafruit/Adafruit_CircuitPython_BLE_BroadcastNet
-
-
-### These imports works on CLUE, CPB (and CPX on 5.x)
-from audiocore import RawSample
-try:
-    from audioio import AudioOut
-except ImportError:
-    from audiopwmio import PWMAudioOut as AudioOut
-
 
 debug = 3
+
+def d_print(level, *args, **kwargs):
+    """A simple conditional print for debugging based on global debug level."""
+    if not isinstance(level, int):
+        print(level, *args, **kwargs)
+    elif debug >= level:
+        print(*args, **kwargs)
 
 
 def tftGizmoPresent():
@@ -107,7 +84,7 @@ def tftGizmoPresent():
     try:
         with digitalio.DigitalInOut(board.A3) as backlight_pin:
             backlight_pin.pull = digitalio.Pull.UP
-            present = not backlight_pin.value            
+            present = not backlight_pin.value
     except ValueError:
         ### The Gizmo is already initialised, i.e. showing console output
         pass
@@ -122,7 +99,6 @@ clue_less = "Circuit Playground" in os.uname().machine
 ###       and not use for buttons
 if clue_less:
     ### CPB with TFT Gizmo (240x240)
-    ##from adafruit_circuitplayground import cp
 
     ### Outputs
     if tftGizmoPresent():
@@ -130,11 +106,6 @@ if clue_less:
         display = tft_gizmo.TFT_Gizmo()
     else:
         display = None
-    ##audio_out = AudioOut(board.SPEAKER)
-    ##pixels = cp.pixels
-
-    ### Enable the onboard amplifier for speaker
-    ##cp._speaker_enable.value = True  ### pylint: disable=protected-access
 
     ### Inputs
     ### buttons reversed if it is used upside-down with Gizmo
@@ -151,12 +122,9 @@ if clue_less:
 
 else:
     ### CLUE with builtin screen (240x240)
-    ##from adafruit_clue import clue
 
     ### Outputs
     display = board.DISPLAY
-    ##audio_out = AudioOut(board.SPEAKER)
-    ##pixels = clue.pixel
 
     ### Inputs
     _button_a = digitalio.DigitalInOut(board.BUTTON_A)
@@ -165,6 +133,7 @@ else:
     _button_b.switch_to_input(pull=digitalio.Pull.UP)
     button_left = lambda: not _button_a.value
     button_right = lambda: not _button_b.value
+
 
 choices = ("rock", "paper", "scissors")
 my_choice_idx = 0
@@ -177,12 +146,14 @@ DIM_TXT_COL_FG = 0x505050
 DEFAULT_TXT_COL_FG = 0xa0a0a0
 CURSOR_COL_FG = 0xc0c000
 
-def set_cursor(idx):
+def set_cursor(c_idx):
     """Set the position of the cursor on-screen to indicate the player's selection."""
+    ### pylint: disable=global-statement
     global cursor_dob
 
-    if 0 <= idx < len(choices):
-        cursor_dob.y = top_y_pos + choice_sep * idx
+    if 0 <= c_idx < len(choices):
+        cursor_dob.y = top_y_pos + choice_sep * c_idx
+
 
 if display is not None:
     ### The 6x14 terminalio classic font
@@ -202,37 +173,25 @@ if display is not None:
             screen_group.append(rps_dob)
 
     cursor_dob = Label(terminalio.FONT,
-                            text=">",
-                            scale=3,
-                            color=CURSOR_COL_FG)
+                       text=">",
+                       scale=3,
+                       color=CURSOR_COL_FG)
     cursor_dob.x = 0
     set_cursor(my_choice_idx)
     cursor_dob.y = top_y_pos
     screen_group.append(cursor_dob)
     display.show(screen_group)
 
+### From adafruit_ble.advertising
+MANUFACTURING_DATA_ADT = 0xFF
+ADAFRUIT_COMPANY_ID = 0x0822
 
-def d_print(level, *args, **kwargs):
-    """A simple conditional print for debugging based on global debug level."""
-    if not isinstance(level, int):
-        print(level, *args, **kwargs)
-    elif debug >= level:
-        print(*args, **kwargs)
-
-### These are in adafruit_ble.advertising but are private :(
-MANUFACTURING_DATA_ADT = const(0xFF)
-ADAFRUIT_COMPANY_ID = const(0x0822)
-
+### pylint: disable=line-too-long
 ### According to https://github.com/adafruit/Adafruit_CircuitPython_BLE/blob/master/adafruit_ble/advertising/adafruit.py
 ### 0xf000 (to 0xffff) is for range for Adafruit customers
-RPS_ACK_ID = const(0xfe30)
-RPS_DATA_ID = const(0xfe31)
+RPS_ACK_ID = 0xfe30
+RPS_DATA_ID = 0xfe31
 
-
-### TODO prefix improvements mentioned in https://github.com/adafruit/Adafruit_CircuitPython_BLE/issues/82
-### may not happen in time though
-
-### TODO need to make sure this is non-connectable and does not solicit a scan response.
 
 class RpsAdvertisement(Advertisement):
     """Broadcast an RPS message.
@@ -242,22 +201,14 @@ class RpsAdvertisement(Advertisement):
     flags = None
 
     _PREFIX_FMT = "<B" "BHBH"
-    ## _SEQ_FMT = "B"
     _DATA_FMT = "8s"  ### this NUL pads if necessary
-    ## _DATA_FMT = "s"  ### this only transfers one byte!
 
-    ### prefix appears to be used to determine whether an incoming
-    ### packet matches this class
-    ### The second struct.calcsize needs to include the _DATA_FMT for some
-    ### reason I either don't know or can't remember
     prefix = struct.pack(
         _PREFIX_FMT,
         struct.calcsize(_PREFIX_FMT) - 1,
         MANUFACTURING_DATA_ADT,
         ADAFRUIT_COMPANY_ID,
-        ##struct.calcsize("<H" + _SEQ_FMT + _DATA_FMT),
         struct.calcsize("<H" + _DATA_FMT),
-        ##struct.calcsize("<H"),
         RPS_DATA_ID
     )
     manufacturer_data = LazyObjectField(
@@ -267,15 +218,6 @@ class RpsAdvertisement(Advertisement):
         company_id=ADAFRUIT_COMPANY_ID,
         key_encoding="<H",
     )
-
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_BroadcastNet/blob/c6328d5c7edf8a99ff719c3b1798cb4111bab397/adafruit_ble_broadcastnet.py#L66-L67
-### has a sequence_number - this will be use for for Complex Game
-###    sequence_number = ManufacturerDataField(0x0003, "<B")
-###    """Sequence number of the measurement. Used to detect missed packets."""
-
-    ### 0x0003 is used in AdafruitSensorMeasurement()
-    ##sequence_number = ManufacturerDataField(0x0003, "<" + _SEQ_FMT)
-    ##"""Sequence number of the data. Used for acknowledgements."""
 
     test_string = ManufacturerDataField(RPS_DATA_ID, "<" + _DATA_FMT)
     """RPS choice."""
@@ -288,26 +230,20 @@ MAX_SEND_TIME_NS = MAX_SEND_TIME_S * NS_IN_S
 MIN_AD_INTERVAL = 0.02001
 
 ble = BLERadio()
-##ble.name = ?
-
-
 
 opponent_choice = None
 
-msg_seq_last_rx = 255
-msg_seq = 0
-
 timeout = False
-round = 1
+round_no = 1
 wins = 0
 losses = 0
-draws = 0 
+draws = 0
 voids = 0
 
 TOTAL_ROUND = 5
 
 def evaluate_game(mine, yours):
-    """Determine who won the game based on the two strings mine and yours.
+    """Determine who won the game based on the two strings mine and yours_lc.
        Returns three booleans (win, draw, void)."""
     ### Return with void at True if any input is None
     try:
@@ -316,43 +252,44 @@ def evaluate_game(mine, yours):
     except AttributeError:
         return (False, False, True)
 
-    win = draw = void = False
-    if (mine == "rock" and yours == "rock" or
-        mine == "paper" and yours == "paper" or
-        mine == "scissors" and yours == "scissors"):
-        draw = True
-    elif (mine == "rock" and yours == "paper"):
-        lose = True
-    elif (mine == "rock" and yours == "scissors"):
-        win = True
-    elif (mine == "paper" and yours == "rock"):
-        win = True
-    elif (mine == "paper" and yours == "scissors"):
-        lose = True
-    elif (mine == "scissors" and yours == "rock"):
-        lose = True
-    elif (mine == "scissors" and yours == "paper"):
-        win = True
+    r_win = r_draw = r_void = False
+    ### pylint: disable=too-many-boolean-expressions
+    if (mine_lc == "rock" and yours_lc == "rock"
+            or mine_lc == "paper" and yours_lc == "paper"
+            or mine_lc == "scissors" and yours_lc == "scissors"):
+        r_draw = True
+    elif (mine_lc == "rock" and yours_lc == "paper"):
+        pass  ### r_win default is False
+    elif (mine_lc == "rock" and yours_lc == "scissors"):
+        r_win = True
+    elif (mine_lc == "paper" and yours_lc == "rock"):
+        r_win = True
+    elif (mine_lc == "paper" and yours_lc == "scissors"):
+        pass  ### r_win default is False
+    elif (mine_lc == "scissors" and yours_lc == "rock"):
+        pass  ### r_win default is False
+    elif (mine_lc == "scissors" and yours_lc == "paper"):
+        r_win = True
     else:
-        void = True
+        r_void = True
 
-    return (win, draw, void)
+    return (r_win, r_draw, r_void)
 
 
-### Advertise for 20 seconds maximum and if a packet is received 
+### Advertise for 20 seconds maximum and if a packet is received
 ### for 5 seconds after that
 while True:
-    if round > TOTAL_ROUND:
+    if round_no > TOTAL_ROUND:
         print("Summary: ",
               "wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
 
         ### Reset variables for another game
-        round = 1
+        round_no = 1
         wins = 0
         losses = 0
-        draws = 0 
+        draws = 0
         voids = 0
-        round = 1
+        round_no = 1
 
     if button_left():
         while button_left():
@@ -366,7 +303,6 @@ while True:
 
         choice = choices[my_choice_idx]
         tx_message.test_string = choice
-        ## tx_message.sequence_number = msg_seq
         d_print(2, "TXing RTA", choice)
 
         ### Page 126 35.5 recommends an initial 30s of 20ms intervals
@@ -394,7 +330,7 @@ while True:
                                   timeout=MAX_SEND_TIME_S):
             received_ns = time.monotonic_ns()
             d_print(2, "RXed RTA",
-                    adv.test_string) ##  , adv.sequence_number)
+                    adv.test_string)
             opponent_choice_bytes = adv.test_string
             ### TODO - could write about for (NB!!) vs for else vs while
             idx = 0
@@ -425,7 +361,7 @@ while True:
 
         ble.stop_advertising()
 
-        d_print(1,"ROUND", round,
+        d_print(1,"ROUND", round_no,
                 "MINE", choice,
                 "| OPPONENT", opponent_choice)
         (win, draw, void) = evaluate_game(choice, opponent_choice)
@@ -438,7 +374,7 @@ while True:
         else:
             losses += 1
         d_print(1, "wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
-        round += 1
+        round_no += 1
 
 ### Do something on screen or NeoPixels
 
