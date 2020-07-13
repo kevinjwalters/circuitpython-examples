@@ -22,24 +22,13 @@
 
 
 import time
-import gc
-import os
-import struct
-import random
 
-import board
 import displayio
 from displayio import Group
 import terminalio
-import digitalio
 
-import neopixel
 from adafruit_display_text.label import Label
 
-
-### Top y position of first choice and pixel separate between choices
-top_y_pos = 60
-choice_sep = 60
 
 BLUE=0x0000ff
 BLACK=0x000000
@@ -90,6 +79,7 @@ SPRITE_SIZE = 16
 
 
 def blankScreen(disp, pix):
+    ### pylint: disable=unused-argument
     """A blank screen used to hide any serial console output."""
     if disp is None:
         return
@@ -174,7 +164,7 @@ class RPSDisplay():
                                             tile_width=sprite_size, tile_height=sprite_size)
             opp_sprite[0] = idx
             opp_sprites.append(opp_sprite)
-            
+
         return (sprites, opp_sprites, sprite_size)
 
 
@@ -194,7 +184,7 @@ class RPSDisplay():
             return
 
         if duration == 0.0:
-            disp.brightness = 0.0 if direction == "down" else self.std_brightness
+            self.disp.brightness = 0.0 if direction == "down" else self.std_brightness
             return
 
         if direction == "down":
@@ -228,7 +218,8 @@ class RPSDisplay():
         ### Go through Group in reverse order
         for idx in range(len(dio_group) - 1, -1, -1):
             ### Avoiding isinstance here as Label is a sub-class of Group!
-            if (type(dio_group[idx]) == Group):
+            ### pylint: disable=unidiomatic-typecheck
+            if type(dio_group[idx]) == Group:
                 self.emptyGroup(dio_group[idx])
             del dio_group[idx]
 
@@ -279,6 +270,7 @@ class RPSDisplay():
 
 
     def introductionScreen(self):
+        ### pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Introduction screen."""
         if self.disp is not None:
             self.emptyGroup(self.disp_group)
@@ -294,11 +286,12 @@ class RPSDisplay():
 
             extra_space = 8
             spacing = 3 * SPRITE_SIZE + extra_space
+            y_adj = (-6, -2, -2)
             for idx, sprite in enumerate(self.sprites):
                 s_group = Group(scale=3, max_size=1)
                 s_group.x = -96
-                s_group.y = round((DISPLAY_HEIGHT - 1.5 * SPRITE_SIZE) // 2
-                                  + (idx - 1) * spacing)
+                s_group.y = round((DISPLAY_HEIGHT - 1.5 * SPRITE_SIZE) / 2
+                                  + (idx - 1) * spacing) + y_adj[idx]
                 s_group.append(sprite)
                 intro_group.append(s_group)
 
@@ -417,7 +410,7 @@ class RPSDisplay():
             prssi_dob.x = self.plrssi_x_rpos - 4 * 2 * self.font_width
             prssi_dob.y = self.pl_y_cur_pos
             self.disp_group.append(prssi_dob)
-        
+
         self.pl_y_cur_pos += self.pl_y_off
 
 
@@ -433,6 +426,7 @@ class RPSDisplay():
 
 
     def showGameRound(self, game_no=0, round_no=0, rounds_tot=None):
+        ### pylint: disable=unused-argument
         """Show the game and round number on NeoPixels for screenless devices.
            Only used for Gizmo-less CPB."""
         if self.disp is not None:
@@ -458,6 +452,7 @@ class RPSDisplay():
 
 
     def showGameResultScreen(self, pla, sco, rounds_tot=None):
+        ### pylint: disable=unused-argument,too-many-locals,too-many-statements
         """Display a high score table with some visual sorting."""
         self.fadeUpDown("down")
         self.emptyGroup(self.disp_group)
@@ -490,7 +485,7 @@ class RPSDisplay():
         max_len = 0
         prev_score = sco[0]
         descending = True
-        for idx, (name, macaddr) in enumerate(pla):
+        for idx, (name, _) in enumerate(pla):
             max_len = max(max_len, len(name))
             if sco[idx] > prev_score:
                 descending = False
@@ -501,12 +496,12 @@ class RPSDisplay():
         scale = 2
         spacing = 4 if len(pla) <= 6 else 0
         top_y_pos = round((DISPLAY_HEIGHT
-                          - len(pla) * scale * FONT_HEIGHT
-                          - (len(pla) - 1) * spacing) // 2
-                          + scale * FONT_HEIGHT // 2)
+                           - len(pla) * scale * FONT_HEIGHT
+                           - (len(pla) - 1) * spacing) / 2
+                          + scale * FONT_HEIGHT / 2)
         scores_group = Group(max_size=len(pla))
         gs_group.append(scores_group)
-        for idx, (name, macaddr) in enumerate(pla):
+        for idx, (name, _) in enumerate(pla):
             op_dob = Label(self.font,
                            text=fmt.format(name, sco[idx]),
                            scale=2,
@@ -575,6 +570,7 @@ class RPSDisplay():
 
 
     def showGameResultNeoPixels(self, pla, sco, rounds_tot=None):
+        ### pylint: disable=unused-argument
         """Display a high score table on NeoPixels.
            Sorted into highest first order then displayed by
            flashing position pixel to indicate player number and
@@ -587,9 +583,9 @@ class RPSDisplay():
         bg_col = BLACK
         for idx, score in idx_n_score:
             playerIdx = self.choiceToPixIdx(idx)
-            for score in range(score):
-                scoreIdx = self.choiceToPixIdx(score)
-                rev = min(score // self.pix_len, len(SCORE_COLS) - 1)
+            for scoreRise in range(score):
+                scoreIdx = self.choiceToPixIdx(scoreRise)
+                rev = min(scoreRise // self.pix_len, len(SCORE_COLS) - 1)
                 self.pix[scoreIdx] = SCORE_COLS[rev]
                 if scoreIdx == playerIdx:
                     bg_col = SCORE_COLS[rev]
@@ -637,6 +633,7 @@ class RPSDisplay():
 
     def showPlayerVPlayerScreen(self, me_name, op_name, my_ch_idx, op_ch_idx,
                                 result, summary, win, draw, void):
+        ### pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Display a win, draw, lose or error message."""
         self.fadeUpDown("down")
         self.emptyGroup(self.disp_group)
@@ -710,10 +707,10 @@ class RPSDisplay():
             ### max_glyphs is set to the maximum len of all the possible strings
             ### the + 1 is workaround in case a buggy version of library is used
             summary_dob = Label(self.font,
-                               text="",
-                               max_glyphs=8 + 1,
-                               scale=3,
-                               color=BLACK)
+                                text="",
+                                max_glyphs=8 + 1,
+                                scale=3,
+                                color=BLACK)
             summary_dob.y = round(DISPLAY_HEIGHT - (3 * FONT_HEIGHT / 2))
             pvp_group.append(summary_dob)
 
@@ -766,6 +763,7 @@ class RPSDisplay():
 
     def showPlayerVPlayerNeoPixels(self, op_idx, my_ch_idx, op_ch_idx,
                                    result, summary, win, draw, void):
+        ### pylint: disable=too-many-locals
         """This indicates the choices by putting the colours
            associated with rock paper scissors on the first pixel
            for the player and on subsequent pixels for opponents.

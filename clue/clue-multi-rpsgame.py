@@ -1,4 +1,4 @@
-### clue-multi-rpsgame v1.17
+### clue-multi-rpsgame v1.18
 ### CircuitPython massively multiplayer rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -29,76 +29,35 @@
 ### SOFTWARE.
 
 
-import time
 import gc
 import os
-import struct
 import random
 
 import board
-import displayio
-from displayio import Group
-import terminalio
 import digitalio
-from audiocore import WaveFile
-import _bleio  ### just for _bleio.BluetoothError
 
 import neopixel
-from adafruit_display_text.label import Label
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE
 from adafruit_ble import BLERadio
 
-from rps_advertisements import JoinGameAdvertisement, \
-                               RpsEncDataAdvertisement, \
-                               RpsKeyDataAdvertisement, \
-                               RpsRoundEndAdvertisement
-from rps_audio import SampleJukebox
-from rps_crypto import bytesPad, strUnpad, generateOTPadKey, \
-                       enlargeKey, encrypt, decrypt
-from rps_comms import broadcastAndReceive, addrToText, MIN_AD_INTERVAL
-from rps_display import RPSDisplay, blankScreen
-
-### TODO
-### Maybe simple version is clue only
-### simple version still needs win indicator (flash text?) and a score counter
-
-### Complex version demos how to
-
-### simple version will have a lot of issues
-### unreliable transport
-### lack of synchronised win announcement
-### probably not deal with players who join midway?
-### need to allocate player numbers - could sort by MAC - ACTUALLY this is not needed?!
-### avoid election algorithms even if tempted
-### could include the lack of protocol versioning and future proofing and cite
-### LDAP as good example and git perhaps as less good
-### complex format not compatible with simple format so mixing the two will confuse things
-
-### Other things of interest
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_Eddystone
-### A Service: https://github.com/adafruit/Adafruit_CircuitPython_BLE_iBBQ/blob/master/adafruit_ble_ibbq.py
-### Yet another UART, implements TransparentUARTService(Service) https://github.com/adafruit/Adafruit_CircuitPython_BLE_BerryMed_Pulse_Oximeter
-### A Service: https://github.com/adafruit/Adafruit_CircuitPython_BLE_Heart_Rate/blob/master/adafruit_ble_heart_rate.py
-### EddystoneAdvertisement(Advertisement): https://github.com/adafruit/Adafruit_CircuitPython_BLE_Eddystone/blob/master/adafruit_ble_eddystone/__init__.py
-
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_Apple_Notification_Center
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_MIDI
-
-### Dan's latest handiwork
-### https://github.com/adafruit/Adafruit_CircuitPython_BLE_Adafruit
-
-### https://learn.adafruit.com/bluetooth-le-broadcastnet-sensor-node-raspberry-pi-wifi-bridge
-### explains the https://github.com/adafruit/Adafruit_CircuitPython_BLE_BroadcastNet
-
-
 ### These imports works on CLUE, CPB (and CPX on 5.x)
-from audiocore import RawSample
 try:
     from audioio import AudioOut
 except ImportError:
     from audiopwmio import PWMAudioOut as AudioOut
 
-### Look for ble_name in secrets.py file if present
+### RPS module files
+from rps_advertisements import JoinGameAdvertisement, \
+                               RpsEncDataAdvertisement, \
+                               RpsKeyDataAdvertisement, \
+                               RpsRoundEndAdvertisement
+from rps_audio import SampleJukebox
+from rps_comms import broadcastAndReceive, addrToText, MIN_AD_INTERVAL
+from rps_crypto import bytesPad, strUnpad, generateOTPadKey, \
+                       enlargeKey, encrypt, decrypt
+from rps_display import RPSDisplay, blankScreen
+
+
+### Look for our name in secrets.py file if present
 ble_name = None
 try:
     from secrets import secrets
@@ -220,11 +179,11 @@ IMAGE_DIR = "rps/images"
 AUDIO_DIR = "rps/audio"
 
 files = (("searching", "welcome-to", "arena", "ready")
-          + ("rock", "paper", "scissors")
-          + ("start-tx", "end-tx", "txing")
-          + ("rock-scissors", "paper-rock", "scissors-paper")
-          + ("you-win", "draw", "you-lose", "error")
-          + ("humiliation", "excellent"))
+         + ("rock", "paper", "scissors")
+         + ("start-tx", "end-tx", "txing")
+         + ("rock-scissors", "paper-rock", "scissors-paper")
+         + ("you-win", "draw", "you-lose", "error")
+         + ("humiliation", "excellent"))
 
 gc.collect()
 d_print(2, "GC before SJ", gc.mem_free())
@@ -295,33 +254,37 @@ def evaluateRound(mine, yours):
     except AttributeError:
         return (False, False, True)
 
-    win = draw = void = False
-    if (mine_lc == "rock" and yours_lc == "rock" or
-        mine_lc == "paper" and yours_lc == "paper" or
-        mine_lc == "scissors" and yours_lc == "scissors"):
-        draw = True
+    r_win = r_draw = r_void = False
+    ### pylint: disable=too-many-boolean-expressions
+    if (mine_lc == "rock" and yours_lc == "rock"
+            or mine_lc == "paper" and yours_lc == "paper"
+            or mine_lc == "scissors" and yours_lc == "scissors"):
+        r_draw = True
     elif (mine_lc == "rock" and yours_lc == "paper"):
-        lose = True
+        pass  ### r_win default is False
     elif (mine_lc == "rock" and yours_lc == "scissors"):
-        win = True
+        r_win = True
     elif (mine_lc == "paper" and yours_lc == "rock"):
-        win = True
+        r_win = True
     elif (mine_lc == "paper" and yours_lc == "scissors"):
-        lose = True
+        pass  ### r_win default is False
     elif (mine_lc == "scissors" and yours_lc == "rock"):
-        lose = True
+        pass  ### r_win default is False
     elif (mine_lc == "scissors" and yours_lc == "paper"):
-        win = True
+        r_win = True
     else:
-        void = True
+        r_void = True
 
-    return (win, draw, void)
+    return (r_win, r_draw, r_void)
 
 
 rps_display.playerListScreen()
 
 def addPlayer(name, addr_text, address, ad):
-    global players
+    ### pylint: disable=unused-argument
+    ### address is part of call back
+    """Add the player name and mac address to players global variable
+       and the name and rssi (if present) to on-screen list."""
 
     rssi = ad.rssi if ad else None
 
@@ -347,7 +310,9 @@ jg_msg = JoinGameAdvertisement(game="RPS")
                                 jg_msg,
                                 scan_time=JG_MSG_TIME_S,
                                 scan_response_request=True,
-                                ad_cb=(lambda _a, _b, _c: rps_display.flashBLE()) if JG_FLASH else None,
+                                ad_cb=((lambda _a, _b, _c:
+                                        rps_display.flashBLE()) if JG_FLASH
+                                       else None),
                                 endscan_cb=lambda _a, _b, _c: button_left(),
                                 name_cb=addPlayer)
 _ = None  ### Clear to allow GC
@@ -369,9 +334,8 @@ ad_interval = MIN_AD_INTERVAL if len(players) <= 4 else len(players) * 0.007
 
 d_print(1, "PLAYERS", players)
 
-### Sequence numbers - real packets start at 1
+### Sequence numbers - real packets start range between 1-255 inclusive
 seq_tx = [1]  ### The next number to send
-seq_rx_by_addr = {pma: 0 for pn, pma in players[1:]}  ### Per address received all up to
 
 new_round_init = True
 
@@ -380,11 +344,10 @@ new_round_init = True
 static_nonce = bytes(range(12, 0, -1))
 
 while True:
-    ### TODO - physically test this for need for debounce on left button
-
     if round_no > TOTAL_ROUNDS:
         print("Summary: ",
-              "wins {:d}, losses {:d}, draws {:d}, void {:d}\n\n".format(wins, losses, draws, voids))
+              "wins {:d}, losses {:d},"
+              " draws {:d}, void {:d}\n\n".format(wins, losses, draws, voids))
 
         rps_display.showGameResult(players, scores, rounds_tot=TOTAL_ROUNDS)
 
@@ -452,8 +415,7 @@ while True:
                                                      scan_time=FIRST_MSG_TIME_S,
                                                      ad_interval=ad_interval,
                                                      receive_n=num_other_players,
-                                                     seq_tx=seq_tx,
-                                                     seq_rx_by_addr=seq_rx_by_addr)
+                                                     seq_tx=seq_tx)
 
         key_data_msg = RpsKeyDataAdvertisement(key_data=short_key, round_no=round_no)
         ### All of the programs will be loosely synchronised now
@@ -466,19 +428,15 @@ while True:
                                                      ad_interval=ad_interval,
                                                      receive_n=num_other_players,
                                                      seq_tx=seq_tx,
-                                                     seq_rx_by_addr=seq_rx_by_addr,
                                                      ads_by_addr=enc_data_by_addr)
         del enc_data_by_addr
 
         ### Play end transmit sound while doing next decrypt bit
         sample.play("end-tx")
 
-        ### TODO tidy up comments here on the purpose of RoundEnd
-        ### ???? With ackall RoundEnd has no purpose and wasn't really working as a substitute anyway
         re_msg = RpsRoundEndAdvertisement(round_no=round_no)
-        ### The round end message is really about acknowledging receipt of the key
-        ### by sending a message that holds non-critical information
-        ### TODO - this one should only send for a few second, JoinGame should send for loads
+        ### The round end message is really about acknowledging receipt of
+        ### the key_data_msg by sending a non-critical message with the ack
         _, re_by_addr, _ = broadcastAndReceive(ble,
                                                re_msg,
                                                RpsEncDataAdvertisement,
@@ -488,7 +446,6 @@ while True:
                                                ad_interval=ad_interval,
                                                receive_n=num_other_players,
                                                seq_tx=seq_tx,
-                                               seq_rx_by_addr=seq_rx_by_addr,
                                                ads_by_addr=key_data_by_addr)
         del key_data_by_addr
         _ = None  ### Allow old value of _ to be GC'd, del does not work on _
@@ -506,22 +463,20 @@ while True:
             opponent_msgs = allmsg_by_addr.get(opponent_macaddr)
             if opponent_msgs is None:
                 opponent_msgs = []
-            cipher_ad = None
-            cipher_bytes = None
-            cipher_round = None
-            key_ad = None
-            key_bytes = None
-            key_round = None
+            cipher_ad = cipher_bytes = cipher_round = None
+            key_ad = key_bytes = key_round = None
             ### There should be either one or two messges per type
             ### two occurs when there
             for msg_idx in range(len(opponent_msgs)):
                 if (cipher_ad is None
-                    and isinstance(opponent_msgs[msg_idx][0], RpsEncDataAdvertisement)):
+                        and isinstance(opponent_msgs[msg_idx][0],
+                                       RpsEncDataAdvertisement)):
                     cipher_ad = opponent_msgs[msg_idx][0]
                     cipher_bytes = cipher_ad.enc_data
                     cipher_round = cipher_ad.round_no
                 elif (key_ad is None
-                      and isinstance(opponent_msgs[msg_idx][0], RpsKeyDataAdvertisement)):
+                      and isinstance(opponent_msgs[msg_idx][0],
+                                     RpsKeyDataAdvertisement)):
                     key_ad = opponent_msgs[msg_idx][0]
                     key_bytes = key_ad.key_data
                     key_round = key_ad.round_no

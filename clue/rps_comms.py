@@ -21,7 +21,6 @@
 ### SOFTWARE.
 
 import time
-import gc
 import random
 
 import _bleio  ### just for _bleio.BluetoothError
@@ -54,11 +53,12 @@ def d_print(level, *args, **kwargs):
 def addrToText(mac_addr, big_endian=False, sep=""):
     """Convert a mac_addr in bytes to text."""
     ### Note use of reversed() - macs are returned in an unusual LSB order
+    ### pylint: disable=superfluous-parens
     return sep.join(["{:02x}".format(b)
                      for b in (mac_addr if big_endian else reversed(mac_addr))])
 
 
-def max_ack(acklist):
+def maxAck(acklist):
     """Return the highest ack number from a contiguous run.
        Returns 0 for an empty list."""
 
@@ -69,7 +69,7 @@ def max_ack(acklist):
 
     ordered_acklist = sorted(acklist)
     max_ack_sofar = ordered_acklist[0]
-    for ack in ordered_acklist[1:]: 
+    for ack in ordered_acklist[1:]:
         if ack - max_ack_sofar > 1:
             break
         max_ack_sofar = ack
@@ -79,13 +79,14 @@ def max_ack(acklist):
 def startScan(radio, send_ad, send_advertising,
               sequence_number, receive_n,
               ss_rx_ad_classes, rx_ad_classes,
-              scan_time, ad_interval, 
+              scan_time, ad_interval,
               buffer_size, minimum_rssi,
               match_locally, scan_response_request,
               enable_ack, awaiting_allrx, awaiting_allacks,
               ad_cb, name_cb, endscan_cb,
               received_ads_by_addr, blenames_by_addr,
               send_ad_rxs, acks):
+    ### pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """TODO - explain what this does and think about it writing the explanation
        to ensure it all makes sense."""
     complete = False
@@ -110,14 +111,13 @@ def startScan(radio, send_ad, send_advertising,
                                    buffer_size=buffer_size,  ### default is 512, was 1536
                                    active=scan_response_request,
                                    timeout=scan_time):
-        received_ns = time.monotonic_ns()
         addr_text = addrToText(adv_ss.address.address_bytes)
 
         ### Add name of the device to dict limiting
         ### this to devices of interest by checking received_ads_by_addr
         ### plus pass data to any callback function
         if (addr_text not in blenames_by_addr
-            and addr_text in received_ads_by_addr):
+                and addr_text in received_ads_by_addr):
             name = adv_ss.complete_name  ### None indicates no value
             if name:  ### This test ignores any empty strings too
                 blenames_by_addr[addr_text] = name
@@ -173,7 +173,7 @@ def startScan(radio, send_ad, send_advertising,
             for existing_ad in received_ads_by_addr[addr_text]:
                 if this_ad_b == existing_ad[1]:
                     break  ### already present
-            else:  ### Python's unusual for/break/else 
+            else:  ### Python's unusual for/break/else
                 received_ads_by_addr[addr_text].append((adv, bytes(adv)))
                 if isinstance(adv, cls_send_ad):
                     send_ad_rxs[addr_text] = True
@@ -204,7 +204,7 @@ def startScan(radio, send_ad, send_advertising,
             if len(acks) == receive_n:
                 ack_count = 0
                 for addr_text, acks_for_addr in acks.items():
-                    if max_ack(acks_for_addr) >= sequence_number:
+                    if maxAck(acks_for_addr) >= sequence_number:
                         ack_count += 1
                 if ack_count == receive_n:
                     complete = True
@@ -227,7 +227,6 @@ def broadcastAndReceive(radio,
                         minimum_rssi=-90,
                         receive_n=0,
                         seq_tx=None,
-                        seq_rx_by_addr=None,
                         match_locally=True,
                         scan_response_request=False,
                         ad_cb=None,
@@ -236,6 +235,7 @@ def broadcastAndReceive(radio,
                         name_cb=None,
                         endscan_cb=None
                         ):
+    ### pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Send an Advertisement sendad and then wait max_time seconds to receive_n
        receive_n Advertisements from other devices.
        If receive_n is 0 then wait for the remaining max_time.
@@ -288,7 +288,7 @@ def broadcastAndReceive(radio,
 
         ### Pick out any Advertisements with an ack field with a value
         acks_thisaddr = list(filter(lambda adnb: hasattr(adnb[0], "ack")
-                                                 and isinstance(adnb[0].ack, int),
+                                    and isinstance(adnb[0].ack, int),
                                     adsnb_per_addr))
         ### list() must have been run on acks_thisaddr to expand iterator
         if acks_thisaddr:

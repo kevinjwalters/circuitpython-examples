@@ -24,11 +24,12 @@ from audiocore import WaveFile
 
 
 class SampleJukebox():
-    """This plays wav files and tries to control the timing of memory allocations
-       within the nRF52840 PWMAudioOut library to minimise chance of MemoryError
-       exceptions (2048 bytes)."""
+    """This plays wav files and tries to control the timing of memory
+       allocations within the nRF52840 PWMAudioOut library to minimise
+       the chance of MemoryError exceptions (2048 bytes)."""
 
     _file_buf = None  ### Use for WaveFile objects
+
 
     def _init_wave_files(self, files, directory):
         """Open files from AUDIO_DIR and return a dict with FileIO objects
@@ -44,16 +45,16 @@ class SampleJukebox():
             filename = directory + "/" + file + ".wav"
             try:
                 wav_file = open(filename, "rb")
-            except OSError as oe:
+            except OSError:
                 ### OSError: [Errno 2] No such file/directory: 'filename.ext'
                 if error_output:
                     print("ERROR: missing audio file:", filename)
             fhs[file] = WaveFile(wav_file, self._file_buf)
         self._wave_files = fhs
 
+
     def __init__(self, audio_device, files,
                  directory="", error_output=None):
-        cls = self.__class__
         self._audio_device = audio_device
         self._error_output = error_output
         self._wave_files = None  ### keep pylint happy
@@ -67,6 +68,7 @@ class SampleJukebox():
                 self._audio_device.pause()
                 break
 
+
     def play(self, name, loop=False):
         wave_file = self._wave_files.get(name)
         if wave_file is None:
@@ -76,16 +78,18 @@ class SampleJukebox():
         ### of losing the 2048 contiguous bytes needed for this
         self._audio_device.stop()
         self._audio_device.play(wave_file, loop=loop)
-        ### https://github.com/adafruit/circuitpython/issues/2036 
+        ### https://github.com/adafruit/circuitpython/issues/2036
         ### is a general ticket about efficient audio buffering
+
 
     def playing(self):
         return self._audio_device.playing
+
 
     def wait(self):
         while self._audio_device.playing:
             pass
 
+
     def stop(self):
         self._audio_device.pause() ### This avoid m_free
-

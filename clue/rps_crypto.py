@@ -21,9 +21,7 @@
 ### SOFTWARE.
 
 
-import time
 import os
-import struct
 import random
 
 from rps_crypto_chacha import ChaCha

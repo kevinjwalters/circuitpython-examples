@@ -11,7 +11,7 @@ Implementation that follows RFC 7539 closely.
 
 import struct
 
-MASK32 = const(0xffffffff)
+MASK32 = 0xffffffff
 
 
 class ChaCha():
