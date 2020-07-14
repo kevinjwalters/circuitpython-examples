@@ -1,4 +1,4 @@
-### clue-simple-rpsgame v1.0
+### clue-simple-rpsgame v1.1
 ### CircuitPython rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -44,7 +44,6 @@ from adafruit_ble.advertising.standard import ManufacturerData, ManufacturerData
 
 from adafruit_display_text.label import Label
 
-### TODO - invert background/foreground for winner a few times
 
 debug = 3
 
@@ -130,34 +129,65 @@ choice_sep = 60
 
 DIM_TXT_COL_FG = 0x505050
 DEFAULT_TXT_COL_FG = 0xa0a0a0
+DEFAULT_TXT_COL_BG = 0x000000
 CURSOR_COL_FG = 0xc0c000
 OPP_CURSOR_COL_FG = 0x00c0c0
 
 
-def setCursor(c_idx, who):
+def setCursor(c_idx, who, visibility=None):
     """Set the position of the cursor on-screen to indicate the player's selection."""
-    ### pylint: disable=global-statement
-    global cursor_dob, opp_cursor_dob
+    char = None
+
+    if visibility == "show":
+        char = ">"
+    elif visibility == "hide":
+        char = " "
 
     if 0 <= c_idx < len(choices):
-        if who == "mine":
-            cursor_dob.y = top_y_pos + choice_sep * c_idx
-        elif who == "yours":
-            opp_cursor_dob.y = top_y_pos + choice_sep * c_idx
+        dob = cursor_dob if who == "mine" else opp_cursor_dob
+        dob.y = top_y_pos + choice_sep * c_idx
+        if char is not None:
+            dob.text = char
+
+
+def flashWinner(c_idx, who):
+    """Invert foreground/background colour a few times
+       to indicate the winning choice."""
+
+    if who == "mine":
+        sg_idx = rps_dob_idx[0] + c_idx
+    elif who == "opp":
+        sg_idx = rps_dob_idx[1] + c_idx
+    else:
+        raise ValueError("who is mine or opp")
+
+    ### An even number will leave colours on original values
+    for _ in range(5 * 2):
+        tmp_col = screen_group[sg_idx].color
+        screen_group[sg_idx].color = screen_group[sg_idx].background_color
+        screen_group[sg_idx].background_color = tmp_col
+        time.sleep(0.5)
+
 
 ### The 6x14 terminalio classic font
 FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
 screen_group = Group(max_size=len(choices) * 2 + 1 + 1)
 
+### The position of the two players RPS Label objects inside screen_group
+rps_dob_idx = []
+
+### Create the simple arrow cursors
 left_col = 20
 right_col = display.width // 2 + left_col
 for x_pos in (left_col, right_col):
     y_pos = top_y_pos
+    rps_dob_idx.append(len(screen_group))
     for label_text in choices:
         rps_dob = Label(terminalio.FONT,
                         text=label_text,
                         scale=2,
-                        color=DEFAULT_TXT_COL_FG)
+                        color=DEFAULT_TXT_COL_FG,
+                        background_color=DEFAULT_TXT_COL_BG)
         rps_dob.x = x_pos
         rps_dob.y = y_pos
         y_pos += 60
@@ -172,11 +202,13 @@ setCursor(my_choice_idx, "mine")
 cursor_dob.y = top_y_pos
 screen_group.append(cursor_dob)
 
+### Initially set to a space to not show it
 opp_cursor_dob = Label(terminalio.FONT,
-                       text=">",
+                       text=" ",
                        scale=3,
-                       color=OPP_CURSOR_COL_FG)
-opp_cursor_dob.x = right_col -20
+                       color=OPP_CURSOR_COL_FG,
+                       background_color=DEFAULT_TXT_COL_BG)
+opp_cursor_dob.x = right_col - 20
 setCursor(my_choice_idx, "your")
 opp_cursor_dob.y = top_y_pos
 screen_group.append(opp_cursor_dob)
@@ -247,6 +279,7 @@ voids = 0
 
 TOTAL_ROUND = 5
 
+
 def evaluate_game(mine, yours):
     """Determine who won the game based on the two strings mine and yours_lc.
        Returns three booleans (win, draw, void)."""
@@ -300,8 +333,7 @@ while True:
         while button_left():
             pass
         my_choice_idx = (my_choice_idx + 1) % len(choices)
-        if display is not None:
-            setCursor(my_choice_idx, "mine")
+        setCursor(my_choice_idx, "mine")
 
     if button_right():
         tx_message = RpsAdvertisement()
@@ -333,7 +365,7 @@ while True:
                     break
                 idx += 1
             opponent_choice = opponent_choice_bytes[0:idx].decode("utf-8")
-            break  ### comment out for testing how many received
+            break
 
         ### We have received one message or exceeded MAX_SEND_TIME_S
         ble.stop_scan()
@@ -354,20 +386,27 @@ while True:
             timeout = True
 
         ble.stop_advertising()
-        setCursor(choices.index(opponent_choice), "yours")
-        d_print(1,"ROUND", round_no,
+
+        d_print(1, "ROUND", round_no,
                 "MINE", choice,
                 "| OPPONENT", opponent_choice)
-        (win, draw, void) = evaluate_game(choice, opponent_choice)
+        win, draw, void = evaluate_game(choice, opponent_choice)
 
         if void:
             voids += 1
-        elif draw:
-            draws += 1
-        elif win:
-            wins += 1
         else:
-            losses += 1
+            opp_choice_idx = choices.index(opponent_choice)
+            setCursor(opp_choice_idx, "opp", visibility="show")
+            if draw:
+                time.sleep(4)
+                draws += 1
+            elif win:
+                flashWinner(my_choice_idx, "mine")
+                wins += 1
+            else:
+                flashWinner(opp_choice_idx, "opp")
+                losses += 1
+            setCursor(opp_choice_idx, "opp", visibility="hide")
         d_print(1, "wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
-        round_no += 1
 
+        round_no += 1
