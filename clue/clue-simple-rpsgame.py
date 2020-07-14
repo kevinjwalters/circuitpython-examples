@@ -1,4 +1,4 @@
-### clue-simple-rpsgame v0.5
+### clue-simple-rpsgame v1.0
 ### CircuitPython rock paper scissors game over Bluetooth LE
 
 ### Tested with CLUE and Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -31,6 +31,7 @@
 import time
 import os
 import struct
+import sys
 
 import board
 from displayio import Group
@@ -43,25 +44,7 @@ from adafruit_ble.advertising.standard import ManufacturerData, ManufacturerData
 
 from adafruit_display_text.label import Label
 
-
-### TODO
-### Maybe simple version is clue only
-### simple version still needs win indicator (flash text?) and a score counter
-
-### Complex version demos how to
-### work on cpb
-### detect gizmo
-### use neopixels as alternative display (light 1, 2, 3 discreetly (discrete joke)
-### and maybe use Red, Purple, Sapphire for rock paper scissors
-
-### simple version will have a lot of issues
-### unreliable transport
-### lack of synchronised win announcement
-### got to decide whether to do the littany of crypto mistakes or not
-### could include the lack of protocol and future proofing and cite
-### LDAP as good example and git perhaps as less good
-### complex format not compatible with simple format so mixing the two will confuse things
-
+### TODO - invert background/foreground for winner a few times
 
 debug = 3
 
@@ -134,6 +117,9 @@ else:
     button_left = lambda: not _button_a.value
     button_right = lambda: not _button_b.value
 
+if display is None:
+    print("FATAL:", "This version of program only works with a display")
+    sys.exit(1)
 
 choices = ("rock", "paper", "scissors")
 my_choice_idx = 0
@@ -145,42 +131,57 @@ choice_sep = 60
 DIM_TXT_COL_FG = 0x505050
 DEFAULT_TXT_COL_FG = 0xa0a0a0
 CURSOR_COL_FG = 0xc0c000
+OPP_CURSOR_COL_FG = 0x00c0c0
 
-def set_cursor(c_idx):
+
+def setCursor(c_idx, who):
     """Set the position of the cursor on-screen to indicate the player's selection."""
     ### pylint: disable=global-statement
-    global cursor_dob
+    global cursor_dob, opp_cursor_dob
 
     if 0 <= c_idx < len(choices):
-        cursor_dob.y = top_y_pos + choice_sep * c_idx
+        if who == "mine":
+            cursor_dob.y = top_y_pos + choice_sep * c_idx
+        elif who == "yours":
+            opp_cursor_dob.y = top_y_pos + choice_sep * c_idx
 
+### The 6x14 terminalio classic font
+FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
+screen_group = Group(max_size=len(choices) * 2 + 1 + 1)
 
-if display is not None:
-    ### The 6x14 terminalio classic font
-    FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
-    screen_group = Group(max_size=len(choices) * 2 + 1)
+left_col = 20
+right_col = display.width // 2 + left_col
+for x_pos in (left_col, right_col):
+    y_pos = top_y_pos
+    for label_text in choices:
+        rps_dob = Label(terminalio.FONT,
+                        text=label_text,
+                        scale=2,
+                        color=DEFAULT_TXT_COL_FG)
+        rps_dob.x = x_pos
+        rps_dob.y = y_pos
+        y_pos += 60
+        screen_group.append(rps_dob)
 
-    for x_pos in (20, display.width // 2 + 20):
-        y_pos = top_y_pos
-        for label_text in choices:
-            rps_dob = Label(terminalio.FONT,
-                            text=label_text,
-                            scale=2,
-                            color=DEFAULT_TXT_COL_FG)
-            rps_dob.x = x_pos
-            rps_dob.y = y_pos
-            y_pos += 60
-            screen_group.append(rps_dob)
+cursor_dob = Label(terminalio.FONT,
+                   text=">",
+                   scale=3,
+                   color=CURSOR_COL_FG)
+cursor_dob.x = left_col - 20
+setCursor(my_choice_idx, "mine")
+cursor_dob.y = top_y_pos
+screen_group.append(cursor_dob)
 
-    cursor_dob = Label(terminalio.FONT,
+opp_cursor_dob = Label(terminalio.FONT,
                        text=">",
                        scale=3,
-                       color=CURSOR_COL_FG)
-    cursor_dob.x = 0
-    set_cursor(my_choice_idx)
-    cursor_dob.y = top_y_pos
-    screen_group.append(cursor_dob)
-    display.show(screen_group)
+                       color=OPP_CURSOR_COL_FG)
+opp_cursor_dob.x = right_col -20
+setCursor(my_choice_idx, "your")
+opp_cursor_dob.y = top_y_pos
+screen_group.append(opp_cursor_dob)
+
+display.show(screen_group)
 
 ### From adafruit_ble.advertising
 MANUFACTURING_DATA_ADT = 0xFF
@@ -222,11 +223,15 @@ class RpsAdvertisement(Advertisement):
     test_string = ManufacturerDataField(RPS_DATA_ID, "<" + _DATA_FMT)
     """RPS choice."""
 
+
 NS_IN_S = 1000 * 1000  * 1000
 MIN_SEND_TIME_NS = 6 * NS_IN_S
 MAX_SEND_TIME_S = 20
 MAX_SEND_TIME_NS = MAX_SEND_TIME_S * NS_IN_S
 
+### 20ms is the minimum delay between advertising packets
+### in Bluetooth Low Energy
+### extra 10us deals with API floating point rounding issues
 MIN_AD_INTERVAL = 0.02001
 
 ble = BLERadio()
@@ -296,7 +301,7 @@ while True:
             pass
         my_choice_idx = (my_choice_idx + 1) % len(choices)
         if display is not None:
-            set_cursor(my_choice_idx)
+            setCursor(my_choice_idx, "mine")
 
     if button_right():
         tx_message = RpsAdvertisement()
@@ -305,34 +310,23 @@ while True:
         tx_message.test_string = choice
         d_print(2, "TXing RTA", choice)
 
-        ### Page 126 35.5 recommends an initial 30s of 20ms intervals
-        ### https://developer.apple.com/accessories/Accessory-Design-Guidelines.pdf
-        ### So this low value seems appropriate but interval=0.020 gives this
-        ### _bleio.BluetoothError: Unknown soft device error: 0007
-        ### 0.037 ok 0.021 ok 0.0201 ok 0.02001 ok - damn FP!!
-        ## ble.start_advertising(tx_message, interval=0.02001)
-
         opponent_choice = None
         ble.start_advertising(tx_message, interval=MIN_AD_INTERVAL)
         sending_ns = time.monotonic_ns()
 
-        ##print("ssssssssss")
-        ##message.test32bit = "ssssssss"
-        ##ble.start_advertising(message)
-        ##time.sleep(5)
-        ##ble.stop_advertising()
-
-        ### timeout in seconds
-        ### -100 is probably minimum, -128 would be 8bit signed min
+        ### Timeout value is in seconds
+        ### RSSI -100 is probably minimum, -128 would be 8bit signed min
         ### window and interval are 0.1 by default - same value means
         ### continuous scanning (sending Advertisement will interrupt this)
-        for adv in ble.start_scan(RpsAdvertisement, minimum_rssi=-127,
+        for adv in ble.start_scan(RpsAdvertisement,
+                                  minimum_rssi=-90,
                                   timeout=MAX_SEND_TIME_S):
             received_ns = time.monotonic_ns()
             d_print(2, "RXed RTA",
                     adv.test_string)
             opponent_choice_bytes = adv.test_string
-            ### TODO - could write about for (NB!!) vs for else vs while
+
+            ### Trim trailing NUL chars from bytes
             idx = 0
             while idx < len(opponent_choice_bytes):
                 if opponent_choice_bytes[idx] == 0:
@@ -360,11 +354,12 @@ while True:
             timeout = True
 
         ble.stop_advertising()
-
+        setCursor(choices.index(opponent_choice), "yours")
         d_print(1,"ROUND", round_no,
                 "MINE", choice,
                 "| OPPONENT", opponent_choice)
         (win, draw, void) = evaluate_game(choice, opponent_choice)
+
         if void:
             voids += 1
         elif draw:
@@ -376,9 +371,3 @@ while True:
         d_print(1, "wins {:d}, losses {:d}, draws {:d}, void {:d}".format(wins, losses, draws, voids))
         round_no += 1
 
-### Do something on screen or NeoPixels
-
-print("GAME OVER")
-
-while True:
-    pass
