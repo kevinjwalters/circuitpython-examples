@@ -23,6 +23,8 @@
 
 import time
 
+### These libraries need to be loaded for RPSDisplay class to work but
+### will not be used when executed on the CPB without TFT Gizmo
 import displayio
 from displayio import Group
 import terminalio
@@ -68,14 +70,6 @@ CHOICE_COL = (0x040000,  ### Red for Rock
               0x030004,  ### Purple for Paper
               0x000004   ### Sapphire blue for Scissors
              )
-
-
-### TODO - HACK TIL I CLEAN THIS ALL UP
-DISPLAY_WIDTH = 240
-DISPLAY_HEIGHT = 240
-FONT_WIDTH = 6
-FONT_HEIGHT = 14
-SPRITE_SIZE = 16
 
 
 def blankScreen(disp, pix):
@@ -245,8 +239,9 @@ class RPSDisplay():
                                                                        rounds_tot),
                               scale=2,
                               color=TITLE_TXT_COL_FG)
-            title_dob.x = round((DISPLAY_WIDTH - len(title_dob.text) * 2 * FONT_WIDTH) // 2)
-            title_dob.y = round(FONT_HEIGHT // 2)
+            title_dob.x = round((self.width
+                                 - len(title_dob.text) * 2 * self.font_width) // 2)
+            title_dob.y = round(self.font_height // 2)
             round_choice_group.append(title_dob)
 
         if won_sf is not None:
@@ -256,13 +251,14 @@ class RPSDisplay():
                                                                            lost_sf),
                                 scale=2,
                                 color=TITLE_TXT_COL_FG)
-            gamesum_dob.x = round((DISPLAY_WIDTH - len(gamesum_dob.text) * 2 * FONT_WIDTH) // 2)
-            gamesum_dob.y = round(DISPLAY_HEIGHT - 2 * FONT_HEIGHT // 2)
+            gamesum_dob.x = round((self.width
+                                   - len(gamesum_dob.text) * 2 * self.font_width) // 2)
+            gamesum_dob.y = round(self.height - 2 * self.font_height // 2)
             round_choice_group.append(gamesum_dob)
 
         s_group = Group(scale=3, max_size=1)
         s_group.x = 32
-        s_group.y = (DISPLAY_HEIGHT - 3 * SPRITE_SIZE) // 2
+        s_group.y = (self.height - 3 * self.sprite_size) // 2
         s_group.append(self.sprites[ch_idx])
         round_choice_group.append(s_group)
 
@@ -279,18 +275,18 @@ class RPSDisplay():
                                   text="Welcome To",
                                   scale=3,
                                   color=IWELCOME_COL_FG)
-            welcometo_dob.x = (DISPLAY_WIDTH - 10 * 3 * FONT_WIDTH) // 2
+            welcometo_dob.x = (self.width - 10 * 3 * self.font_width) // 2
             ### Y pos on screen looks lower than I would expect
-            welcometo_dob.y = 3 * FONT_HEIGHT // 2
+            welcometo_dob.y = 3 * self.font_height // 2
             intro_group.append(welcometo_dob)
 
             extra_space = 8
-            spacing = 3 * SPRITE_SIZE + extra_space
+            spacing = 3 * self.sprite_size + extra_space
             y_adj = (-6, -2, -2)
             for idx, sprite in enumerate(self.sprites):
                 s_group = Group(scale=3, max_size=1)
                 s_group.x = -96
-                s_group.y = round((DISPLAY_HEIGHT - 1.5 * SPRITE_SIZE) / 2
+                s_group.y = round((self.height - 1.5 * self.sprite_size) / 2
                                   + (idx - 1) * spacing) + y_adj[idx]
                 s_group.append(sprite)
                 intro_group.append(s_group)
@@ -299,8 +295,8 @@ class RPSDisplay():
                               text="Arena",
                               scale=3,
                               color=IWELCOME_COL_FG)
-            arena_dob.x = (DISPLAY_WIDTH - 5 * 3 * FONT_WIDTH) // 2
-            arena_dob.y = DISPLAY_HEIGHT - 3 * FONT_HEIGHT // 2
+            arena_dob.x = (self.width - 5 * 3 * self.font_width) // 2
+            arena_dob.y = self.height - 3 * self.font_height // 2
             intro_group.append(arena_dob)
 
             self.showGroup(intro_group)
@@ -347,7 +343,7 @@ class RPSDisplay():
                              scale=2,
                              color=INFO_COL_FG,
                              background_color=INFO_COL_BG)
-            left_width = len(left_dob.text) * 2 * FONT_WIDTH
+            left_width = len(left_dob.text) * 2 * self.font_width
             left_dob.x = -left_width
             left_dob.y = self.button_y_pos
             intro_group.append(left_dob)
@@ -357,8 +353,8 @@ class RPSDisplay():
                               scale=2,
                               color=INFO_COL_FG,
                               background_color=INFO_COL_BG)
-            right_width = len(right_dob.text) * 2 * FONT_WIDTH
-            right_dob.x = DISPLAY_WIDTH
+            right_width = len(right_dob.text) * 2 * self.font_width
+            right_dob.x = self.width
             right_dob.y = self.button_y_pos
             intro_group.append(right_dob)
 
@@ -467,14 +463,14 @@ class RPSDisplay():
                          text="GAME",
                          scale=bg_scale,
                          color=GS_COL)
-        sbg_dob1.x = (DISPLAY_WIDTH - 4 * bg_scale * FONT_WIDTH) // 2
-        sbg_dob1.y = DISPLAY_HEIGHT // 4
+        sbg_dob1.x = (self.width - 4 * bg_scale * self.font_width) // 2
+        sbg_dob1.y = self.height // 4
         sbg_dob2 = Label(self.font,
                          text="SCORES",
                          scale=bg_scale,
                          color=GS_COL)
-        sbg_dob2.x = (DISPLAY_WIDTH - 6 * bg_scale * FONT_WIDTH) // 2
-        sbg_dob2.y = DISPLAY_HEIGHT // 4 * 3
+        sbg_dob2.x = (self.width - 6 * bg_scale * self.font_width) // 2
+        sbg_dob2.y = self.height // 4 * 3
         gs_group.append(sbg_dob1)
         gs_group.append(sbg_dob2)
         self.showGroup(gs_group)
@@ -492,13 +488,13 @@ class RPSDisplay():
             prev_score = sco[idx]
 
         fmt = "{:" + str(max_len) + "s} {:2d}"
-        x_pos = (DISPLAY_WIDTH - (max_len + 3) * 2 * FONT_WIDTH) // 2
+        x_pos = (self.width - (max_len + 3) * 2 * self.font_width) // 2
         scale = 2
         spacing = 4 if len(pla) <= 6 else 0
-        top_y_pos = round((DISPLAY_HEIGHT
-                           - len(pla) * scale * FONT_HEIGHT
+        top_y_pos = round((self.height
+                           - len(pla) * scale * self.font_height
                            - (len(pla) - 1) * spacing) / 2
-                          + scale * FONT_HEIGHT / 2)
+                          + scale * self.font_height / 2)
         scores_group = Group(max_size=len(pla))
         gs_group.append(scores_group)
         for idx, (name, _) in enumerate(pla):
@@ -507,7 +503,7 @@ class RPSDisplay():
                            scale=2,
                            color=(PLAYER_NAME_COL_FG if idx == 0 else OPP_NAME_COL_FG))
             op_dob.x = x_pos
-            op_dob.y = top_y_pos + idx * (scale * FONT_HEIGHT + spacing)
+            op_dob.y = top_y_pos + idx * (scale * self.font_height + spacing)
             scores_group.append(op_dob)
             time.sleep(0.2)
 
@@ -520,7 +516,7 @@ class RPSDisplay():
                            text="?",
                            scale=2,
                            color=QM_SORT_FG)
-            qm_dob.x = round(x_pos - 1.5 * scale * FONT_WIDTH)
+            qm_dob.x = round(x_pos - 1.5 * scale * self.font_width)
             gs_group.append(qm_dob)
             while True:
                 swaps = 0
@@ -648,7 +644,7 @@ class RPSDisplay():
                            scale=2,
                            color=OPP_NAME_COL_FG)
             op_dob.x = 40
-            op_dob.y = FONT_HEIGHT
+            op_dob.y = self.font_height
             error_group.append(op_dob)
             self.showGroup(error_group)
             self.fadeUpDown("up", duration=0.4)
@@ -672,9 +668,9 @@ class RPSDisplay():
 
             ### Add player's name and sprite just off left side of screen
             ### and opponent's just off right
-            player_detail = [[me_name, self.sprites[my_ch_idx], -16 - 3 * SPRITE_SIZE,
+            player_detail = [[me_name, self.sprites[my_ch_idx], -16 - 3 * self.sprite_size,
                               PLAYER_NAME_COL_FG, PLAYER_NAME_COL_BG],
-                             [op_name, self.opp_sprites[op_ch_idx], 16 + DISPLAY_WIDTH,
+                             [op_name, self.opp_sprites[op_ch_idx], 16 + self.width,
                               OPP_NAME_COL_FG, OPP_NAME_COL_BG]]
             idx_lr = [0, 1]  ### index for left and right sprite
             if win:
@@ -689,7 +685,7 @@ class RPSDisplay():
                  fg, bg) in player_detail:
                 s_group = Group(scale=2, max_size=2)  ### Audio is choppy at scale=3
                 s_group.x = start_x
-                s_group.y = (DISPLAY_HEIGHT - 2 * (SPRITE_SIZE + FONT_HEIGHT)) // 2
+                s_group.y = (self.height - 2 * (self.sprite_size + self.font_height)) // 2
 
                 s_group.append(sprite)
                 p_name_dob = Label(self.font,
@@ -698,8 +694,8 @@ class RPSDisplay():
                                    color=fg,
                                    background_color=bg)
                 ### Centre text below sprite - values are * Group scale
-                p_name_dob.x = (SPRITE_SIZE - len(name) * FONT_WIDTH) // 2
-                p_name_dob.y = SPRITE_SIZE + 4
+                p_name_dob.x = (self.sprite_size - len(name) * self.font_width) // 2
+                p_name_dob.y = self.sprite_size + 4
                 s_group.append(p_name_dob)
 
                 pvp_group.append(s_group)
@@ -711,7 +707,7 @@ class RPSDisplay():
                                 max_glyphs=8 + 1,
                                 scale=3,
                                 color=BLACK)
-            summary_dob.y = round(DISPLAY_HEIGHT - (3 * FONT_HEIGHT / 2))
+            summary_dob.y = round(self.height - (3 * self.font_height / 2))
             pvp_group.append(summary_dob)
 
             self.showGroup(pvp_group)
@@ -747,7 +743,7 @@ class RPSDisplay():
             else:
                 sum_text = "You lose"
             summary_dob.text = sum_text
-            summary_dob.x = round((DISPLAY_WIDTH - 3 * FONT_WIDTH * len(sum_text)) // 2)
+            summary_dob.x = round((self.width - 3 * self.font_width * len(sum_text)) // 2)
 
             ### Flash colours for win, fad up to blue for rest
             if not draw and win:
