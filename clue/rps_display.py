@@ -545,7 +545,7 @@ class RPSDisplay():
                         for offset in offsets:
                             scores_group[idx].y = above_y + offset
                             scores_group[idx + 1].y = below_y - offset
-                            time.sleep(0.040)
+                            time.sleep(0.050)
 
                         ### swap the scores around
                         sort_scores[idx] = sort_scores[idx + 1]
