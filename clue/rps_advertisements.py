@@ -85,25 +85,24 @@ class RpsEncDataAdvertisement(Advertisement):
         key_encoding="<H"
     )
 
-    sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
-    """Sequence number of the data. Used in acknowledgements."""
-
     enc_data = ManufacturerDataField(RPS_ENC_DATA_ID, "<" + _DATA_FMT_ENC_DATA)
     round_no = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
+    """Sequence number of the data. Used in acknowledgements."""
     ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, enc_data=None, round_no=None, ack=None, sequence_number=None):
-        """ack must be set to () to send this optional, data-less field."""
+    def __init__(self, *, enc_data=None, round_no=None, sequence_number=None, ack=None):
+        """enc_data must be either set here in the constructor or set first."""
         super().__init__()
         if enc_data is not None:
             self.enc_data = enc_data
         if round_no is not None:
             self.round_no = round_no
-        if ack is not None:
-            self.ack = ack
         if sequence_number is not None:
             self.sequence_number = sequence_number
+        if ack is not None:
+            self.ack = ack
 
 
 class RpsKeyDataAdvertisement(Advertisement):
@@ -136,25 +135,24 @@ class RpsKeyDataAdvertisement(Advertisement):
         key_encoding="<H"
     )
 
-    sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
-    """Sequence number of the data. Used in acknowledgements."""
-
     key_data = ManufacturerDataField(RPS_KEY_DATA_ID, "<" + _DATA_FMT_KEY_DATA)
     round_no = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
+    sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
+    """Sequence number of the data. Used in acknowledgements."""
     ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, key_data=None, round_no=None, ack=None, sequence_number=None):
-        """ack must be set to () to send this optional, data-less field."""
+    def __init__(self, *, key_data=None, round_no=None, sequence_number=None, ack=None):
+        """key_data must be either set here in the constructor or set first."""
         super().__init__()
         if key_data is not None:
             self.key_data = key_data
         if round_no is not None:
             self.round_no = round_no
-        if ack is not None:
-            self.ack = ack
         if sequence_number is not None:
             self.sequence_number = sequence_number
+        if ack is not None:
+            self.ack = ack
 
 
 class RpsRoundEndAdvertisement(Advertisement):
@@ -187,22 +185,21 @@ class RpsRoundEndAdvertisement(Advertisement):
         key_encoding="<H"
     )
 
+    round_no = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
     sequence_number = ManufacturerDataField(ADAFRUIT_SEQ_ID, "<" + _SEQ_FMT)
     """Sequence number of the data. Used in acknowledgements."""
-
-    round_no = ManufacturerDataField(RPS_ROUND_ID, "<" + _DATA_FMT_ROUND)
     ack = ManufacturerDataField(RPS_ACK_ID, "<" + _DATA_FMT_ACK)
     """Round number starting at 1."""
 
-    def __init__(self, *, round_no=None, ack=None, sequence_number=None):
-        """ack must be set to () to send this optional, data-less field."""
+    def __init__(self, *, round_no=None, sequence_number=None, ack=None):
+        """round_no must be either set here in the constructor or set first."""
         super().__init__()
         if round_no is not None:
             self.round_no = round_no
-        if ack is not None:
-            self.ack = ack
         if sequence_number is not None:
             self.sequence_number = sequence_number
+        if ack is not None:
+            self.ack = ack
 
 
 class JoinGameAdvertisement(Advertisement):
@@ -235,7 +232,7 @@ class JoinGameAdvertisement(Advertisement):
     )
 
     game = ManufacturerDataField(GM_JOIN_ID, "<" + _DATA_FMT)
-    """RPS choice."""
+    """The name of the game, limited to eight characters."""
 
     def __init__(self, *, game=None):
         super().__init__()
