@@ -29,6 +29,8 @@ from adafruit_ble.advertising.standard import ManufacturerData, ManufacturerData
 ### the protocol and a descriptor for the encryption type
 
 ### From adafruit_ble.advertising
+### 0xFF is "Manufacturer Specific Data" as per list of types in
+### https://www.bluetooth.com/specifications/assigned-numbers/generic-access-profile/
 MANUFACTURING_DATA_ADT = 0xFF
 ADAFRUIT_COMPANY_ID = 0x0822
 
@@ -38,16 +40,14 @@ ADAFRUIT_SEQ_ID = 0x0003
 
 ### According to https://github.com/adafruit/Adafruit_CircuitPython_BLE/blob/master/adafruit_ble/advertising/adafruit.py
 ### 0xf000 (to 0xffff) is for range for Adafruit customers
-GM_JOIN_ID = 0xfe30
-RPS_VERSION = 0xff30
-RPS_ROUND_ID = 0xff74
-RPS_ENC_DATA_ID = 0xff34
-RPS_KEY_DATA_ID = 0xff54
-RPS_ACK_ID = 0xff52
-### These ID numbers have all been carefully selected to obtain a particular
-### ordering of the fields within the ManufacturerData based on the current
-### dict key ordering - this is bad practice and FRAGILE as the prefix
-### matching falls apart if this changes
+
+### These four are used as part of prefix matching
+RPS_ENC_DATA_ID = 0xfe41
+RPS_KEY_DATA_ID = 0xfe42
+RPS_ROUND_ID = 0xfe43
+GM_JOIN_ID = 0xfe44
+
+RPS_ACK_ID = 0xfe51
 
 ### Data formats for shared fields
 _DATA_FMT_ROUND = "B"
