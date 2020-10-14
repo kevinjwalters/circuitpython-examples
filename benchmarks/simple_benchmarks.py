@@ -1,9 +1,10 @@
-### simple_benchmarks.py v1.0
+### simple_benchmarks.py v1.1
 ### Some simple benchmarks
 
 ### DO NOT copy files to CIRCUITPY while this is running
 
 ### Tested with an Adafruit CLUE and Feather M4 Express using CircuitPython 5.3.1
+### And Microbit V1 using MicroPython v1.9.2-34-gd64154c73
 
 ### MIT License
 
@@ -34,10 +35,11 @@ import time
 import gc
 import sys
 
-import board
+import math
 
 ### Turn off any screen as console output seriously messes up results
 try:
+    import board
     board.DISPLAY.auto_refresh = False
 except Exception:
     pass
@@ -48,17 +50,27 @@ OPS = {}
 SEEDS = {}
 
 
-def timeit(func):
-    t1 = time.monotonic_ns()
+def timeit_cp(func):
+    t1 = t2 = time.monotonic_ns()
     func()
     t2 = time.monotonic_ns()
     return (t2 - t1) / 1e9
 
 
+def timeit_mb(func):
+    t1 = t2 = time.ticks_us()
+    func()
+    t2 = time.ticks_us()
+    return (t2 - t1) / 1e6
+
+
+timeit = timeit_mb if sys.platform == "microbit" else timeit_cp
+
+
 ### Floating point
 ### 1) avoid integers to avoid conversions and the long/big integer code
 ### 2) avoid repeated, unintentional calculations with 0.0/Inf/NaN 
-ITERATIONS["bm_001AdditionA"] = 50_000
+ITERATIONS["bm_001AdditionA"] = 50 * 1000
 OPS["bm_001AdditionA"] = 10
 def bm_001AdditionA(n):
     for idx in range(n):
@@ -76,7 +88,7 @@ def bm_001AdditionA(n):
     return (a,b,c,d,e)
 
 
-ITERATIONS["bm_002MultiplicationA"] = 50_000
+ITERATIONS["bm_002MultiplicationA"] = 50 * 1000
 OPS["bm_002MultiplicationA"] = 10
 def bm_002MultiplicationA(n):
     for idx in range(n):
@@ -94,7 +106,7 @@ def bm_002MultiplicationA(n):
     return (a,b,c,d,e)
 
 
-ITERATIONS["bm_003DivisionA"] = 50_000
+ITERATIONS["bm_003DivisionA"] = 50 * 1000
 OPS["bm_003DivisionA"] = 10
 def bm_003DivisionA(n):
     for idx in range(n):
@@ -110,13 +122,32 @@ def bm_003DivisionA(n):
         d = a / b / 0.9999
         e = a / b / c / d
     return (a,b,c,d,e)
+    
+ITERATIONS["bm_004ArchimedesPiA"] = 5 * 1000
+OPS["bm_004ArchimedesPiA"] = 1
+def bm_004ArchimedesPiA(n):
+    for idx in range(n):
+        x = 4
+        y = 2 * math.sqrt(2)
+
+        count = 0
+        ### Conventional approach is to iterate until x - y is small
+        while count < 10:
+            x_new = 2.0 * x * y / (x + y)
+            y    = math.sqrt(x_new * y)
+            x    = x_new
+            count += 1
+        my_pi = (x + y) / 2.0
+
+    return (my_pi, count)
 
 
 local_funcs = locals()
 
 def run(n=1, format="text", stats=False):
     for cond in ("platform", "version", "modules"):
-        print(cond + ":", getattr(sys, cond))
+        if hasattr(sys, cond):
+            print(cond + ":", getattr(sys, cond))
 
     func_names = sorted([name for name, func in local_funcs.items() if name.startswith("bm_")])
     for f_n in func_names:
@@ -128,3 +159,7 @@ def run(n=1, format="text", stats=False):
         ops_per_func = OPS.get(f_n) if OPS.get(f_n) else 1
         print("{:f}s ({:f}Hz)".format(duration, ops_per_func * count / duration))
         time.sleep(0.1)
+
+
+if __name__ == "__main__":
+    run()
