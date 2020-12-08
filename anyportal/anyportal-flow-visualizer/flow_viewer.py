@@ -37,7 +37,6 @@ import math
 
 import board
 import displayio
-import ulab
 
 try:
     from adafruit_matrixportal.matrix import Matrix
@@ -59,7 +58,7 @@ SOLI_COLOR = 0xADAF00 # solids
 HEAD_COLOR = 0x00FFFF # leading particles
 TAIL_COLOR = 0x000A0A << (0 if matrix_portal else 3) # trailing particles
 TAIL_LENGTH = 10      # length in pixels
-DELAY = 0.08          # smaller = faster
+DELAY = 0.0           # smaller = faster
 #----------------------------------------------------------
 
 # use solution to define other items
@@ -69,19 +68,6 @@ MATRIX_WIDTH = len(VX[0])
 MATRIX_HEIGHT = len(VX)
 ### Starting locations specified as (x, y)
 SEEDS = ((0, y) for y in range(1, MATRIX_HEIGHT - 2, 2))
-
-for ca_pass in ("count", "assign"):
-    s_idx = 0
-    for row in range(len(VX)):
-        for col, v in enumerate(VX[row]):
-            if v is None:
-                if ca_pass == "assign":
-                    SOLIDS_X[s_idx] = col
-                    SOLIDS_Y[s_idx] = row
-                s_idx += 1
-    if ca_pass == "count":
-        SOLIDS_X = ulab.zeros(s_idx, dtype=ulab.uint16)
-        SOLIDS_Y = ulab.zeros(s_idx, dtype=ulab.uint16)
 
 ### Matrix / PyPortal and displayio setup
 ### PyPortal is 320x240, Titano variant is 480x320, MatrixPortal is 128x64
@@ -100,11 +86,17 @@ else:
     pix_scale_y = display.height / MATRIX_HEIGHT
     pix_scale = int(min(pix_scale_x, pix_scale_y))
     group = displayio.Group(max_size=1, scale=pix_scale)
-    ### Centre the displayed bitmap 
+    ### Centre the displayed bitmap
     group.x = (display.width - MATRIX_WIDTH * pix_scale) // 2
     group.y = (display.height - MATRIX_HEIGHT * pix_scale) // 2
 
 display.show(group)
+
+### Draw the solids onto a bitmap used to initialise the frame
+for row in range(len(VX)):
+    for col, v in enumerate(VX[row]):
+        if v is None:
+            solids_bitmap[col, row] = 1
 
 palette = displayio.Palette(4)
 palette[0] = BACK_COLOR
@@ -149,10 +141,6 @@ def compute_streamlines():
         # add streamline to global store
         STREAMLINES.append(streamline)
 
-def draw_solids(bmp):
-    for idx in range(len(SOLIDS_X)):
-        bmp[SOLIDS_X[idx], SOLIDS_Y[idx]] = 1
-
 def show_streamlines():
     '''Draw the streamlines.'''
     for sl, head in enumerate(HEADS):
@@ -190,7 +178,7 @@ def animate_streamlines():
         for index, _ in enumerate(HEADS):
             HEADS[index] = 0
 
-### fill and redraw bitmap is 11.4ms on Pyportal, blit is 2.6ms 
+### fill and redraw bitmap is 11.4ms on Pyportal, blit is 2.6ms
 def update_display():
     '''Update the matrix display.'''
     display.auto_refresh = False
@@ -201,7 +189,6 @@ def update_display():
 #==========
 # MAIN
 #==========
-draw_solids(solids_bitmap)
 print('Computing streamlines...', end='')
 compute_streamlines()
 print('DONE')
