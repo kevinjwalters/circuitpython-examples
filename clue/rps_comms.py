@@ -99,8 +99,8 @@ def startScan(radio, send_ad, send_advertising,
     if send_advertising:
         try:
             radio.start_advertising(send_ad, interval=ad_interval)
-        except _bleio.BluetoothError:
-            pass  ### catch and ignore "Already advertising."
+        except _bleio.BluetoothError as ex:
+            print("Caught Exception", repr(ex)) ### catch and ignore "Already advertising."
 
     ### Timeout value is in seconds
     ### RSSI -100 is probably practical minimum, -128 would be 8bit signed min
