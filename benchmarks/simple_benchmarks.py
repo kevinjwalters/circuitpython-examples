@@ -1,4 +1,4 @@
-### simple_benchmarks.py v1.1
+### simple_benchmarks.py v1.2
 ### Some simple benchmarks
 
 ### DO NOT copy files to CIRCUITPY while this is running
@@ -29,10 +29,11 @@
 ### SOFTWARE.
 
 
-### Discussion on this in https://forums.adafruit.com/viewtopic.php?f=60&t=170425  
+### Discussion on this in https://forums.adafruit.com/viewtopic.php?f=60&t=170425
 
 import time
 import gc
+import os
 import sys
 
 import math
@@ -44,6 +45,11 @@ try:
 except Exception:
     pass
 
+### sys.platform not present on FeatherS2 with 6.0.0
+try:
+    PLATFORM = sys.platform
+except AttributeError:
+    PLATFORM = None
 
 ITERATIONS = {}
 OPS = {}
@@ -63,13 +69,13 @@ def timeit_mb(func):
     t2 = time.ticks_us()
     return (t2 - t1) / 1e6
 
+timeit = timeit_mb if PLATFORM == "microbit" else timeit_cp
 
-timeit = timeit_mb if sys.platform == "microbit" else timeit_cp
-
+### pylint: disable=invalid-name
 
 ### Floating point
 ### 1) avoid integers to avoid conversions and the long/big integer code
-### 2) avoid repeated, unintentional calculations with 0.0/Inf/NaN 
+### 2) avoid repeated, unintentional calculations with 0.0/Inf/NaN
 ITERATIONS["bm_001AdditionA"] = 50 * 1000
 OPS["bm_001AdditionA"] = 10
 def bm_001AdditionA(n):
@@ -85,7 +91,7 @@ def bm_001AdditionA(n):
         c = c + a + a + a
         d = a + b + 0.9999
         e = a + b + c + d
-    return (a,b,c,d,e)
+    return (a, b, c, d, e)
 
 
 ITERATIONS["bm_002MultiplicationA"] = 50 * 1000
@@ -103,7 +109,7 @@ def bm_002MultiplicationA(n):
         c = c * a * a * a
         d = a * b * 0.9999
         e = a * b * c * d
-    return (a,b,c,d,e)
+    return (a, b, c, d, e)
 
 
 ITERATIONS["bm_003DivisionA"] = 50 * 1000
@@ -121,8 +127,8 @@ def bm_003DivisionA(n):
         c = c / a / a / a
         d = a / b / 0.9999
         e = a / b / c / d
-    return (a,b,c,d,e)
-    
+    return (a, b, c, d, e)
+
 ITERATIONS["bm_004ArchimedesPiA"] = 5 * 1000
 OPS["bm_004ArchimedesPiA"] = 1
 def bm_004ArchimedesPiA(n):
@@ -134,8 +140,8 @@ def bm_004ArchimedesPiA(n):
         ### Conventional approach is to iterate until x - y is small
         while count < 10:
             x_new = 2.0 * x * y / (x + y)
-            y    = math.sqrt(x_new * y)
-            x    = x_new
+            y = math.sqrt(x_new * y)
+            x = x_new
             count += 1
         my_pi = (x + y) / 2.0
 
@@ -144,10 +150,13 @@ def bm_004ArchimedesPiA(n):
 
 local_funcs = locals()
 
-def run(n=1, format="text", stats=False):
+def run(runs=5, fmt="text", stats=False):
     for cond in ("platform", "version", "modules"):
         if hasattr(sys, cond):
-            print(cond + ":", getattr(sys, cond))
+            print("sys." + cond + ":", getattr(sys, cond))
+    for cond in ("sysname", "nodename", "release", "version", "machine"):
+        if hasattr(os.uname(), cond):
+            print("os." + cond + ":", getattr(os.uname(), cond))
 
     func_names = sorted([name for name, func in local_funcs.items() if name.startswith("bm_")])
     for f_n in func_names:
@@ -155,9 +164,16 @@ def run(n=1, format="text", stats=False):
         print(pretty_name, ": ", sep="", end="")
         count = ITERATIONS[f_n]
         gc.collect()
-        duration = timeit(lambda : local_funcs[f_n](count))
+        durations = []
+        for _ in range(runs):
+            durations.append(timeit(lambda: local_funcs[f_n](count)))
+            time.sleep(0.1)
+
         ops_per_func = OPS.get(f_n) if OPS.get(f_n) else 1
-        print("{:f}s ({:f}Hz)".format(duration, ops_per_func * count / duration))
+        ops_per_sec_mean = ops_per_func * count / sum(durations) / runs
+
+        print(",".join(["{:.4f}s".format(d) for d in durations]),
+              "({:.0f}Hz)".format(ops_per_sec_mean))
         time.sleep(0.1)
 
 
