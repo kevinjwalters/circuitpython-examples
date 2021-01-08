@@ -1,4 +1,4 @@
-### simple_benchmarks.py v1.2
+### simple_benchmarks.py v1.3
 ### Some simple benchmarks
 
 ### DO NOT copy files to CIRCUITPY while this is running
@@ -146,6 +146,38 @@ def bm_004ArchimedesPiA(n):
         my_pi = (x + y) / 2.0
 
     return (my_pi, count)
+
+### calculation with extremely large numbers are likely to prevent critical
+### periodic background tasks running in the interpreter
+ITERATIONS["bm_005MixedBigIntA"] = 3 * 1000
+OPS["bm_005MixedBigIntA"] = 30
+def bm_005MixedBigIntA(n):
+    big_num1 = 987654321987654321987654321987654321
+    for idx in range(n):
+        num = 1
+        num *= 1000
+        num = 2 * num * num * num
+        num = 12345 * num
+        num = num * 12345678901234567890000 * big_num1 * big_num1
+        num *= 3
+        num *= 31415
+        num += 987654321 + num + num + num
+        num -= 100000000
+        num -= 800000000
+        num -= 87654321
+        num = -num
+        num //= 4  ### undo the addition of three extra num
+        num = num // 12345 // big_num1
+        num = -num
+        num //= 123456789012345678900
+        num = num // 100 // 3 // big_num1
+        num //= 31415
+        num = num // 1000
+        num -= 500 * 1000
+        num = num - 500000 - 500000 - 499999
+        assert num == 1
+
+    return (num,)
 
 
 local_funcs = locals()
