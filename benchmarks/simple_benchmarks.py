@@ -1,4 +1,4 @@
-### simple_benchmarks.py v1.3
+### simple_benchmarks.py v1.4
 ### Some simple benchmarks
 
 ### DO NOT copy files to CIRCUITPY while this is running
@@ -69,7 +69,19 @@ def timeit_mb(func):
     t2 = time.ticks_us()
     return (t2 - t1) / 1e6
 
-timeit = timeit_mb if PLATFORM == "microbit" else timeit_cp
+def timeit_bp(func):
+    t1 = t2 = time.monotonic()
+    func()
+    t2 = time.monotonic()
+    return (t2 - t1) / 1.0
+
+if PLATFORM in ("linux", "win32"):
+    timeit = timeit_bp
+elif PLATFORM == "microbit":
+    timeit = timeit_mb
+else:
+    timeit = timeit_cp
+
 
 ### pylint: disable=invalid-name
 
