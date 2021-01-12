@@ -1,4 +1,4 @@
-### flow_viewer v2.1
+### flow_viewer v2.2
 ### Flow field visualizer based on potential flow
 
 ### Tested with an Adafruit PyPortal and CircuitPython 6.0.0
