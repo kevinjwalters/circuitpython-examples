@@ -75,9 +75,11 @@ def timeit_bp(func):
     t2 = time.monotonic()
     return (t2 - t1) / 1.0
 
+### Could switch to execute and look
+### for exceptions (AttributeError, NotImplementedError)?
 if PLATFORM in ("linux", "win32"):
     timeit = timeit_bp
-elif PLATFORM == "microbit":
+elif PLATFORM in ("microbit", "rp2"):
     timeit = timeit_mb
 else:
     timeit = timeit_cp
