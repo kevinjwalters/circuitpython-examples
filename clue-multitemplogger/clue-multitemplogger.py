@@ -1,4 +1,4 @@
-### clue-mutlitemplogger.py v1.0
+### clue-mutlitemplogger.py v1.1
 ### Measure temperature from multiple sensors and log to CIRCUITPY
 
 ### Tested with Adafruit CLUE and CircuitPython 6.1.0
@@ -63,7 +63,9 @@ except OSError as ose:
     data_file = None
 
 ### NeoPixel colour during measurement
-READING = 0x004000 + (0x000040 if data_file else 0)
+### Bright values may be useful if powered from a
+### USB power bank with low-current auto off
+READING = 0x00ff00 + (0x0000ff if data_file else 0)
 BLACK = 0x000000
 
 
