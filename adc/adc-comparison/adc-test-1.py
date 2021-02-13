@@ -1,4 +1,4 @@
-### adc-test-1 v1.0
+### adc-test-1 v1.1
 ### Print values from ADC to compare between boards
 ### Reads from A5, sets A0 on SAMD21 only
 
@@ -46,8 +46,8 @@ def repeat(value, cnt):
     for _ in range(cnt):
         yield value
 
-
-input_pin = board.A5
+### A2 is GP28 on Raspberry Pi Pico (RP2040)
+input_pin = board.A2 if SYSNAME == "rp2040" else board.A5
 output_pin = board.A0 if SYSNAME == "samd21" else None
 OUTPUT_DAC_BITS = 10
 
