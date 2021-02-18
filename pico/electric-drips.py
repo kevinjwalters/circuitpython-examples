@@ -1,4 +1,4 @@
-### electric-drips.py v0.5
+### electric-drips.py v0.6
 ### Falling "drips" down the GP pins intended for Cytron Maker Pi Pico
 
 ### TODO PARTIALLY WORKS Tested with Pi Pico and CircuitPython 6.2.0-beta.2-18-g2a467f137
@@ -32,13 +32,30 @@ import random
 
 import board
 import pwmio
+import digitalio
+from audiopwmio import PWMAudioOut as AudioOut
+from audiocore import WaveFile
+
+debug = 1
+
+def d_print(level, *args, **kwargs):
+    """A simple conditional print for debugging based on global debug level."""
+    if not isinstance(level, int):
+        print(level, *args, **kwargs)
+    elif debug >= level:
+        print(*args, **kwargs)
+
+AUDIO_PIN = board.GP18
+audio_out = AudioOut(AUDIO_PIN)
+drip = WaveFile(open("one-drip-16k.wav", "rb"))
+
 
 ### Pins and vertical displacement
 left_pins = ((board.GP0, 0),
              (board.GP1, 1),
              # gap
-             (board.GP2, 3),
-             (board.GP3, 4),
+             (board.GP2, 3),  ### clash with GP18 audio due to PWM architecture
+             (board.GP3, 4),  ### clash with GP18 audio due to PWM architecture
              (board.GP4, 5),
              (board.GP5, 6),
              # gap 
@@ -69,18 +86,47 @@ right_pins = (# 6 absences (green LED for 3v3)
               # gap
               (board.GP21, 13),
               (board.GP20, 14),
-              (board.GP19, 15),
-              (board.GP18, 16),
+              (board.GP19, 15),  ### clash with GP18 audio
+              ##(board.GP18, 16),  ### clash with GP18 audio
               # gap
               (board.GP17, 18),
               (board.GP16, 19))
 
+### The use of GP18 also effectively reserves GP19
+### and the RP2040 hardware cannot then offer PWM on GP2 and GP3
+PWMAUDIO_CLASH_PINS = (board.GP2, board.GP3,
+                       board.GP19)
 
 PIN_SPACING_M = 2.54 / 10 / 100
 BOARD_LENGTH_M = 20 * PIN_SPACING_M
 
 ### This is a duty_cycle value
 MAX_BRIGHTNESS = 65535
+PWM_LED_FREQUENCY = 7000
+
+
+class FakePWMOut:
+    """A basic, fixed-brightness emulation of the PWMOut object used for variable brightness
+       LED driving."""
+
+    def __init__(self, pin, frequency=None, duty_cycle=32767):
+        self._pin = pin
+        self._duty_cycle = duty_cycle
+        self._digout = digitalio.DigitalInOut(self._pin)
+        self._digout.direction = digitalio.Direction.OUTPUT
+        
+        self.duty_cycle = duty_cycle  ### set value using property
+
+
+    @property
+    def duty_cycle(self):
+        return self._duty_cycle
+
+    @duty_cycle.setter
+    def duty_cycle(self, value):
+        self._duty_cycle = value
+        self._digout.value = (value >= 32768)
+
 
 def show_points(pwms, pin_posis, points):
     ##min_y = pin_posis[0][1]
@@ -101,21 +147,31 @@ def show_points(pwms, pin_posis, points):
         ### Use of min() caps the value within legal duty cycle range
         pwms[idx].duty_cycle = min(level, MAX_BRIGHTNESS)
 
+def start_sound(wav):
+    audio_out.play(wav)
+
+
+def pwm_init(pins, duty_cycle=0):
+    pwms = []
+    for p in pins:
+        if p in PWMAUDIO_CLASH_PINS:
+            pwms.append(FakePWMOut(p, duty_cycle=duty_cycle))
+        else:
+            pwms.append(pwmio.PWMOut(p, frequency=PWM_LED_FREQUENCY,
+                                     duty_cycle=duty_cycle))
+    return pwms
+
 
 points = []
 gravity = 9.81 / 30.0
 half_gravity = 0.5 * gravity
 
-left_pwms = [pwmio.PWMOut(pp[0], frequency=2000, duty_cycle=0) for pp in left_pins]
-left_pin_pos = tuple([pp[1] * PIN_SPACING_M for pp in left_pins])
-
-#for timecheck in range(10):
-#   for tenths in range(10):
-#       time.sleep(0.1)
-#   print("tick")
+left_pwms = pwm_init([p for p, d in left_pins])
+left_pin_pos = tuple([d * PIN_SPACING_M for p, d in left_pins])
 
 while True:
     time.sleep(random.random() * 5.0)
+    d_print(1, "START")
 
     ### position, size, brightness
     points.append([left_pin_pos[0], PIN_SPACING_M / 2.0, 0])
@@ -131,11 +187,16 @@ while True:
     start_y_pos = points[0][0]
     current_y_pos = start_y_pos
     end_y_pos = left_pin_pos[-1] + points[0][1]
+    splashed = False
     while current_y_pos <= end_y_pos:
         now_ns = time.monotonic_ns()
         fall_time = (now_ns - start_fall_ns) * 1e-9
         current_y_pos = start_y_pos + half_gravity * fall_time * fall_time
         points[0][0] = current_y_pos
+        ### Start sound a bit before impact to synchronise
+        if not splashed and current_y_pos >= left_pin_pos[-2]:
+            start_sound(drip)
+            splashed = True
         show_points(left_pwms, left_pin_pos, points)
 
     points.clear()
