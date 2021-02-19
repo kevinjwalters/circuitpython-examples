@@ -1,5 +1,9 @@
-### clue-mutlitemplogger.py v1.1
+### clue-mutlitemplogger.py v1.2
 ### Measure temperature from multiple sensors and log to CIRCUITPY
+
+### This now writes every 6 minutes to REDUCE THE WEAR on the flash chip
+### (replacing this involves SMD soldering!)
+### See https://forums.adafruit.com/viewtopic.php?f=65&t=175527
 
 ### Tested with Adafruit CLUE and CircuitPython 6.1.0
 
@@ -31,7 +35,6 @@ from collections import OrderedDict
 
 import microcontroller
 import board
-import busio
 from adafruit_onewire.bus import OneWireBus
 import adafruit_ds18x20
 import adafruit_bmp280
@@ -49,10 +52,16 @@ LM35_PIN = board.P12
 
 MAX_AIN = 2**16 - 1
 
+VERBOSE = False
+
+### Measure every 10 seconds but do not write to CIRCUITPY at this
+### rate as the flash does not have wear-levelling and
 count = 3
 interval = 10
 interval_ns = interval * 1000 * 1000 * 1000
-verbose = False
+write_buffer_lines = 108  ### 8640 bytes every 108/3*10=360 seconds
+pending_writes = []
+
 console = True
 
 
@@ -65,10 +74,13 @@ except OSError as ose:
 ### NeoPixel colour during measurement
 ### Bright values may be useful if powered from a
 ### USB power bank with low-current auto off
+RECORDING = 0xff0000
 READING = 0x00ff00 + (0x0000ff if data_file else 0)
 BLACK = 0x000000
 
 
+### First value might be questionable with a high impedance source
+### due to input multiplexing
 def get_voltage(ain, samples=500):
     return sum([ain.value for _ in range(samples)]) / (samples * MAX_AIN) * vref
 
@@ -84,7 +96,7 @@ def find_DS18X20(bus, verbose=True):
     if verbose:
         for dev in devices:
             print("ROM = {}\tFamily = 0x{:02x}".format([hex(i) for i in dev.rom],
-                                                       dev.family_code))  
+                                                       dev.family_code))
     return devices[0] if devices else None
 
 
@@ -102,8 +114,8 @@ i2c = board.I2C()
 ow_bus = OneWireBus(DS18X20_PIN)
 bmp280 = adafruit_bmp280.Adafruit_BMP280_I2C(i2c)
 sht31d = adafruit_sht31d.SHT31D(i2c)
-ds18b20 = adafruit_ds18x20.DS18X20(ow_bus, 
-                                   find_DS18X20(ow_bus, verbose=verbose))
+ds18b20 = adafruit_ds18x20.DS18X20(ow_bus,
+                                   find_DS18X20(ow_bus, verbose=VERBOSE))
 pixel = neopixel.NeoPixel(board.NEOPIXEL, 1)
 
 ntc_ain = AnalogIn(NTC_PIN)
@@ -125,15 +137,21 @@ sensors = OrderedDict([("bmp280", lambda: bmp280.temperature),
 
 def output(text, *, pad=" ", pad_len=0, end=b"\x0d\x0a", encoding="ascii"):
     if pad and pad_len:
-       out_text = text + " " * (pad_len - len(text) - len(end))
+        out_text = text + " " * (pad_len - len(text) - len(end))
     else:
-       out_text = text
-    
+        out_text = text
+
     if console:
         print(out_text)
     if data_file:
-        data_file.write(out_text.encode(encoding) + end)
-        data_file.flush()
+        pending_writes.append(out_text.encode(encoding) + end)
+        if len(pending_writes) >= write_buffer_lines:
+            pixel[0] = RECORDING
+            for line in pending_writes:
+                data_file.write(line)
+            data_file.flush()
+            pending_writes.clear()
+            pixel[0] = BLACK
 
 
 ### 80 chars minus CRLF
@@ -145,29 +163,29 @@ for _ in range(3):
     output(HEADER, pad_len=FIXED_WIDTH)
 
 
-last_loop_t = 0
+last_loop_ns = 0
 
-backlight_cycle_dur_ns = 1800e9
+backlight_cycle_dur_ns = 7200e9
 backlight_cycle = [1.0, 0.0, 0.0, 0.125, 0.25, 0.5]
 
-start_loop_t = time.monotonic_ns()
+start_loop_ns = time.monotonic_ns()
 while True:
     while True:
-        now_t = time.monotonic_ns()
-        if now_t > last_loop_t + interval_ns:
+        now_ns = time.monotonic_ns()
+        if now_ns > last_loop_ns + interval_ns:
             break
-    last_loop_t = now_t
+    last_loop_ns = now_ns
 
     ### Cycle the backlight through the brightness values stored in list
-    phase, _ = math.modf((now_t - start_loop_t) / backlight_cycle_dur_ns)
+    phase, _ = math.modf((now_ns - start_loop_ns) / backlight_cycle_dur_ns)
     backlight = backlight_cycle[min(int(phase * len(backlight_cycle)),
                                     len(backlight_cycle) - 1)]
     set_backlight(backlight)
 
     ### Take a few measurements and print / log them
     for _ in range(count):
-        in_start_t = time.monotonic_ns()
+        in_start_ns = time.monotonic_ns()
         temps = measure_temps()
-        data_as_text = ("{:d},{:.3f},".format(in_start_t, backlight)
+        data_as_text = ("{:d},{:.3f},".format(in_start_ns, backlight)
                         + ",".join([str(temp) for temp in temps.values()]))
         output(data_as_text, pad_len=FIXED_WIDTH)
