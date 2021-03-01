@@ -103,7 +103,8 @@ while True:
     print("DRIP")
     for frame in animation:
         if isinstance(frame, WaveFile):
-            continue 
+            audio_out.play(frame)
+            continue
 
         for pin in frame:
             outputs[str(pin)].value = True
