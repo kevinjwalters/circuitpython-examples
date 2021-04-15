@@ -1,4 +1,4 @@
-### cpx-ir-shutter-remote v1.1
+### cpx-ir-shutter-remote v1.2
 ### Circuit Playground Express (CPX) shutter remote using infrared for Sony Cameras
 
 ### copy this file to CPX as code.py
@@ -53,6 +53,13 @@ ir_carrier_pwm = pulseio.PWMOut(board.IR_TX,
                                 duty_cycle=round(20 / 100 * 65535))
 ir_pulseout = pulseio.PulseOut(ir_carrier_pwm)
 
+### Used to observe 6.0.0-6.2.0 bug
+### https://github.com/adafruit/circuitpython/issues/4602
+##ir_carrier_pwm_a2debug = pulseio.PWMOut(board.A2,
+##                                        frequency=CARRIER_IRFREQ_SONY,
+##                                        duty_cycle=round(20 / 100 * 65535))
+##ir_pulseout_a2debug = pulseio.PulseOut(ir_carrier_pwm_a2debug)
+
 ### Sony timing values (in us) based on the ones in
 ### https://github.com/z3t0/Arduino-IRremote/blob/master/src/ir_Sony.cpp
 ### Disabling the addition of trail value is required to make this work
@@ -67,6 +74,20 @@ def fire_shutter():
        This is a code used by Sony cameras."""
     ir_encoder.transmit(ir_pulseout, [0xB4, 0xB8, 0xF0],
                         repeat=2, delay=0.005, nbits=20)
+    ### Send to A2 to help debug issue with 5.3.1 ok, 6.x broken
+    ###
+    ##ir_encoder.transmit(ir_pulseout_a2debug, [0xB4, 0xB8, 0xF0],
+    ##                    repeat=2, delay=0.005, nbits=20)
+
+
+def say_interval(number_as_words):
+    words = number_as_words.split() + ["seconds"]
+    for word in words:
+        if word == ",":
+            time.sleep(0.15)
+        else:
+            cp.play_file(WAV_DIR + "/" + word + ".wav")
+        time.sleep(0.050)
 
 
 SHUTTER_CMD_COLOUR = (8, 0, 0)
@@ -76,6 +97,25 @@ BLACK = (0, 0, 0)
 S_TO_NS = 1000 * 1000 * 1000
 ADJ_NS = 20 * 1000 * 1000
 IMPENDING_NS = 2 * S_TO_NS
+### intervalometer mode announces the duration
+manual_trig_wav = "button.wav"
+sound_trig_wav = "noise.wav"
+impending_wav = "ready.wav"
+WAV_DIR="num"
+interval_words = ["five",
+                  "ten",
+                  "fifteen",
+                  "twenty",
+                  "twenty five",
+                  "thirty",
+                  "sixty",
+                  "one hundred and twenty",
+                  "one hundred and eighty",
+                  "two hundred and forty",
+                  "three hundred",
+                  "six hundred",
+                  "one thousand , eight hundred",
+                  "three thousand , six hundred"]
 intervals = [5, 10, 15, 20, 25, 30, 60,
              120, 180, 240, 300, 600, 1800, 3600]
 interval_idx = intervals.index(30)  ### default is 30 seconds
@@ -84,11 +124,15 @@ last_cmd_ns = None
 first_cmd_ns = None
 pixel_indication = True
 impending = False
+say_and_reset = False
 
 while True:
     ### CPX switch to left
     if cp.switch:
-        intervalometer = False
+        if intervalometer:
+            cp.play_file(manual_trig_wav)
+            intervalometer = False
+
         if cp.button_a:  ### left button_a
             if pixel_indication:
                 cp.pixels.fill(SHUTTER_CMD_COLOUR)
@@ -110,18 +154,27 @@ while True:
     ### CPX switch to right
     else:
         if not intervalometer:
-            last_cmd_ns = time.monotonic_ns()
+            say_and_reset = True
             intervalometer = True
 
+        ### Left button decreases time
         if cp.button_a and interval_idx > 0:
             interval_idx -= 1
             while cp.button_a:
                 pass  ### wait for button release
+            say_and_reset = True
 
+        ### Right button increases time
         elif cp.button_b and interval_idx < len(intervals) - 1:
             interval_idx += 1
             while cp.button_b:
                 pass  ### wait for button release
+            say_and_reset = True
+
+        if say_and_reset:
+            say_interval(interval_words[interval_idx])
+            last_cmd_ns = time.monotonic_ns()
+            say_and_reset = False
 
         ### If enough time has elapsed fire the shutter
         ### or show the impending colour on NeoPixels
@@ -143,6 +196,6 @@ while True:
               and not impending
               and now_ns - last_cmd_ns >= interval_ns - IMPENDING_NS):
             cp.pixels.fill(IMPENDING_COLOUR)
-            time.sleep(0.1)
+            cp.play_file(impending_wav)
             cp.pixels.fill(BLACK)
             impending = True
