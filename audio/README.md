@@ -8,3 +8,8 @@
 A 16k mono sample for `electric-drips.py` and `electric-drips-simple.py`.
 
  * one-drip-16k.wav - a sub-sample of `Faucet Drip.wav`, User tack00, https://freesound.org/people/tack00/sounds/399257/ .
+
+Directory of 16k 16bit mono compressed sound samples.
+
+ * num - all from Speak and Math except `and.wav` and `button.wav` which are output from Talkie library samples, probably copyright Texas Instruments Inc.
+
