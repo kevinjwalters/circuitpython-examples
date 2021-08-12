@@ -1,4 +1,4 @@
-### larson-scanner.py v2.0
+### larson-scanner.py v2.1
 ### Larson scanner for Cytron Maker Pi Pico
 
 ### Tested with Maker Pi Pico and CircuitPython 6.2.0-beta.4
@@ -50,7 +50,7 @@ def d_print(level, *args, **kwargs):
         print(*args, **kwargs)
 
 
-AUDIO_DAUGHTERBOARD = True
+AUDIO_DAUGHTERBOARD = False
 
 if AUDIO_DAUGHTERBOARD:
     ### Using pins presented on ESP-01 to talk to Feather nRF52840
@@ -66,16 +66,11 @@ else:
     left_file = open("scanner-left-16k.wav", "rb")
     right_file = open("scanner-right-16k.wav", "rb")
 
-    ### These crackle very unpleasantly and/or CP just crashes
-    #scanner_left = WaveFile(left_file)
-    #scanner_right = WaveFile(right_file)
-
-    ### This blows up on first play during PWM animation
-    ### but at least it doesn't crackle!!
-    ### https://github.com/adafruit/circuitpython/issues/4431
-    buffer = bytearray(80 * 1024)  ### TODO - remove this
-    scanner_left = WaveFile(left_file, buffer)
-    scanner_right = WaveFile(right_file, buffer)
+    ### This non pops a bit on 7.0.0-alpha.6 and after 10-100 minutes
+    ### the audio stops and both audio pwm get stuck perhaps at 
+    ### a lowish duty cycle
+    scanner_left = WaveFile(left_file)
+    scanner_right = WaveFile(right_file)
 
     ### The use of GP18 also effectively reserves GP19
     ### and the RP2040 hardware cannot then offer PWM on GP2 and GP3
