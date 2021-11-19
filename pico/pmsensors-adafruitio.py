@@ -1,4 +1,4 @@
-### pmsensors-adafruitio v1.0
+### pmsensors-adafruitio v1.2
 ### Send values from Plantower PMS5003, Sensirion SPS-30 and Omron B5W LD0101 to Adafruit IO
 
 ### Tested with Maker Pi PICO using CircuitPython 7.0.0
@@ -51,20 +51,19 @@ from adafruit_espatcontrol import adafruit_espatcontrol
 from adafruit_espatcontrol import adafruit_espatcontrol_wifimanager
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
 from adafruit_io.adafruit_io import IO_MQTT
+from adafruit_io.adafruit_io_errors import AdafruitIO_MQTTError
 from microcontroller import cpu
 
 ### Particulate Matter sensors
 from adafruit_pm25.uart import PM25_UART
-from adafruit_b5wld0101 import B5WLD0101
 from adafruit_sps30.i2c import SPS30_I2C
-
-
+from b5wld0101 import B5WLD0101
 
 debug = 5
 mu_output = 2
 
 ### Instructables video was shot with this set to 25 seconds
-UPLOAD_PERIOD = 25   ### TODO - DEFAULT VALUE??? 60?   NOTE
+UPLOAD_PERIOD = 60
 ADAFRUIT_IO_GROUP_NAME = "mpp-pm"
 VCC_DIVIDER = 2.0
 SENSORS = ("pms5003", "sps30", "b5wld0101")
@@ -105,6 +104,7 @@ PWM_V = 3.3
 MS_TO_NS = 1000 * 1000 * 1000
 PMS5003_READ_ATTEMPTS = 10
 ADC_SAMPLES = 100
+RECONNECT_SLEEP = 1.25
 
 ### Data fields to publish to Adafruit IO
 UPLOAD_PMS5003 = ("pm10 standard", "pm25 standard")
@@ -216,7 +216,7 @@ class DataWarehouse():
         self.esp = adafruit_espatcontrol.ESP_ATcontrol(self.esp01_uart,
                                                        esp01_baud,
                                                        debug=debug)
-        self.esp_version = self.esp.get_version()
+        self.esp_version = ""
         self.wifi = None
         try:
             _ = [secrets_[key] for key in self.SECRETS_REQUIRED]
@@ -237,13 +237,20 @@ class DataWarehouse():
                                                                         self.secrets)
         ### A few retries here seems to greatly improve reliability
         for _ in range(4):
-            print("Connecting to WiFi...")
+            if self.debug:
+                print("Connecting to WiFi...")
             try:
                 self.wifi.connect()
-                print("Connected!")
+                self.esp_version = self.esp.get_version()
+                if self.debug:
+                    print("Connected!")
                 break
-            except (RuntimeError, TypeError) as ex:
-                print("wifi.connect exception", repr(ex))
+            except (RuntimeError,
+                    TypeError,
+                    adafruit_espatcontrol.OKError) as ex:
+                if self.debug:
+                    print("EXCEPTION: Failed to publish()", repr(ex))
+                time.sleep(RECONNECT_SLEEP)
 
         ### This uses global variables
         socket.set_interface(self.esp)
@@ -274,34 +281,56 @@ class DataWarehouse():
 
 
     def poll(self):
-        poll_ok = True
-        try:
-            ### Process any incoming messages
-            self.io.loop()
-        except (ValueError, RuntimeError, MQTT.MMQTTException) as ex:
-            print("Failed to get data", repr(ex))
+        dw_poll_ok = False
+        try_reconnect = False
+        for _ in range(2):
+            try:
+                ### Process any incoming messages
+                if try_reconnect:
+                    self.reset_and_reconnect()
+                    try_reconnect = False
+                self.io.loop()
+                dw_poll_ok = True
+            except (ValueError, RuntimeError, AttributeError,
+                    MQTT.MMQTTException,
+                    adafruit_espatcontrol.OKError,
+                    AdafruitIO_MQTTError) as ex:
+                if self.debug:
+                    print("EXCEPTION: Failed to get data in loop()", repr(ex))
+                try_reconnect = True
 
-            poll_ok = False
-
-        return poll_ok
+        return dw_poll_ok
 
 
     def publish(self, p_data, p_fields):
-        all_ok = True
-        print("UPLOAD")  ### TODO
+        ok = [False] * len(p_fields)
+        try_reconnect = False
+        if self.debug:
+            print("publish()")
 
-        for field_name in p_fields:
+        for idx, field_name in enumerate(p_fields):
             try:
                 pub_name = self.pub_name[field_name]
             except KeyError:
                 pub_name = self.update_pub_name(field_name)
-            try:
-                self.io.publish(pub_name, p_data[field_name])
-            except (ValueError, RuntimeError, MQTT.MMQTTException):
-                all_ok = False
-                self.reset_and_reconnect()
+            for _ in range(2):
+                try:
+                    if try_reconnect:
+                        self.reset_and_reconnect()
+                        try_reconnect = False
+                    self.io.publish(pub_name, p_data[field_name])
+                    ok[idx] = True
+                    break
+                except (ValueError, RuntimeError, AttributeError,
+                        MQTT.MMQTTException,
+                        adafruit_espatcontrol.OKError,
+                        AdafruitIO_MQTTError) as ex:
+                    if self.debug:
+                        print("EXCEPTION: Failed to publish()", repr(ex))
+                    try_reconnect = True
+                    time.sleep(RECONNECT_SLEEP)
 
-        return all_ok
+        return all(ok)
 
 
 dw = DataWarehouse(secrets,
@@ -312,12 +341,8 @@ dw = DataWarehouse(secrets,
 last_upload_ns = 0
 
 while True:
-    pixel.fill(GOOD)
-    if not dw.poll():
-        pixel.fill(ERROR)
-        print("ESP_ATcontrol OKError exception")
-        for _ in range(20):
-            print("EXCEPTION")
+    poll_ok = dw.poll()
+    pixel.fill(GOOD if poll_ok else ERROR)
 
     cpu_temp = cpu.temperature
     voltages = read_voltages()
@@ -342,8 +367,5 @@ while True:
         pixel.fill(GOOD if pub_ok else ERROR)
         if pub_ok:
             last_upload_ns = time_ns
-        else:
-            for _ in range(20):
-                print("UPLOAD ERROR")
 
     time.sleep(1.5 + random.random())
