@@ -1,4 +1,4 @@
-### cordlepy 1.3
+### cordlepy 1.4
 ### A port of Wordle word game
 
 ### Tested with an Adafruit PyPortal and CircuitPython and 7.1.1
@@ -362,6 +362,7 @@ class WordGrid():
             cls.square_palette = displayio.Palette(3)
             for colour, idx in cls.COL_IDX.items():
                 cls.square_palette[idx] = colour
+        ### TODO - more testing on memory and performance
         if True:
             square_bitmap = displayio.Bitmap(width, height, len(cls.square_palette))
             tg = displayio.TileGrid(square_bitmap, pixel_shader=cls.square_palette)
@@ -402,6 +403,7 @@ class WordGrid():
 class Keyboard():
     BACKSPACE = 8
     ENTER = 13
+    OFF_KEYBOARD = -1
 
     _ALPHA_LAYOUT = {"QUERTY": [["qwertyuiop",0],
                                 ["asdfghjkl", 0.4],
@@ -505,6 +507,30 @@ class Keyboard():
             _ = self._dio_group.pop()
 
 
+    def _decodePresses(self, press_list, lift_time_ns):
+        """Takes a list of [key, press_time_ns] presses which may be from
+           a light touch to a resistive screen where many presses are generated
+           and filter them to reach a verdict on the most likely key."""
+        key_verdict = None
+
+        clean_list = []
+        last_idx = len(press_list) - 1
+        for p_idx, (key, press_time_ns) in enumerate(press_list):
+            duration_s = ((lift_time_ns if p_idx == last_idx
+                           else press_list[p_idx + 1][1]) - press_time_ns) / 1e9
+            if not (key == self.OFF_KEYBOARD and duration_s < self._off_time):
+                if len(clean_list) == 0 or clean_list[-1][0] != key:
+                    clean_list.append([key, duration_s])
+                else:
+                    clean_list[-1][1] += duration_s
+
+        for key, press_time_ns in clean_list:
+            if press_time_ns > self._min_press_time:
+                key_verdict = key
+
+        return key_verdict if key_verdict != self.OFF_KEYBOARD else None
+
+
     def getChar(self, stay_shown=False):
         key = None
         point = None
@@ -512,15 +538,15 @@ class Keyboard():
         ### Wait for a tap
         self.showKeyboard()
         last_button = None
+        presses = []
         while key is None:
             while True:
                 point = self._touch_screen.touch_point
                 if point is not None:
                     break
 
-            last_keydown_ns = time.monotonic_ns()
-            off_keyboard_ns = 0
             while True:
+                ### Scan each key
                 key_pressed = False
                 for b_idx, butt in enumerate(self._dio_keyboard):
                     point_keyb = (point[0] - self._dio_keyboard.x,
@@ -528,36 +554,29 @@ class Keyboard():
                     if butt.contains(point_keyb):
                         key_pressed = True
                         if last_button != butt:
-                            last_keydown_ns = time.monotonic_ns()
+                            key = self._keys[b_idx]
+                            presses.append([key, time.monotonic_ns()])
                             if last_button is not None:
                                 last_button.selected = False
                             butt.selected = True
-                            key = self._keys[b_idx]
                             last_button = butt
                         break
 
                 ### Ignore press if touch has slid off the keyboard
-                if not key_pressed:
-                    off_keyboard_ns = time.monotonic_ns()
-
-                if (last_button
-                        and (off_keyboard_ns - last_keydown_ns) / 1e9 > self._off_time):
-                    last_button.selected = False
-                    last_button = None
-                    key = None
-                    key_pressed = False
+                if not key_pressed and key != self.OFF_KEYBOARD:
+                    key = self.OFF_KEYBOARD
+                    presses.append([key, time.monotonic_ns()])
+                    if last_button is not None:
+                        last_button.selected = False
+                        last_button = None
 
                 point = self._touch_screen.touch_point
                 if point is None:
                     break
 
-            ### Optionally ignore brief key presses
-            if last_button and self._min_press_time is not None:
-                keyup_ns = time.monotonic_ns()
-                press_time = (keyup_ns - last_keydown_ns) / 1e9
-                if press_time < self._min_press_time:
-                    last_button.selected = False
-                    key = None
+            key = self._decodePresses(presses, time.monotonic_ns())
+            if last_button:
+                last_button.selected = False
 
         ### Clear the visible selection
         if last_button:
@@ -565,7 +584,7 @@ class Keyboard():
 
         if not stay_shown:
             self.hideKeyboard()
-        print("---")
+
         return key
 
 
