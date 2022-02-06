@@ -1,7 +1,8 @@
-### cordlepy 1.4
+### cordlepy 1.5
 ### A port of Wordle word game
 
-### Tested with an Adafruit PyPortal and CircuitPython and 7.1.1
+### Tested with an Adafruit PyPortal and an Adafruit CLUE
+### on CircuitPython 7.1.1
 
 ### make a secrets.py including the timezone
 ### copy a file with five character words on each line to gamewords.txt
@@ -29,12 +30,17 @@
 ### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ### SOFTWARE.
 
-### TODO - top left / bottom right press for calibration at start
+### TODO - mark keys with yellow / green guesses
+### TODO - PyPortal top left / bottom right press for calibration at start
 ###        or auto calibration based on keypresses if keen
-### TODO - improve keyboard for light touches
 ### TODO - statistics at end of round
 ### TODO - Adafruit IO integration of some sort? A misused heatmap?
 ### TODO - a few sound effects?
+
+### TODO - fix up CLUE positioning
+### TODO - add left button on CLUE for extra enter key
+### TODO - increase word scroll step on CLUE and re-evaluate word grid size
+### TODO - add a date setter when needed with 2022 epoch
 
 ### TODO - add in-app purchase with proof-of-work cryptocurrency of hints to
 ###        unlevel the playing field, unvetted adverts, lootboxes,
@@ -287,7 +293,9 @@ if not clue and words.selector == GameWords.ONE_A_DAY:
 
 
 if clue:
+    import math
     import digitalio
+    from adafruit_lsm6ds.lsm6ds33 import LSM6DS33
     pin_a = board.BUTTON_A
     pin_b = board.BUTTON_B
     pin_but_a = digitalio.DigitalInOut(pin_a)
@@ -296,21 +304,25 @@ if clue:
     pin_but_b.switch_to_input(pull=digitalio.Pull.UP)
     left_button = lambda: not pin_but_a.value
     right_button = lambda: not pin_but_b.value
-    ts = None
+    keyboard_device = [LSM6DS33(board.I2C()),
+                       right_button,
+                       ((0, -2),   ### x -z
+                        (1, -2))]  ### y -z
     default_font = terminalio.FONT
     default_font_scale = 2
 else:
     left_button = right_button = None  ### Assume PyPortal
-    import adafruit_touchscreen
+    from adafruit_touchscreen import Touchscreen
     ### These numbers borrowed from
     ### https://learn.adafruit.com/pyportal-calculator-using-the-displayio-ui-elements
     PYPORTAL_TSCAL_X = (5800, 59000)
     PYPORTAL_TSCAL_Y = (5800, 57000)
-    ts = adafruit_touchscreen.Touchscreen(board.TOUCH_XL, board.TOUCH_XR,
-                                          board.TOUCH_YD, board.TOUCH_YU,
-                                          calibration=(PYPORTAL_TSCAL_X,
-                                                       PYPORTAL_TSCAL_Y),
-                                          size=(DISPLAY_WIDTH, DISPLAY_HEIGHT))
+    accel = None  ### Present but not used
+    keyboard_device = Touchscreen(board.TOUCH_XL, board.TOUCH_XR,
+                                  board.TOUCH_YD, board.TOUCH_YU,
+                                  calibration=(PYPORTAL_TSCAL_X,
+                                               PYPORTAL_TSCAL_Y),
+                                  size=(DISPLAY_WIDTH, DISPLAY_HEIGHT))
     default_font = bitmap_font.load_font("/fonts/Arial-12.bdf")
     default_font_scale = 1
 
@@ -358,11 +370,9 @@ class WordGrid():
     @classmethod
     def WordSquare(cls, width, height, color=DEFAULT):
         if cls.square_palette is None:
-            print("INIT PALETTE") ### TODO REMOVE
             cls.square_palette = displayio.Palette(3)
             for colour, idx in cls.COL_IDX.items():
                 cls.square_palette[idx] = colour
-        ### TODO - more testing on memory and performance
         if True:
             square_bitmap = displayio.Bitmap(width, height, len(cls.square_palette))
             tg = displayio.TileGrid(square_bitmap, pixel_shader=cls.square_palette)
@@ -419,17 +429,22 @@ class Keyboard():
                  keycap_bg=0x404040,
                  keycap_font=terminalio.FONT,
                  min_press_time=0.08,  ### 80ms plus library delay required for a press
+                 max_width=None,
+                 max_height=None,
                  cb=None,
                  cb_kwargs={},
                  blank_char=" "
                  ):
         self._keys = []
         self._dio_keyboard = displayio.Group()
-        ### TODO - tidy up all the positioning code
-        self._dio_keyboard.x = 8
-        self._dio_keyboard.y = 132
-        self._key_width = 26
-        self._key_height = 26
+        ### TODO - sizing code still needs some cleaning
+        self._dio_keyboard.x = int(max_width / 40) if max_width else 8
+        self._dio_keyboard.y = 132   ### TODO set this properly
+        self._key_width = int(max_width / 12) if max_width else 26
+        self._key_height = int(max_width / 12) if max_width else 26
+        self._key_x_space = int(self._key_width / 5)
+        self._key_y_space = self._key_x_space + 2
+        
         self._keycap_fg = keycap_fg
         self._keycap_bg = keycap_bg
         self._keycap_font = keycap_font
@@ -438,9 +453,17 @@ class Keyboard():
                        numbers=numbers, keycaps_upper=keycaps_upper,
                        shift=shift, control=control, symbols=False)
         self._dio_group = displayio.Group()
+
         self._touch_screen = None
-        self._min_press_time = min_press_time
         self._off_time = 0.05
+
+        self._accel = None
+        self._accel_lr_ud = None
+        self._button = None
+        self._keycursor_home = (1, 4)  ### row, column
+        self._keycursor = None
+
+        self._min_press_time = min_press_time
         self._cb = cb
         self._cb_kwargs = cb_kwargs
         self._blank_char = blank_char
@@ -448,9 +471,24 @@ class Keyboard():
             _ = input_device.touch_point
             self._touch_screen = input_device
         except AttributeError:
-            raise ValueError("Need an input_device which supports touch_point")
+            pass
 
-    def _addButton(self, x, y, key, text, width=None, height=None):
+        try:
+            _ = input_device[0].acceleration
+            _ = input_device[1]()
+            _ = input_device[2][:2]
+            self._accel = input_device[0]
+            self._button = input_device[1]
+            self._accel_lr_ud = input_device[2][:2]
+        except (AttributeError, TypeError):
+            pass
+
+        if self._touch_screen is None and self._accel is None:
+            raise ValueError("Need an input_device which supports touch_point"
+                             "or array with accelerometer, callable button and axis spec")
+
+
+    def _makeButton(self, x, y, text, width=None, height=None):
         button = Button(x=x,
                         y=y,
                         width=self._key_width if width is None else width,
@@ -460,8 +498,8 @@ class Keyboard():
                         label_color=self._keycap_fg,
                         fill_color=self._keycap_bg,
                         style=Button.ROUNDRECT)
-        self._keys.append(key)
-        self._dio_keyboard.append(button)
+        return button
+
 
     def _initKeys(self, layout,
                   enter=True, backspace=True, space=False,
@@ -472,29 +510,43 @@ class Keyboard():
         except KeyError:
             raise ValueError("Unknown layout " + layout)
         for row_idx, (line, offset) in enumerate(layout):
-            x_pos = int(offset * (self._key_width + 5))
+            button_row = displayio.Group()
+            self._dio_keyboard.append(button_row)
+            key_row = []
+            self._keys.append(key_row)
+
+            x_pos = int(offset * (self._key_width + self._key_x_space))
+            col_idx = 0
             on_last_row = row_idx == len(layout) - 1
-            y_pos = row_idx * (self._key_height + 7)
+            y_pos = row_idx * (self._key_height + self._key_y_space)
             if enter and on_last_row:
                 x_pos = 0  ### remove offset
                 wide_width = int(1.333 * self._key_width)
-                self._addButton(x_pos, y_pos,
-                                self.ENTER, "EN",
-                                width=wide_width)
-                x_pos += wide_width + 5
+                butt = self._makeButton(x_pos, y_pos,
+                                        "EN",
+                                        width=wide_width)
+                button_row.append(butt)
+                key_row.append(self.ENTER)
+                x_pos += wide_width + self._key_x_space
+                col_idx += 1
 
             for char in line:
-                self._addButton(x_pos, y_pos,
-                                char,
-                                char.upper() if keycaps_upper else char)
-                x_pos += self._key_width + 5
+                butt = self._makeButton(x_pos, y_pos,
+                                        char.upper() if keycaps_upper else char)
+                button_row.append(butt)
+                key_row.append(char)
+                x_pos += self._key_width + self._key_x_space
+                col_idx += 1
 
             if backspace and on_last_row:
                 wide_width = int(1.333 * self._key_width)
-                self._addButton(x_pos, y_pos,
-                                self.BACKSPACE, "BS",
-                                width=wide_width)
-                x_pos += wide_width + 4
+                butt = self._makeButton(x_pos, y_pos,
+                                        "BS",
+                                        width=wide_width)
+                button_row.append(butt)
+                key_row.append(self.BACKSPACE)
+                x_pos += wide_width + self._key_x_space
+                col_idx += 1
 
 
     def showKeyboard(self):
@@ -531,12 +583,10 @@ class Keyboard():
         return key_verdict if key_verdict != self.OFF_KEYBOARD else None
 
 
-    def getChar(self, stay_shown=False):
+    def _getCharTouchScreen(self):
         key = None
-        point = None
 
-        ### Wait for a tap
-        self.showKeyboard()
+        point = None
         last_button = None
         presses = []
         while key is None:
@@ -548,18 +598,21 @@ class Keyboard():
             while True:
                 ### Scan each key
                 key_pressed = False
-                for b_idx, butt in enumerate(self._dio_keyboard):
-                    point_keyb = (point[0] - self._dio_keyboard.x,
-                                  point[1] - self._dio_keyboard.y)
-                    if butt.contains(point_keyb):
-                        key_pressed = True
-                        if last_button != butt:
-                            key = self._keys[b_idx]
-                            presses.append([key, time.monotonic_ns()])
-                            if last_button is not None:
-                                last_button.selected = False
-                            butt.selected = True
-                            last_button = butt
+                for row_idx, row in enumerate(self._dio_keyboard):
+                    for col_idx, butt in enumerate(row):
+                        point_keyb = (point[0] - self._dio_keyboard.x,
+                                      point[1] - self._dio_keyboard.y)
+                        if butt.contains(point_keyb):
+                            key_pressed = True
+                            if last_button != butt:
+                                key = self._keys[row_idx][col_idx]
+                                presses.append([key, time.monotonic_ns()])
+                                if last_button is not None:
+                                    last_button.selected = False
+                                butt.selected = True
+                                last_button = butt
+                            break
+                    if key_pressed:
                         break
 
                 ### Ignore press if touch has slid off the keyboard
@@ -582,8 +635,130 @@ class Keyboard():
         if last_button:
             last_button.selected = False
 
+        return key
+
+
+    def _getTiltAngles(self, axes_idxs):
+        angles = self._accel.acceleration
+        tilts = []
+        for idx in axes_idxs:
+            c1, c2 = self._accel_lr_ud[idx]
+            tilt_r = math.atan2(math.copysign(1, c1) * angles[abs(c1)],
+                                math.copysign(1, c2) * angles[abs(c2)])
+            tilts.append(math.degrees(tilt_r))
+
+        return tilts
+
+
+    def _buttonSelect(self, select_rowcol=None, unselect_rowcol=None):
+        if select_rowcol:
+            self._dio_keyboard[select_rowcol[0]][select_rowcol[1]].selected = True
+
+        if unselect_rowcol:
+            self._dio_keyboard[unselect_rowcol[0]][unselect_rowcol[1]].selected = False
+
+
+    def _getCharAccel(self):
+        key = None
+
+        ### select button under cursor
+        self._buttonSelect(self._keycursor)
+        button_down = 0
+        time_period_ns = 10 * 1000 * 1000
+        xy_dead_angle = 6.0
+        ud_dead_angle = 10.0
+        speed_conv = 1.0 / 4.0 / (1e9 / time_period_ns)
+        xy_offset = 0.0
+        ud_offset = 0.0
+        press_steps = round(self._min_press_time * 1e9 / time_period_ns)
+
+        while True:
+            start_time_ns = time.monotonic_ns()
+            target_end_time_ns = start_time_ns + time_period_ns
+
+            if self._button():
+                button_down += 1
+            elif self._button() > 0:
+                button_down -= 1
+
+            angles = self._getTiltAngles((0, 1))
+            ### measure left/right and up/down tilt
+            if abs(angles[0]) > xy_dead_angle:
+                xy_offset += angles[0] * speed_conv
+            else:
+                xy_offset = 0.0
+
+            if abs(angles[1]) > ud_dead_angle:
+                ud_offset += angles[1] * speed_conv
+            else:
+                ud_offset = 0.0
+
+            ### Done if button has been pressed for long enough
+            if button_down >= press_steps:
+                key = self._keys[self._keycursor[0]][self._keycursor[1]]
+                break
+
+            ### Change button left/right if offset is great enough
+            if xy_offset >= 1.0 and self._keycursor[1] < len(self._dio_keyboard[self._keycursor[0]]) - 1:
+                self._buttonSelect(None, self._keycursor)
+                self._keycursor[1] += 1
+                self._buttonSelect(self._keycursor)
+                xy_offset = 0.0
+
+            elif xy_offset <= -1.0 and self._keycursor[1] > 0:
+                self._buttonSelect(None, self._keycursor)
+                self._keycursor[1] -= 1
+                self._buttonSelect(self._keycursor)
+                xy_offset = 0.0
+
+            ### Change button up/down if offset is great enough and
+            ### take care with shorter rows of keys
+            if ud_offset >= 1.0 and self._keycursor[0] < len(self._dio_keyboard) - 1:
+                self._buttonSelect(None, self._keycursor)
+                self._keycursor[0] += 1
+                self._keycursor[1] = min(self._keycursor[1],
+                                         len(self._dio_keyboard[self._keycursor[0]]) - 1)
+                self._buttonSelect(self._keycursor)
+                ud_offset = 0.0
+
+            elif ud_offset <= -1.0 and self._keycursor[0] > 0:
+                self._buttonSelect(None, self._keycursor)
+                self._keycursor[0] -= 1
+                self._keycursor[1] = min(self._keycursor[1],
+                                         len(self._dio_keyboard[self._keycursor[0]]) - 1)
+                self._buttonSelect(self._keycursor)
+                ud_offset = 0.0
+
+            while time.monotonic_ns() < target_end_time_ns:
+                pass
+
+        ### Wait for the button up
+        while self._button():
+            pass
+
+        self._buttonSelect(None, self._keycursor)
+        return key
+
+
+    def getChar(self, stay_shown=False, reset_cursor=True):
+        key = None
+
+        if (reset_cursor and self._keycursor is None
+                and self._keycursor_home is not None):
+            self._keycursor = list(self._keycursor_home)
+
+        ### Wait for a tap
+        self.showKeyboard()
+        if self._touch_screen:
+            key = self._getCharTouchScreen()
+        elif self._accel:
+            key = self._getCharAccel()
+
         if not stay_shown:
             self.hideKeyboard()
+
+        if reset_cursor and self._keycursor_home is not None:
+            self._keycursor = None
 
         return key
 
@@ -595,12 +770,15 @@ class Keyboard():
         chars = []
         text_idx = 0
 
+        if self._keycursor is None and self._keycursor_home is not None:
+            self._keycursor = list(self._keycursor_home)
+
         while True:
             if text_idx < len(text):
                 char = text[text_idx]
                 text_idx += 1
             else:
-                char = self.getChar(stay_shown=True)
+                char = self.getChar(stay_shown=True, reset_cursor=False)
 
             if char == self.BACKSPACE:
                 if chars:
@@ -623,6 +801,8 @@ class Keyboard():
                 break
 
         self.hideKeyboard()
+        if self._keycursor_home is not None:
+            self._keycursor = None
         return "".join(str(c) for c in chars)
 
 
@@ -665,7 +845,8 @@ main_group.append(grid.group)
 ### Create keyboard and add to displayio displayed group but the
 ### keyboard will not be visible at this stage
 gc.collect()
-keyboard = Keyboard(ts, cb=grid_set_char)
+keyboard = Keyboard(keyboard_device, cb=grid_set_char,
+                    max_width=DISPLAY_WIDTH, max_height=DISPLAY_HEIGHT)
 gc.collect()
 d_print(3, "GC after Keyboard", gc.mem_free())
 main_group.append(keyboard.group)
@@ -680,7 +861,6 @@ while True:
     grid.y = grid_start_y
     for line_idx in range(MAX_GUESSES):
         ### Get user's guess
-        ### TODO - game requires this to be in word list
         guess = ""
         while True:
             guess = keyboard.getLine(text=guess, min_len=5, max_len=5,
