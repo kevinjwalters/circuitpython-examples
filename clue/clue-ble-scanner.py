@@ -1,4 +1,4 @@
-### clue-ble-scanner v0.2
+### clue-ble-scanner v0.3
 ### CircuitPython BLE scanner
 
 ### Tested with Circuit Playground Bluefruit Alpha with TFT Gizmo
@@ -33,6 +33,10 @@
 ### what about a pre-existing fixed size file?
 
 ### TODO - keep an eye on memory - avoid the cp and clue objects - perhaps only store what is needed from Advertisement
+### TODO - still blowing up on the CLUE after a few hours
+###        the CLUE has better reception and picks up more MACs
+###        each time the line number has been an addition to one of the count
+###        dicts
 
 import time
 import gc
@@ -43,20 +47,13 @@ from displayio import Group
 import terminalio
 import digitalio
 
-from adafruit_display_text.label import Label
+from adafruit_display_text.bitmap_label import Label
 
 ### https://github.com/adafruit/Adafruit_CircuitPython_BLE
 from adafruit_ble import BLERadio
-from adafruit_ble.advertising.standard import Advertisement
+##from adafruit_ble.advertising.standard import Advertisement
 
-### These imports works on CLUE, CPB (and CPX on 5.x)
-from audiocore import RawSample
-try:
-    from audioio import AudioOut
-except ImportError:
-    from audiopwmio import PWMAudioOut as AudioOut
 
-    
 ### Assuming CLUE if it's not a Circuit Playround (Bluefruit)
 clue_less = "Circuit Playground" in os.uname().machine
 
@@ -107,16 +104,15 @@ FONT_WIDTH, FONT_HEIGHT = terminalio.FONT.get_bounding_box()
 rows = 10
 row_y = 30
 row_spacing = FONT_HEIGHT + 2
-rows_group = Group(max_size=rows)
+rows_group = Group()
 
 ### I have foreground and background colours I can use here
 
 ### 1234567890123456789012345678901234567890
 ### aa:bb:cc:dd:ee:ff -101 12345678901234567
-for idx in range(rows):
+for _ in range(rows):
     row_label = Label(font=terminalio.FONT,
                       text="",
-                      max_glyphs=40,   ### maximum that will fit 240/6
                       color=0xc0c000)
     row_label.y = row_y
     row_y += row_spacing
@@ -124,12 +120,11 @@ for idx in range(rows):
 
 summary_label = Label(font=terminalio.FONT,
                       text="",
-                      max_glyphs=40,   ### maximum that will fit 240/6
                       color=0x00c0c0)
-                      
-summary_label.y = 220       
 
-screen_group = Group(max_size=2)
+summary_label.y = 220
+
+screen_group = Group()
 screen_group.append(rows_group)
 screen_group.append(summary_label)
 
@@ -170,7 +165,7 @@ c_name_by_addr = {}
 
 def remove_old(ad_by_key, expire_time_ns):
     """Delete any entry in the ad_by_key dict with a timestamp older than expire_time_ns."""
-    ### the list() is needed to make a real list from the iterator 
+    ### the list() is needed to make a real list from the iterator
     ### which allows modification of the dict inside the loop
     for key, value in list(ad_by_key.items()):
         if value[1] < expire_time_ns:
@@ -206,8 +201,7 @@ def update_screen(disp, rows_g, rows_n, ad_by_key, then_ns,
     ### Add the top N rows to to the screen
     ### the key is the mac address as text without any colons
     idx = 0
-    for key, value in sorted_data[:rows_n]:
-        ad, ad_time_ns, rssi = value
+    for key, (advert, ad_time_ns, rssi) in sorted_data[:rows_n]:
         ### Add the colon sepators to the string version of the MAC address
         if data_mask == 0:
             masked_mac = key
@@ -218,17 +212,19 @@ def update_screen(disp, rows_g, rows_n, ad_by_key, then_ns,
         mac_text = ":".join([masked_mac[off:off+2] for off in range(0, len(masked_mac), 2)])
         ##name = ad.complete_name
         name = c_name_by_addr.get(key)
-        if name is None:
-            name = "?"
-        ### Must be careful not to exceed the fixed max_glyphs field size here (40)
-        rows_g[idx].text = "{:16s} {:s} {:4d}".format(name[:16],
+        ### Make a name that fit within 16 chars stripped of NULs
+        disp_name = "?" if name is None else name.replace('\0', '')[:16]
+
+        ### Fixed max_glyphs limitations are in the past
+        ### but 40 chars only fit on screen!
+        rows_g[idx].text = "{:16s} {:s} {:4d}".format(disp_name,
                                                       mac_text,  ### should be 17 chars
                                                       rssi)
         ### This should be from 0 to about 65s-75s
         age = 170 - (then_ns - ad_time_ns) / stale_time_ns * 170
         brightness = min(max(round(85 + age * 2.4), 0), 255)
         rows_g[idx].color = (brightness, brightness, 0)
-        idx += 1    
+        idx += 1
 
     #### Blank out any rows not populated with data
     if idx < rows_n:
@@ -243,7 +239,7 @@ while True:
         ##addr_b = ad.address.address_bytes
         c_name = ad.complete_name
         addr_text = "".join(["{:02x}".format(b) for b in reversed(ad.address.address_bytes)])
-        
+
         last_ad_by_key[addr_text] = (ad, now_ns, ad.rssi)
 
         try:
@@ -256,13 +252,13 @@ while True:
             oui_count[oui] += 1
         except KeyError:
             oui_count[oui] = 1
-        
+
         if c_name is not None:
             c_name_by_addr[addr_text] = c_name
             try:
                 complete_names_count[c_name] += 1
             except KeyError:
-                complete_names_count[c_name] = 1      
+                complete_names_count[c_name] = 1
 
         if button_right():
             data_mask = (data_mask + 1 ) % DATA_MASK_LEVELS
@@ -271,12 +267,12 @@ while True:
 
         if now_ns - last_seen_update_ns > screen_update_ns:
             gc.collect()
-            mem_free = gc.mem_free()
+            mem_free_b = gc.mem_free()
             update_screen(display, rows_group, rows, last_ad_by_key,
-                         now_ns,
-                         summary_label,
-                         len(addresses_count), len(oui_count), len(complete_names_count),
-                         mem_free=mem_free)
+                          now_ns,
+                          summary_label,
+                          len(addresses_count), len(oui_count), len(complete_names_count),
+                          mem_free=mem_free_b)
 
             last_seen_update_ns = now_ns
 
