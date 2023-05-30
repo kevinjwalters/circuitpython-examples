@@ -1,4 +1,4 @@
-### clue-battery-tester v1.0
+### clue-battery-tester v1.1
 
 ### A battery tester
 
@@ -236,7 +236,7 @@ def guessBattery(voltage):
         return "NiMH"
     elif voltage <= 1.55:
         return "Alkaline"
-    elif voltage <= 3.3:
+    elif voltage <= 3.35:
         return "LiButton"
     elif voltage <= 4.45:
         return "LiPo"
@@ -265,7 +265,7 @@ DEFAULT_TARGET_POWER_W = { "NiMH": 45/1000,
 MIN_VOLTAGE = { "NiMH": 0.9,
                 "Alkaline": 1.0,
                 "LiButton": 2.0,
-                "LiPo": 3.5 }
+                "LiPo": 3.4 }
 
 
 
