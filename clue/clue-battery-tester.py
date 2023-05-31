@@ -262,7 +262,7 @@ DEFAULT_TARGET_POWER_W = { "NiMH": 45/1000,
 
 ### Need to be more cautious here on the
 ### minimum voltage for rechargeable batteries
-MIN_VOLTAGE = { "NiMH": 0.9,
+MIN_VOLTAGE = { "NiMH": 1.0,
                 "Alkaline": 1.0,
                 "LiButton": 2.0,
                 "LiPo": 3.4 }
