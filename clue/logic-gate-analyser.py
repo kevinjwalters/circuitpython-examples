@@ -1,4 +1,4 @@
-### logic-gate-analyser.py v1.0
+### logic-gate-analyser.py v1.1
 ### Displays matching logic gate and truth table based on inputs and outputs
 
 ### Tested with Adafruit CLUE and CircuitPython 9.0.4
@@ -28,6 +28,9 @@
 ### LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 ### OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ### SOFTWARE.
+
+### Instructables article
+### TODO - add URL
 
 
 import array
@@ -241,7 +244,7 @@ class SingleGateBitmap:
         ### pylint: disable=too-many-locals
 
         self._type = gate_type
-        self._negated_output = type in self.gates_negated
+        self._negated_output = gate_type in self.gates_negated
         base_type = self.gates_negated.get(self._type)[0] if self._negated_output else self._type
         self._base_gate = self.gates.get(base_type)
         self._wires = wires
