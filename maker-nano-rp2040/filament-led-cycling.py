@@ -1,4 +1,4 @@
-### filament-led-cycling v1.0
+### filament-led-cycling v1.1
 ### Basic test patterns using pwm for six channel constant current LED driver circuit
 
 ### Tested on Cytron Maker Nano RP2040 with CircuitPython 9.0.5
@@ -32,6 +32,7 @@
 ### TODO - auto-adjust using ambient light sensor
 ### TODO - add current estimate in code based
 ###        on RP2040 base usage plus LED brightness levels, speaker use and RGB pixels
+### TODO - add one_by_one mode for checking current on each channel
 
 import random
 import time
@@ -279,6 +280,46 @@ def larson_scanner(time_ns,
     ##    audio_out.play(scanner_sample)  ### this sounds terrible
 
 
+tune1 = [( 0, 1.0, [(0, 0.1), (1, 0.1), (2, 0.1), (3, 0.1), (4, 0.1)]),
+         (69, 0.25, [(4, 0.7)]),  ### tone,
+         (71, 0.25, [(3, 0.7)]),  ### up a full tone,
+         (67, 0.25, [(2, 0.7)]),  ### down a major third,
+         (55, 0.25, [(0, 0.7)]),  ### now drop an octave,
+         (62, 1.25, [(1, 0.7)]),  ### up a perfect fifth.
+         ( 0, 0.75, [(0, 0.4), (1, 0.4), (2, 0.4), (3, 0.4), (4, 0.4)])   ### (rest, wait for arrival)
+        ]
+tune1_len = sum([note[1] for note in tune1])
+def some_notes(time_ns,
+               state  ### pylint: disable=unused-argument
+               ):
+    """This turns them all off for 2 seconds, then adds one every 2 seconds.
+       This is intended to facilitate current measurement from slow meters.
+    """
+    if len(state) == 0:
+        state["start_ns"] = time_ns
+        state["barlength"] = 60 / 90 * 4
+        state["notegap"] = 0.05
+        state["length_ns"] = round(tune1_len * state["barlength"] * 1e9)
+        state["next_note"] = 0
+
+    reltime_ns = (time_ns - state["start_ns"]) % state["length_ns"]
+
+    note_start = 0.0
+    for idx, (midi_note, length, pwm_changes) in enumerate(tune1):
+        note_len = length * state["barlength"]
+        note_end = note_start + note_len
+        if idx == state["next_note"] and note_start <= reltime_ns / 1e9 < note_end:
+            state["next_note"] = (idx + 1) % len(tune1)
+            for pwm_idx, brightness in pwm_changes:
+                pwms[pwm_idx].duty_cycle = brightness_to_dc(brightness)
+            if midi_note > 0:
+                simpleio.tone(SPEAKER_PIN,
+                              midi_to_freq(midi_note),
+                              note_len - state["notegap"])
+            break
+        note_start = note_end
+
+
 def staggered_on(time_ns,
                  state  ### pylint: disable=unused-argument
                  ):
@@ -349,7 +390,7 @@ def calc_temperature(vbes, temp_coef):
 
 
 mode = 0
-MODE_COUNT = 5
+MODE_COUNT = 6
 
 ### Loop is currently 8-10ms
 min_loop_pause_ns = 5_000_000        ### 5ms
@@ -422,6 +463,8 @@ while True:
     elif mode == 3:
         larson_scanner(time_diff_ns, anim_state)
     elif mode == 4:
+        some_notes(time_diff_ns, anim_state)
+    elif mode == 5:
         staggered_on(time_diff_ns, anim_state)
 
     last_loop_ns = now_ns
