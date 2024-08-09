@@ -1,4 +1,4 @@
-### peripheral-power-test v1.0
+### peripheral-power-test v1.2
 
 ### Peripheral power test
 
@@ -28,7 +28,7 @@
 
 ### Other "ports"
 ### https://github.com/kevinjwalters/arduino-examples/blob/master/uno/peripheral-power-test/peripheral-power-test.ino
-
+### https://github.com/kevinjwalters/micropython-examples/blob/master/microbit/peripheral-power-test.py
 
 import os
 import time
@@ -44,14 +44,20 @@ from adafruit_motor import servo
 machine = os.uname().machine
 if "Pico" in machine:
     BOARDLED_PIN = board.LED
-    HIGH_PIN = board.GP8
-    RGBPIXELS_PIN = board.GP9
-    SERVO_PIN = board.GP10
+    HIGH_PIN = board.GP18
+    RGBPIXELS_PIN = board.GP19
+    SERVO_PIN = board.GP20
 elif "Feather" in machine:
     BOARDLED_PIN = board.LED
     HIGH_PIN = board.D6
     RGBPIXELS_PIN = board.D9
     SERVO_PIN = board.D10
+elif "Cytron Maker Nano" in machine:
+    ### board.LED is just GP2 - use GP16 instead
+    BOARDLED_PIN = board.GP16
+    HIGH_PIN = board.GP2
+    RGBPIXELS_PIN = board.GP3
+    SERVO_PIN = board.GP4
 else:
     raise ValueError("Unsupported board")
 
@@ -106,8 +112,8 @@ if False:
 
 
 while True:
-    ### Flash onboard LED three times to signify start
-    for _ in range(3):
+    ### Flash onboard LED five times to signify start
+    for _ in range(5):
         board_led.value = True
         time.sleep(1)
         board_led.value = False
@@ -118,7 +124,7 @@ while True:
     start_pos = SERVO_MIN
     end_pos = SERVO_MAX
     old_start_pos = end_pos
-    degree_step = 1
+    degree_step = 3
     reps = 1
     duration_s = 2
     for idx in range(NUM_PIXELS):
@@ -151,6 +157,7 @@ while True:
         ### For a ring of 12 every 4 pixels double the number of servo movements
         if idx % SERVO_SPEED_LOOPS == SERVO_SPEED_LOOPS - 1:
             reps *= 2
+            degree_step *= 2
 
     ### Test complete
     pixels_off()
