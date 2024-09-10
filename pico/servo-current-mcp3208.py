@@ -1,8 +1,10 @@
-### servo-current-mcp3208 v1.0
+### servo-current-mcp3208 v1.1
 
 ### Measuring servo current using MCP3208 and optional external LM385 vref
 
 ### Copy this file to EDU PICO board as code.py
+### Potentiometer should be turned towards 0 to avoid exceeding
+### ADC vref if lowered below 3.3V
 
 ### MIT License
 
@@ -58,7 +60,8 @@ SPI_CS  = board.GP17
 SPI_SCK  = board.GP18
 SPI_TX  = board.GP19
 
-ADC_PIN  = board.GP26
+### Avoid GP26 as it's connected to the EDU PICO potentiometer module
+ADC_PIN  = board.GP27
 
 SERVO_MIN = 0
 SERVO_MAX = 180
@@ -137,10 +140,10 @@ def adc_plot_value(value_16b):
     value = value_16b >> 4
     if value < 16:
         return value  ### 0-15
-    if value < 32:
+    if value < 48:
         return 16 + ((value - 16) >> 1)  ### 16-31
-    elif value < 160:
-        return 32 + ((value - 32) >> 3)  ### 32-47
+    elif value < 176:
+        return 32 + ((value - 48) >> 3)  ### 32-47
     else:
         return round(math.log(value) * 4.6 + 24.7)  ### 48 to 63
 
