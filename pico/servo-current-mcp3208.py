@@ -1,4 +1,4 @@
-### servo-current-mcp3208 v1.1
+### servo-current-mcp3208 v1.2
 
 ### Measuring servo current using MCP3208 and optional external LM385 vref
 
@@ -60,6 +60,7 @@ SPI_CS  = board.GP17
 SPI_SCK  = board.GP18
 SPI_TX  = board.GP19
 
+EDU_PICO_POT_PIN = board.GP28
 ### Avoid GP26 as it's connected to the EDU PICO potentiometer module
 ADC_PIN  = board.GP27
 
@@ -100,6 +101,7 @@ spi = busio.SPI(clock=SPI_SCK, MISO=SPI_RX, MOSI=SPI_TX)
 cs = digitalio.DigitalInOut(SPI_CS)
 mcp = MCP.MCP3208(spi, cs, ref_voltage=LM385_REFV)
 ch0_adc = MCPAnalogIn(mcp, MCP.P0)
+edu_pico_pot = analogio.AnalogIn(EDU_PICO_POT_PIN)
 int_adc = analogio.AnalogIn(ADC_PIN)
 
 font_width, font_height = terminalio.FONT.get_bounding_box()[:2]
@@ -110,11 +112,11 @@ left_num = Label(font=terminalio.FONT,
                  save_text=False)
 left_num.y = font_height // 3
 right_num = Label(font=terminalio.FONT,
-                 text="----",
-                 color=pixel_white,
-                 background_color=pixel_black,
-                 save_text=False)
-right_num.x = display.width - 4* font_width
+                  text="---- -----",
+                  color=pixel_white,
+                  background_color=pixel_black,
+                  save_text=False)
+right_num.x = display.width - 9 * font_width
 right_num.y = font_height // 3
 
 num_height = (font_height + 4) // 2
@@ -163,13 +165,17 @@ last_loop_ns = 0
 min_loop_ns = 20_000_000   ### 20ms
 number_update_rate = 25
 
+offset = 0  ### 16bit scaled value
+
 while True:
+    new_offset = max((edu_pico_pot.value - 1800) // 40, 0)
+    offset  = (offset >> 1) + (new_offset >> 1) + 1
     mcp_val = ch0_adc.value
     int_val = int_adc.value
 
     row_idx = loop_idx % plot_rows
     mcp_val_x = adc_plot_value(mcp_val)
-    int_val_x = SSD1306_WIDTH - 1 - adc_plot_value(int_val)
+    int_val_x = SSD1306_WIDTH - 1 - adc_plot_value(max((int_val - (offset & 0xfff0)), 0))
     if mcp_val_x != mcp_history [row_idx]:
         simple_plot_bmp[mcp_history[row_idx], row_idx] = 0
         simple_plot_bmp[mcp_val_x, row_idx] = 1
@@ -183,7 +189,7 @@ while True:
     ### Update numbers less frequently to make them more readable
     if loop_idx % number_update_rate == 0:
         left_num.text = str(mcp_val >> 4)
-        right_num.text = str(int_val >> 4)
+        right_num.text = "{:4d}-{:<4d}".format(int_val >> 4, offset >> 4)
 
     display.refresh()
     loop_idx +=1
