@@ -1,4 +1,4 @@
-### synthio-pwm-benchmark v0.9
+### synthio-pwm-benchmark v1.0
 ### Checking performance of various pwm techniques
 
 ### Tested with Pi Pico W (on EDU PICO) and 9.1.4
@@ -134,9 +134,9 @@ def pwm_waveform_ulab(wf, old_idx, new_idx, value_unused):
     if new_idx != old_idx:
         wf[:] = np.where(square_ramp < new_idx, wave_max, wave_min)
 
+time.sleep(30)
 
 start_ns = time.monotonic_ns()
-
 synth.blocks.append(lfo_pwm)
 
 sleep_times = (0.001, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050)
@@ -177,7 +177,7 @@ while True:
     delta[sleep_idx] = diff_idx
     sleep_idx = (sleep_idx + 1) % len(sleep_times)
     if sleep_idx == 0:
-        print("DELTA", delta)
+        print("DELTA", t1/1e9, delta)
         print("CP (ms)", perf_cp_ms)
         print("ULAB (ms)", perf_ulab_ms)
         gc.collect()
