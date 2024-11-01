@@ -1,4 +1,4 @@
-### synthio-pwm-benchmark v1.0
+### synthio-pwm-benchmark v1.1
 ### Checking performance of various pwm techniques
 
 ### Tested with Pi Pico W (on EDU PICO) and 9.1.4
@@ -173,6 +173,8 @@ while True:
                 time.sleep(5.0)
 
         pwm_idx = new_idx
+    else:
+        perf_cp_ms[sleep_idx] = perf_ulab_ms[sleep_idx] = 0.0
 
     delta[sleep_idx] = diff_idx
     sleep_idx = (sleep_idx + 1) % len(sleep_times)
