@@ -1,4 +1,4 @@
-### pico-input-tester v1.0
+### pico-input-tester v2.0
 ### Measure RP2350 Errata 9 leakage flaw with smoother PWM output and ADC reads including ADS1115
 
 ### Tested on Pi Pico W vs Pi Pico 2 W both running CircuitPython 10.1.3
@@ -66,8 +66,8 @@ OUT_MAX = 65535
 ### duty cycle increment/decrement value for triangle wave
 ### must be 1.0 or larger
 TRIANGLE_STEPS = [1024,
-                  1000,
-                  65535 / 3.3 / 100,
+                  ##1000,
+                  ##65535 / 3.3 / 100,
                   65535 / 3.3 / 1000
                   ]
 
@@ -91,9 +91,12 @@ serial = busio.UART(tx=SERIAL_TX_PIN, rx=SERIAL_RX_PIN,
                     baudrate=SERIAL_BAUDRATE, timeout=RESPONSE_CHAR_WAIT_S)
 
 cpu_freq = microcontroller.cpus[0].frequency
-pwm_out = pwmio.PWMOut(PWM_OUT_PIN,
-                       duty_cycle = 0,
-                       frequency=round(cpu_freq / PWM_RANGE))
+
+def pwm_init(dc):
+    return pwmio.PWMOut(PWM_OUT_PIN,
+                        duty_cycle=dc,
+                        frequency=round(cpu_freq / PWM_RANGE))
+
 
 adc_smout = analogio.AnalogIn(ADC_SMOUT_PIN)
 adc_res_smout = analogio.AnalogIn(ADC_RES_SMOUT_PIN)
@@ -133,6 +136,53 @@ def get_sample(ana):
         total += samples[idx]
     return total / (SAMPLE_COUNT - 4)
 
+
+def triangle_waveform(step):
+    dc_value_fp = OUT_MIN
+    direction_up = True
+
+    while True:
+        yield round(dc_value_fp)
+        if direction_up:
+            dc_value_fp += step
+            if dc_value_fp > OUT_MAX:
+                if round(dc_value_fp) == OUT_MAX + 1:
+                    dc_value_fp = OUT_MAX
+                else:
+                    direction_up = False
+                    dc_value_fp = OUT_MAX + 1 - step
+        else:
+            dc_value_fp -= step
+            if dc_value_fp < OUT_MIN:
+                if round(dc_value_fp) == OUT_MIN - 1:
+                    dc_value_fp = OUT_MIN
+                else:
+                    break
+
+DNL_SPIKES = [(512 * idx ) for idx in (1,3,5,7)]
+def rp2040adcdnl():
+    for _ in range(4):
+        yield 0
+    for spike in DNL_SPIKES:
+        ### +/-50mV is no good, misses DNL spikes
+        ### using 0mv to 150mV
+        ##for half_step in range(-63, 63 + 1):
+        for half_step in range(0, 63 * 3 + 1):
+            value = (spike << 4) + (half_step << 3)
+            if 0 <= value <= 65535:
+                yield value
+    for _ in range(4):
+        yield 65535
+    for step_down_to_zero in range(65536 - 8192, -1, -8192):
+        yield step_down_to_zero
+
+
+#print(list(triangle_waveform(8192)))
+#print(list(rp2040adcdnl()))
+
+
+time.sleep(15)
+### Print header
 print(",".join(["start_ns",
                 "test_idx",
                 "dc_value",
@@ -141,67 +191,49 @@ print(",".join(["start_ns",
                 "int_adc_res_smout",
                 "ext_adc_res_smout",
                 "input",
-                "rem_adc_res_smout"]))
-
-time.sleep(15)
+                "rem_adc_res_smout",
+                "c_pwm"]))
 
 cycle_count = 0
 while True:
-    for step in TRIANGLE_STEPS:
+    for continuous_pwm in (True, False):
+        pwm_out = pwm_init(0) if continuous_pwm else None
         for cmd in (READ_DIG_CMD, READ_ANA_CMD):
-            gc.collect()
-            cycle_count += 1
-            dc_value_fp = OUT_MIN
-            direction_up = True
+            for step_gen in [rp2040adcdnl()] + [triangle_waveform(s) for s in TRIANGLE_STEPS]:
+                gc.collect()
+                cycle_count += 1
+                cmd_b = cmd.encode('utf-8') + bytes([ord("\n")])
+                for dc_value in step_gen:
+                    if continuous_pwm:
+                        pwm_out.duty_cycle = dc_value
+                        time.sleep(SETTLE_TIME_S)
+                    else:
+                        ### This is only appropriate for large capacitors like 470uF
+                        pwm_out = pwm_init(dc_value)
+                        time.sleep(SETTLE_TIME_S)
+                        pwm_out.deinit()  ### return to high impedance input
 
-            cmd_b = cmd.encode('utf-8') + bytes([ord("\n")])
-            while True:
-                dc_value = round(dc_value_fp)
-                pwm_out.duty_cycle = dc_value
-                time.sleep(SETTLE_TIME_S)
+                    ### Issues read ADC or read digital input command
+                    ### to remote Pi Pico 2 then
+                    ### do local reads while that's being sent/processed
+                    serial.write(cmd_b)
 
-                ### Issues read ADC or read digital input command
-                ### to remote Pi Pico 2 then
-                ### do local reads while that's being sent/processed
-                serial.write(cmd_b)
+                    start_ns = time.monotonic_ns()
+                    int_adc_smout = get_sample(adc_smout)
+                    ### Voltage is used for ADS1115 as it has variable gain and
+                    ### an internal voltage reference
+                    ext_adc_smout = tiads_smout.voltage if tiads_smout else NOT_AVAIL
+                    int_adc_res_smout = get_sample(adc_res_smout)
+                    ext_adc_res_smout = tiads_res_smout.voltage if tiads_res_smout else NOT_AVAIL
 
-                start_ns = time.monotonic_ns()
-                int_adc_smout = get_sample(adc_smout)
-                ### Voltage is used for ADS1115 as it has variable gain and
-                ### an internal voltage reference
-                ext_adc_smout = tiads_smout.voltage if tiads_smout else NOT_AVAIL
-                int_adc_res_smout = get_sample(adc_res_smout)
-                ext_adc_res_smout = tiads_res_smout.voltage if tiads_res_smout else NOT_AVAIL
-
-                ### The timeout on the serial object does not work in all cases
-                resp = serial.readline()
-                try:
-                    rars_str = resp.decode("utf-8").split(",")[0]
-                    ### Digital value comes back as integer 0 or 1
-                    rem_adc_res_smout = int(rars_str) if cmd == READ_DIG_CMD else float(rars_str)
-                except (AttributeError, UnicodeError, ValueError):
-                    rem_adc_res_smout = NOT_AVAIL
-                print(f"{start_ns},{cycle_count},{dc_value},{int_adc_smout},{ext_adc_smout},{int_adc_res_smout},{ext_adc_res_smout},{cmd},{rem_adc_res_smout}")
-
-                #print("UA",
-                #      (int_adc_res_smout - int_adc_smout) / 65535.0 * 3.3 / IMP_RES * 1e6,
-                #      (ext_adc_res_smout - ext_adc_smout) / IMP_RES * 1e6)
-
-                #print("SAMPLES INT", [get_sample(adc_smout) for x in range(10)])
-                #print("SAMPLES ADS", [tiads_smout.voltage for x in range(10)])
-
-                if direction_up:
-                    dc_value_fp += step
-                    if dc_value_fp > OUT_MAX:
-                        if round(dc_value_fp) == OUT_MAX + 1:
-                            dc_value_fp = OUT_MAX
-                        else:
-                            direction_up = False
-                            dc_value_fp = OUT_MAX + 1 - step
-                else:
-                    dc_value_fp -= step
-                    if dc_value_fp < OUT_MIN:
-                        if round(dc_value_fp) == OUT_MIN - 1:
-                            dc_value_fp = OUT_MIN
-                        else:
-                            break
+                    ### The timeout on the serial object does not work in all cases
+                    resp = serial.readline()
+                    try:
+                        rars_str = resp.decode("utf-8").split(",")[0]
+                        ### Digital value comes back as integer 0 or 1
+                        rem_adc_res_smout = (int(rars_str) if cmd == READ_DIG_CMD
+                                             else float(rars_str))
+                    except (AttributeError, UnicodeError, ValueError):
+                        rem_adc_res_smout = NOT_AVAIL
+                    c_pwm = "T" if continuous_pwm else "F"
+                    print(f"{start_ns},{cycle_count},{dc_value},{int_adc_smout},{ext_adc_smout},{int_adc_res_smout},{ext_adc_res_smout},{cmd},{rem_adc_res_smout},{c_pwm}")
