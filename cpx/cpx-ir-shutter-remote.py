@@ -1,4 +1,4 @@
-### cpx-ir-shutter-remote v1.2
+### cpx-ir-shutter-remote v1.3
 ### Circuit Playground Express (CPX) shutter remote using infrared for Sony Cameras
 
 ### copy this file to CPX as code.py
@@ -40,6 +40,7 @@
 
 import time
 
+import pwmio
 import pulseio
 import board
 import adafruit_irremote
@@ -48,10 +49,12 @@ from adafruit_circuitplayground import cp
 
 ### 40kHz modulation (for Sony) with 20% duty cycle
 CARRIER_IRFREQ_SONY = 40 * 1000
-ir_carrier_pwm = pulseio.PWMOut(board.IR_TX,
-                                frequency=CARRIER_IRFREQ_SONY,
-                                duty_cycle=round(20 / 100 * 65535))
-ir_pulseout = pulseio.PulseOut(ir_carrier_pwm)
+#ir_carrier_pwm = pulseio.PWMOut(board.IR_TX,
+#                                frequency=CARRIER_IRFREQ_SONY,
+#                                duty_cycle=round(20 / 100 * 65535))
+ir_pulseout = pulseio.PulseOut(board.IR_TX,
+                               frequency=CARRIER_IRFREQ_SONY,
+                               duty_cycle=round(20 / 100 * 65535))
 
 ### Used to observe 6.0.0-6.2.0 bug
 ### https://github.com/adafruit/circuitpython/issues/4602
