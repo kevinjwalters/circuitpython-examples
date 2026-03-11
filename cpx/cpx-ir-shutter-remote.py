@@ -1,11 +1,11 @@
-### cpx-ir-shutter-remote v1.3
+### cpx-ir-shutter-remote v1.4
 ### Circuit Playground Express (CPX) shutter remote using infrared for Sony Cameras
 
 ### copy this file to CPX as code.py
 
 ### MIT License
 
-### Copyright (c) 2020 Kevin J. Walters
+### Copyright (c) 2020-2026 Kevin J. Walters
 
 ### Permission is hereby granted, free of charge, to any person obtaining a copy
 ### of this software and associated documentation files (the "Software"), to deal
@@ -38,9 +38,9 @@
 ### The default interval is thirty seconds and this can be changed
 ### by reduced with the left button and increased with the right button
 
+
 import time
 
-import pwmio
 import pulseio
 import board
 import adafruit_irremote
@@ -48,20 +48,11 @@ from adafruit_circuitplayground import cp
 
 
 ### 40kHz modulation (for Sony) with 20% duty cycle
-CARRIER_IRFREQ_SONY = 40 * 1000
-#ir_carrier_pwm = pulseio.PWMOut(board.IR_TX,
-#                                frequency=CARRIER_IRFREQ_SONY,
-#                                duty_cycle=round(20 / 100 * 65535))
+CARRIER_IRFREQ_SONY = 40_000
+CARRIER_DC_SONY = round(20 / 100 * 65535)
 ir_pulseout = pulseio.PulseOut(board.IR_TX,
                                frequency=CARRIER_IRFREQ_SONY,
-                               duty_cycle=round(20 / 100 * 65535))
-
-### Used to observe 6.0.0-6.2.0 bug
-### https://github.com/adafruit/circuitpython/issues/4602
-##ir_carrier_pwm_a2debug = pulseio.PWMOut(board.A2,
-##                                        frequency=CARRIER_IRFREQ_SONY,
-##                                        duty_cycle=round(20 / 100 * 65535))
-##ir_pulseout_a2debug = pulseio.PulseOut(ir_carrier_pwm_a2debug)
+                               duty_cycle=CARRIER_DC_SONY)
 
 ### Sony timing values (in us) based on the ones in
 ### https://github.com/z3t0/Arduino-IRremote/blob/master/src/ir_Sony.cpp
@@ -93,12 +84,12 @@ def say_interval(number_as_words):
         time.sleep(0.050)
 
 
-SHUTTER_CMD_COLOUR = (8, 0, 0)
-IMPENDING_COLOUR = (7, 4, 0)
-BLACK = (0, 0, 0)
+SHUTTER_CMD_COLOUR = 0x080000
+IMPENDING_COLOUR = 0x070400
+BLACK = 0x000000
 
-S_TO_NS = 1000 * 1000 * 1000
-ADJ_NS = 20 * 1000 * 1000
+S_TO_NS = 1_000_000_000
+ADJ_NS = 20_000_000
 IMPENDING_NS = 2 * S_TO_NS
 ### intervalometer mode announces the duration
 manual_trig_wav = "button.wav"
