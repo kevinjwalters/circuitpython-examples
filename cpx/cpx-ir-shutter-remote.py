@@ -1,4 +1,4 @@
-### cpx-ir-shutter-remote v1.6
+### cpx-ir-shutter-remote v1.7
 ### Circuit Playground Express (CPX) shutter remote using infrared for Sony Cameras
 
 ### copy this file to CPX as code.py
@@ -163,7 +163,7 @@ while True:
 
         ### Only fire shutter if it's been a while since last press
         ### this helps to debounce this bouncy buttons
-        if button_left.value and time.monotonic_ns() - last_cmd_ns >= MANUAL_MIN_INT_NS:
+        if button_right.value and time.monotonic_ns() - last_cmd_ns >= MANUAL_MIN_INT_NS:
             if pixel_indication:
                 pixels.fill(SHUTTER_CMD_COLOUR)
             last_cmd_ns = time.monotonic_ns()
@@ -174,12 +174,12 @@ while True:
             if pixel_indication:
                 pixels.fill(BLACK)
             shot_num += 1
-            while button_left.value:
+            while button_right.value:
                 pass  ### wait for button release
 
-        elif button_right.value:
+        elif button_left.value:
             pixel_indication = not pixel_indication
-            while button_right.value:
+            while button_left.value:
                 pass  ### wait for button release
 
     ### CPX switch to right
