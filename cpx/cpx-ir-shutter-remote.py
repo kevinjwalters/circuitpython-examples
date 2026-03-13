@@ -1,4 +1,4 @@
-### cpx-ir-shutter-remote v1.4
+### cpx-ir-shutter-remote v1.5
 ### Circuit Playground Express (CPX) shutter remote using infrared for Sony Cameras
 
 ### copy this file to CPX as code.py
@@ -41,11 +41,23 @@
 
 import time
 
-import pulseio
 import board
-import adafruit_irremote
-from adafruit_circuitplayground import cp
+import digitalio
+import pulseio
 
+import neopixel
+from audiocore import WaveFile
+from audioio import AudioOut
+import adafruit_irremote
+### Unfortunately the cp object and library are too large to use,
+### causes MemoryError for multiple wav plays
+#from adafruit_circuitplayground import cp
+
+
+WAV_DIR="num"
+SHUTTER_CMD_COLOUR = 0x080000
+IMPENDING_COLOUR = 0x070400
+BLACK = 0x000000
 
 ### 40kHz modulation (for Sony) with 20% duty cycle
 CARRIER_IRFREQ_SONY = 40_000
@@ -63,15 +75,30 @@ ir_encoder = adafruit_irremote.GenericTransmit(header=[2400, 600],
                                                zero=  [600,  600],
                                                trail=None)
 
+pixels = neopixel.NeoPixel(board.NEOPIXEL, 10, brightness=1.0)
+pixels.fill(BLACK)
+
+### A is left, B is right (usb at top)
+button_left = digitalio.DigitalInOut(board.BUTTON_A)
+button_left.switch_to_input(pull=digitalio.Pull.DOWN)
+button_right = digitalio.DigitalInOut(board.BUTTON_B)
+button_right.switch_to_input(pull=digitalio.Pull.DOWN)
+
+switch_left = digitalio.DigitalInOut(board.SLIDE_SWITCH)
+switch_left.switch_to_input(pull=digitalio.Pull.UP)
+
+### Speaker control
+speaker_enable = digitalio.DigitalInOut(board.SPEAKER_ENABLE)
+speaker_enable.direction = digitalio.Direction.OUTPUT
+
+audio_out = AudioOut(board.SPEAKER)
+
+
 def fire_shutter():
     """Send infrared code to fire the shutter.
        This is a code used by Sony cameras."""
     ir_encoder.transmit(ir_pulseout, [0xB4, 0xB8, 0xF0],
                         repeat=2, delay=0.005, nbits=20)
-    ### Send to A2 to help debug issue with 5.3.1 ok, 6.x broken
-    ###
-    ##ir_encoder.transmit(ir_pulseout_a2debug, [0xB4, 0xB8, 0xF0],
-    ##                    repeat=2, delay=0.005, nbits=20)
 
 
 def say_interval(number_as_words):
@@ -80,22 +107,27 @@ def say_interval(number_as_words):
         if word == ",":
             time.sleep(0.15)
         else:
-            cp.play_file(WAV_DIR + "/" + word + ".wav")
+            play_file(WAV_DIR + "/" + word + ".wav")
         time.sleep(0.050)
 
 
-SHUTTER_CMD_COLOUR = 0x080000
-IMPENDING_COLOUR = 0x070400
-BLACK = 0x000000
+def play_file(filename):
+    speaker_enable.value = True
+    with WaveFile(open(filename, "rb")) as wavefile:
+        audio_out.play(wavefile)
+        while audio_out.playing:
+            pass
+    speaker_enable.value = False
+
 
 S_TO_NS = 1_000_000_000
-ADJ_NS = 20_000_000
+PREFLASH_NS = 20_000_000
 IMPENDING_NS = 2 * S_TO_NS
 ### intervalometer mode announces the duration
 manual_trig_wav = "button.wav"
-sound_trig_wav = "noise.wav"
+## sound_trig_wav = "noise.wav"  ### To implement
 impending_wav = "ready.wav"
-WAV_DIR="num"
+
 interval_words = ["five",
                   "ten",
                   "fifteen",
@@ -115,34 +147,36 @@ intervals = [5, 10, 15, 20, 25, 30, 60,
 interval_idx = intervals.index(30)  ### default is 30 seconds
 intervalometer = False
 last_cmd_ns = None
-first_cmd_ns = None
 pixel_indication = True
 impending = False
 say_and_reset = False
+shot_num = 1
+first_cmd_ns = time.monotonic_ns()
 
 while True:
     ### CPX switch to left
-    if cp.switch:
+    if switch_left.value:
         if intervalometer:
-            cp.play_file(manual_trig_wav)
+            play_file(manual_trig_wav)
             intervalometer = False
 
-        if cp.button_a:  ### left button_a
+        if button_left.value:
             if pixel_indication:
-                cp.pixels.fill(SHUTTER_CMD_COLOUR)
+                pixels.fill(SHUTTER_CMD_COLOUR)
             last_cmd_ns = time.monotonic_ns()
             fire_shutter()
-            if first_cmd_ns is None:
+            if shot_num == 1:
                 first_cmd_ns = last_cmd_ns
             print("Manual", "shutter release at", (last_cmd_ns - first_cmd_ns) / S_TO_NS)
             if pixel_indication:
-                cp.pixels.fill(BLACK)
-            while cp.button_a:
+                pixels.fill(BLACK)
+            shot_num += 1
+            while button_left.value:
                 pass  ### wait for button release
 
-        elif cp.button_b:
+        elif button_right.value:
             pixel_indication = not pixel_indication
-            while cp.button_b:
+            while button_right.value:
                 pass  ### wait for button release
 
     ### CPX switch to right
@@ -151,17 +185,17 @@ while True:
             say_and_reset = True
             intervalometer = True
 
-        ### Left button decreases time
-        if cp.button_a and interval_idx > 0:
+        ### Left button (A) decreases time
+        if button_left.value and interval_idx > 0:
             interval_idx -= 1
-            while cp.button_a:
+            while button_left.value:
                 pass  ### wait for button release
             say_and_reset = True
 
-        ### Right button increases time
-        elif cp.button_b and interval_idx < len(intervals) - 1:
+        ### Right button (B) increases time
+        elif button_right.value and interval_idx < len(intervals) - 1:
             interval_idx += 1
-            while cp.button_b:
+            while button_right.value:
                 pass  ### wait for button release
             say_and_reset = True
 
@@ -172,24 +206,28 @@ while True:
 
         ### If enough time has elapsed fire the shutter
         ### or show the impending colour on NeoPixels
+        cum_interval_ns = intervals[interval_idx] * S_TO_NS * shot_num
         now_ns = time.monotonic_ns()
-        interval_ns = intervals[interval_idx] * S_TO_NS
-        if now_ns - last_cmd_ns >= interval_ns - ADJ_NS:
+        if now_ns - first_cmd_ns >= cum_interval_ns - PREFLASH_NS:
             if pixel_indication:
-                cp.pixels.fill(SHUTTER_CMD_COLOUR)
-            last_cmd_ns = time.monotonic_ns()
+                pixels.fill(SHUTTER_CMD_COLOUR)
+            ### Wait for exact time
+            ### NB: assigment expressions can need care with brackets
+            while (last_cmd_ns := time.monotonic_ns()) - first_cmd_ns < cum_interval_ns:
+                pass
             fire_shutter()
-            if first_cmd_ns is None:
+            if shot_num == 1:
                 first_cmd_ns = last_cmd_ns
             print("Timer", "shutter release at", (last_cmd_ns - first_cmd_ns) / S_TO_NS)
             if pixel_indication:
-                cp.pixels.fill(BLACK)
+                pixels.fill(BLACK)
+            shot_num += 1
             impending = False
 
         elif (pixel_indication
               and not impending
-              and now_ns - last_cmd_ns >= interval_ns - IMPENDING_NS):
-            cp.pixels.fill(IMPENDING_COLOUR)
-            cp.play_file(impending_wav)
-            cp.pixels.fill(BLACK)
+              and now_ns - first_cmd_ns >= cum_interval_ns - IMPENDING_NS):
+            pixels.fill(IMPENDING_COLOUR)
+            play_file(impending_wav)
+            pixels.fill(BLACK)
             impending = True
