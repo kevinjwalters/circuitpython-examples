@@ -1,4 +1,4 @@
-### cpx-ir-shutter-remote v1.7
+### cpx-ir-shutter-remote v1.8
 ### Circuit Playground Express (CPX) shutter remote using infrared for Sony Cameras
 
 ### copy this file to CPX as code.py
@@ -152,7 +152,9 @@ pixel_indication = True
 impending = False
 say_and_reset = False
 shot_num = 1
+auto_shot_num = None
 first_cmd_ns = time.monotonic_ns()
+first_auto_cmd_ns = None
 
 while True:
     ### CPX switch to left
@@ -204,19 +206,20 @@ while True:
 
         if say_and_reset:
             say_interval(interval_words[interval_idx])
-            last_cmd_ns = time.monotonic_ns()
+            first_auto_cmd_ns = time.monotonic_ns()
+            auto_shot_num = 1
             say_and_reset = False
 
         ### If enough time has elapsed fire the shutter
         ### or show the impending colour on NeoPixels
-        cum_interval_ns = intervals[interval_idx] * S_TO_NS * shot_num
+        cum_interval_ns = intervals[interval_idx] * S_TO_NS * auto_shot_num
         now_ns = time.monotonic_ns()
-        if now_ns - first_cmd_ns >= cum_interval_ns - PREFLASH_NS:
+        if now_ns - first_auto_cmd_ns >= cum_interval_ns - PREFLASH_NS:
             if pixel_indication:
                 pixels.fill(SHUTTER_CMD_COLOUR)
             ### Wait for exact time
-            ### NB: assigment expressions can need care with brackets
-            while (last_cmd_ns := time.monotonic_ns()) - first_cmd_ns < cum_interval_ns:
+            ### NB: assigment expressions need care with brackets
+            while (last_cmd_ns := time.monotonic_ns()) - first_auto_cmd_ns < cum_interval_ns:
                 pass
             fire_shutter()
             if shot_num == 1:
@@ -225,11 +228,12 @@ while True:
             if pixel_indication:
                 pixels.fill(BLACK)
             shot_num += 1
+            auto_shot_num += 1
             impending = False
 
         elif (pixel_indication
               and not impending
-              and now_ns - first_cmd_ns >= cum_interval_ns - IMPENDING_NS):
+              and now_ns - first_auto_cmd_ns >= cum_interval_ns - IMPENDING_NS):
             pixels.fill(IMPENDING_COLOUR)
             play_file(impending_wav)
             pixels.fill(BLACK)
