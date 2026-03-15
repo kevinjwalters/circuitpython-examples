@@ -1,4 +1,4 @@
-### cpx-ir-shutter-remote v1.8
+### cpx-ir-shutter-remote v1.9
 ### Circuit Playground Express (CPX) shutter remote using infrared for Sony Cameras
 
 ### copy this file to CPX as code.py
@@ -54,7 +54,7 @@ import adafruit_irremote
 #from adafruit_circuitplayground import cp
 
 
-WAV_DIR="num"
+WAV_DIR = "num"
 SHUTTER_CMD_COLOUR = 0x080000
 IMPENDING_COLOUR = 0x070400
 BLACK = 0x000000
@@ -125,9 +125,9 @@ PREFLASH_NS = 20_000_000
 MANUAL_MIN_INT_NS = 400_000_000  ### helps with debounce
 IMPENDING_NS = 2 * S_TO_NS
 ### intervalometer mode announces the duration
-manual_trig_wav = "button.wav"
-## sound_trig_wav = "noise.wav"  ### To implement
-impending_wav = "ready.wav"
+manual_trig_wav = WAV_DIR + "/" + "button.wav"
+## sound_trig_wav = WAV_DIR + "/" + "noise.wav"  ### To implement
+impending_wav = WAV_DIR + "/" + "ready.wav"
 
 interval_words = ["five",
                   "ten",
