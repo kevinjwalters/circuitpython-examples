@@ -1,7 +1,8 @@
-### pico-input-read v1.1
+### pico-input-read v1.2
 ### Respond to simple serial commands with digital or analogue gpio
 
 ### Tested on Pi Pico W vs Pi Pico 2 W both running CircuitPython 10.1.3
+### Tested on Pi Pico W vs Pimoroni Tiny 2350 both running CircuitPython 10.1.3
 
 ### copy this file to Pico as code.py
 
@@ -36,6 +37,7 @@
 ### Relevant Errata: RP2350-9 and RP2040-E11
 
 
+import os
 import time
 
 import analogio
@@ -43,9 +45,19 @@ import board
 import busio
 import digitalio
 
-SERIAL_TX_PIN = board.GP16
-SERIAL_RX_PIN = board.GP17
+
+### TX pin must be even-numbered on RPxxxx
+machine = os.uname().machine
+if machine.find("Pimoroni Tiny") >= 0:
+    SERIAL_TX_PIN = board.GP6
+    SERIAL_RX_PIN = board.GP5
+else:
+    SERIAL_TX_PIN = board.GP16
+    SERIAL_RX_PIN = board.GP17
+
+### This is marked A0 on Tiny 2350
 GPIO_PIN = board.GP26
+
 SERIAL_BAUDRATE = 38400
 CMD_READ_TIMEOUT_S = 1.0
 
@@ -95,7 +107,7 @@ while True:
 
     for cmd in cmds:
         value = None
-        if cmd in (READ_ANA_CMD, READM_DIG_CMD):
+        if cmd in (READ_ANA_CMD, READM_ANA_CMD):
             ### Ensure input is correct type
             if not isinstance(gpio, analogio.AnalogIn):
                 if gpio is not None:
@@ -106,7 +118,7 @@ while True:
                 value = get_sample_analogue(gpio)
             else:
                 _ = get_sample_analogue(gpio, original_samples)
-                value = ",".join(original_samples)
+                value = ",".join([str(x) for x in original_samples])
         elif cmd in (READ_DIG_CMD, READM_DIG_CMD):
             ### Ensure input is correct type
             if not isinstance(gpio, digitalio.DigitalInOut):
@@ -117,7 +129,7 @@ while True:
             if cmd == READ_DIG_CMD:
                 value = get_digital(gpio)
             else:
-                value = ",".join([get_digital(gpio) for _ in range(SAMPLE_COUNT)])
+                value = ",".join([str(get_digital(gpio)) for _ in range(SAMPLE_COUNT)])
         elif len(cmd) > 0:
             value = ""
         if value is not None:
