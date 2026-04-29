@@ -30,7 +30,7 @@ layer_001 = (Keycode.SEVEN, Keycode.EIGHT, Keycode.NINE,   "+",
 audio_001 = ["modelf-click-32k.wav"] * 16
 
 
-### Pimoroni's media conrol example
+### Pimoroni's media control example
 ### from https://github.com/pimoroni/pmk-circuitpython/blob/main/examples/hid-keypad-fifteen-layers.py
 layer_002 = (None, CCC("SCAN_PREVIOUS_TRACK"), CCC("PLAY_PAUSE"), CCC("SCAN_NEXT_TRACK"),
              None, CCC("VOLUME_DECREMENT"),    CCC("MUTE"),       CCC("VOLUME_INCREMENT"),
@@ -77,3 +77,10 @@ layer_007 = ("No wukkas ", "bobby-dazzler ", "Bueller... Bueller... ", "for the 
              "winner, winner, chicken dinner ", "terrible, Muriel ", "come a gutsa ", "for those playing along at home ",
              "Bob's your uncle ", "stick it right up the clacker ", "catch you next time ", "strewth ",
              "epic fail ", "absolute junk ", "dead as a doornail ", "solar powered roadways ")
+
+
+### More sound sample fun
+#layer_008 = ("in the mix", "keeping it real", "having a splendid time", "excellent") * 4
+#
+#audio_008 = tuple(["samples/" + nm.replace(" ", "-").replace("'", "").lower() + "-bfc-32k-8b.wav"
+#                   for nm in layer_008])
