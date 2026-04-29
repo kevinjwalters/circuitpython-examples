@@ -1,4 +1,4 @@
-### hid-keys-visual-and-sound-effects v1.0
+### hid-keys-visual-and-sound-effects v1.1
 ### Pimoroni Keybow 2040 HID/MIDI/CCC keyboard with visual effects and PWM audio effects
 
 ### Tested on Keybow 2040 with 10.1.4
@@ -172,12 +172,74 @@ try:
 except AttributeError:
     MASTER_VOLUME = 1.0
 
+
+class SamplePlayer:
+    ### pylint: disable=dangerous-default-value
+    def __init__(self,
+                 output_class=None,
+                 output_args=(),
+                 output_kwargs={},
+                 *,
+                 volume=1.0,
+                 sample_rate=32_000, bits_per_sample=16, channel_count=1):
+        self._output_class = output_class
+        self._output_args = output_args
+        self._output_kwargs = output_kwargs
+
+        self._sample_rate = sample_rate
+        self._bits_per_sample = bits_per_sample
+        self._channel_count = channel_count
+
+        self._samples_signed = None
+        self._mixer = None
+        self._audio_out = None
+        self._init_AOutMix(sample_rate=self._sample_rate,
+                           bits_per_sample=self._bits_per_sample,
+                           channel_count=self._channel_count)
+        self._mixer.voice[0].level = volume
+
+
+    def _init_AOutMix(self, *,
+                      sample_rate, bits_per_sample, channel_count):
+        ### Important to deinit audio_out first otherwise
+        ### there will be a scary noise between the two deinint()s
+        if self._audio_out is not None:
+            self._audio_out.deinit()
+        if self._mixer is not None:
+            self._mixer.deinit()
+
+        self._sample_rate = sample_rate
+        self._bits_per_sample = bits_per_sample
+        self._samples_signed = (bits_per_sample != 8)
+        self._mixer = Mixer(sample_rate=self._sample_rate,
+                            bits_per_sample=self._bits_per_sample,
+                            samples_signed=self._samples_signed,
+                            channel_count=channel_count)
+        self._audio_out = self._output_class(*self._output_args, **self._output_kwargs)
+        self._audio_out.play(self._mixer)  ### this will click with PWMAudioOut
+
+
+    def play(self, wavefile, volume=None, *, block=False, loop=False):
+        """Plays a WaveFile and adjusts the mixer as required."""
+        if volume is not None:
+            self._mixer.voice[0].level = volume
+
+        ### Match sample_rate if required
+        ### but the bits_per_sample cannot be checked
+        if (wavefile.sample_rate != self._mixer.sample_rate or
+            wavefile.bits_per_sample != self._bits_per_sample):
+            self._init_AOutMix(sample_rate=wavefile.sample_rate,
+                               bits_per_sample=wavefile.bits_per_sample,
+                               channel_count=self._channel_count)
+
+        self._mixer.voice[0].play(wavefile, loop=loop)
+        if block:
+            while self._mixer.voice[0].playing:
+                pass
+
+
 ### STEMMA Speaker audio mixer setup
-mixer = Mixer(sample_rate=32_000,
-              channel_count=1)
-audio_out = AudioOut(board.TX)
-audio_out.play(mixer)  ### this makes a click sound
-mixer.voice[0].level = 1.0
+sample_player = SamplePlayer(AudioOut, (board.TX,))
 
 
 BLACK = (0, 0, 0)
@@ -505,7 +567,6 @@ class KeybowLayerStack:
 
         self._anims.insert(idx, anim)
         self._layers.insert(idx, anim.layer)
-        #anim.layer.changed = True   ### do I need to change this? TODO
         self._stack_changed = True
 
     def remove(self, anim):
@@ -626,8 +687,8 @@ def add_key_handlers():
                     wav_file = s_info
                     volume = DEFAULT_VOLUME
 
-                mixer.voice[0].level = volume
-                mixer.voice[0].play(wav_file)
+                sample_player.play(wav_file, volume=volume)
+
 
         # A release handler that turns off the LED
         @keybow.on_release(key)
