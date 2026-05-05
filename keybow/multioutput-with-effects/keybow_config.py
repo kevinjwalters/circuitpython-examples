@@ -37,6 +37,9 @@ layer_002 = (None, CCC("SCAN_PREVIOUS_TRACK"), CCC("PLAY_PAUSE"), CCC("SCAN_NEXT
              None, None,                       None,              None,
              None, None,                       None,              None)
 
+### Use a dimmed version of the layer colour to show keys in use
+background_002 = tuple(None if key is None
+                        else tuple(c // 15 for c in LAYER_COLOURS[2 - 1]) for key in layer_002)
 
 ### Chromatic keys starting at C2 (36)
 layer_003 = ([MIDI(n) for n in range(48, 52)] +
@@ -84,3 +87,18 @@ layer_007 = ("No wukkas ", "bobby-dazzler ", "Bueller... Bueller... ", "for the 
 #
 #audio_008 = tuple(["samples/" + nm.replace(" ", "-").replace("'", "").lower() + "-bfc-32k-8b.wav"
 #                   for nm in layer_008])
+
+### Daft Keybow
+#layer_009 = (None,) * 16
+#
+#audio_009 = tuple(["hbfs/" + nm + ".wav"
+#                   for nm in ("work-it", "make-it", "do-it", "makes-us",
+#                              "harder", "better", "faster", "stronger",
+#                              "more-than", "hour", "our", "never",
+#                              "ever", "after", "work-is", "over")])
+
+### DECtalk "Pimoroni Keybow 2040"
+#layer_010 = (None,) * 16
+#
+#audio_010 = tuple([("samples/" + nm + "-rp-32k.wav", 1.0, rate)
+#                   for rate in (24_000, 32_000, 48_000, 64_000) for nm in ("pimoroni", "keybow", "twenty", "forty")])

@@ -1,4 +1,4 @@
-### hid-keys-visual-and-sound-effects v1.1
+### hid-keys-visual-and-sound-effects v1.2
 ### Pimoroni Keybow 2040 HID/MIDI/CCC keyboard with visual effects and PWM audio effects
 
 ### Tested on Keybow 2040 with 10.1.4
@@ -30,6 +30,8 @@
 ### SPDX-FileCopyrightText: 2026 Kevin J. Walters
 
 ### TODO - test with hibernated laptop
+### TODO - 64_000 samples might be crackling a bit - do I need adaptive buffer size somewhere?
+###        Mixer buffer_size defaults to 1024 and sounds okay at 32_000
 
 
 import math
@@ -89,6 +91,8 @@ K_WIDTH = 4
 K_HEIGHT = 4
 K_COUNT = K_WIDTH * K_HEIGHT
 
+BLACK = (0, 0, 0)  ### RGB LEDs off
+
 keybow_button_r_din = digitalio.DigitalInOut(board.USER_SW)
 keybow_button_r = lambda: not keybow_button_r_din.value
 
@@ -118,7 +122,6 @@ P2_TO_K = tuple([tuple([x + y * K_WIDTH for x in range(K_WIDTH - 1, 0 - 1, -1)])
 P_TO_K_CF = tuple([x + y * K_WIDTH for y in range(K_HEIGHT) for x in range(K_WIDTH - 1, 0 - 1, -1)])
 P_TO_K_RF = tuple([x + y * K_WIDTH for x in range(K_WIDTH - 1, 0 - 1, -1) for y in range(K_HEIGHT)])
 
-
 wav_cache = {}
 def wav_it(fname):
     wav_obj = wav_cache.get(fname)
@@ -133,23 +136,48 @@ def wav_it(fname):
 
 def get_audio_layers(l_filenames):
     a_layers = []
-    for avar in [lvar.replace("layer", "audio") for lvar in l_filenames]:
+    for a_varname in [lvar.replace("layer", "audio") for lvar in l_filenames]:
+        a_layer = [None] * K_COUNT
         try:
-            a_l = tuple([wav_it(x) if isinstance(x, str) else tuple([wav_it(x[0])] + list(x[1:]))  for x in getattr(config, avar)])
+            a_var = getattr(config, a_varname)
+            for idx, item in enumerate(a_var):
+                if isinstance(item, str):
+                    a_layer[idx] = wav_it(item)
+                else:
+                    ### tuple is (filename, volume, sample_rate)
+                    ### where everything after filename is optional
+                    try:
+                        wave_file = wav_it(item[0])
+                        a_layer[idx] = tuple([wave_file] + list(item[1:]))
+                    except IndexError:
+                        pass
         except AttributeError:
-            a_l = None
-        a_layers.append(a_l)
+            pass  ### this is fine, audio layers are optional
+
+        a_layers.append(a_layer)
     return a_layers
+
+
+def get_background_layers(l_filenames):
+    b_layers = []
+    for b_varname in [lvar.replace("layer", "background") for lvar in l_filenames]:
+        try:
+            b_var = getattr(config, b_varname)
+            b_layer = [None] * K_COUNT
+            for idx, item in enumerate(b_var):
+                b_layer[idx] = BLACK if item is None else item
+        except AttributeError:
+            b_layer = None  ### this is fine, audio layers are optional
+
+        b_layers.append(b_layer)
+    return b_layers
 
 
 ### Extract the layers from configuration
 layer_fnames = sorted([x for x in dir(config) if x.startswith("layer")])
 layers = tuple([getattr(config, var) for var in layer_fnames])
 audio_layers = get_audio_layers(layer_fnames)
-
-keymap = layers[0]
-audmap = audio_layers[0]
-key_press_colour = config.LAYER_COLOURS[0]
+background_layers = get_background_layers(layer_fnames)
 
 
 ### Set up the keyboard for sending Keycode
@@ -174,6 +202,10 @@ except AttributeError:
 
 
 class SamplePlayer:
+    ### default is 1024, 2048 still can crackle with 64k playback
+    ### but testing with 4096 triggered a MemoryError exception
+    ### 1024 is generally not bad as long as there's minimal LED use
+    BUFFER_SIZE = 1024
     ### pylint: disable=dangerous-default-value
     def __init__(self,
                  output_class=None,
@@ -214,21 +246,36 @@ class SamplePlayer:
         self._mixer = Mixer(sample_rate=self._sample_rate,
                             bits_per_sample=self._bits_per_sample,
                             samples_signed=self._samples_signed,
+                            buffer_size=self.BUFFER_SIZE,
                             channel_count=channel_count)
         self._audio_out = self._output_class(*self._output_args, **self._output_kwargs)
         self._audio_out.play(self._mixer)  ### this will click with PWMAudioOut
 
 
-    def play(self, wavefile, volume=None, *, block=False, loop=False):
+    def play(self, sample, volume=None, *, block=False, loop=False):
         """Plays a WaveFile and adjusts the mixer as required."""
+
+        playback_volume = 1
+        if isinstance(sample, WaveFile):
+            wavefile = sample
+        else:
+            try:
+                wavefile = sample[0]
+                playback_volume = sample[1]
+                wavefile.sample_rate = sample[2]
+            except IndexError:
+                pass
+
         if volume is not None:
-            self._mixer.voice[0].level = volume
+            self._mixer.voice[0].level = volume * playback_volume
+        else:
+            self._mixer.voice[0].level = playback_volume
 
         ### Match sample_rate if required
         ### but the bits_per_sample cannot be checked
-        if (wavefile.sample_rate != self._mixer.sample_rate or
+        if (wavefile.sample_rate  != self._mixer.sample_rate or
             wavefile.bits_per_sample != self._bits_per_sample):
-            self._init_AOutMix(sample_rate=wavefile.sample_rate,
+            self._init_AOutMix(sample_rate=wavefile.sample_rate ,
                                bits_per_sample=wavefile.bits_per_sample,
                                channel_count=self._channel_count)
 
@@ -242,7 +289,7 @@ class SamplePlayer:
 sample_player = SamplePlayer(AudioOut, (board.TX,))
 
 
-BLACK = (0, 0, 0)
+
 
 effect_idx = 3
 ### (sound, visual)
@@ -350,6 +397,19 @@ class LSCAnim(KeybowAnimation):
                                  rgb)
 
 
+class ImageAnim(KeybowAnimation):
+    def __init__(self, img):
+        super().__init__()
+        self.layer = Layer()
+
+        for p_idx in range(len(img)):
+            rgb = img[p_idx]
+            self.layer.set_pixel(p_idx % K_WIDTH,
+                                 p_idx // K_WIDTH,
+                                 rgb)
+
+
+
 class EMAnim(KeybowAnimation):
     COLOURS = ((0, 87, 183),
                (255, 215, 0))
@@ -359,7 +419,8 @@ class EMAnim(KeybowAnimation):
         self.layer = Layer(transparency=0)
         self._from_em = tuple([int(b) for b in EFFECTS[from_em_idx]])
         self._to_em = tuple([int(b) for b in EFFECTS[to_em_idx]])
-        self._duration_ns = 1_600_000_000
+        self._fade_ns = 1_600_000_000
+        self._duration_ns = 2_500_000_000
         self._half_y = self.layer.height // 2
         self._set_bands()
         self._set_alpha(self._from_em)
@@ -392,7 +453,8 @@ class EMAnim(KeybowAnimation):
         self.layer.changed = True  ### lazy assumption
         rel_ns = now_ns - self._start_ns
         if rel_ns <= self._duration_ns:
-            ratio = rel_ns / self._duration_ns
+            ### Fade time is shorter than duration to allow for a short hold
+            ratio = min(1.0, rel_ns / self._fade_ns)
             inv_ratio = 1.0 - ratio
             alphas = [self._from_em[idx] * inv_ratio + self._to_em[idx] * ratio for idx in range(len(self._from_em))]
             self._set_alpha(alphas)
@@ -569,6 +631,28 @@ class KeybowLayerStack:
         self._layers.insert(idx, anim.layer)
         self._stack_changed = True
 
+    def removeandadd(self, anim_old, anim_new, *, bottom=False):
+        """Replace anim_old if present otherwise just add anim_new
+           not acting on any None values."""
+        found = False
+        if anim_old is not None:
+            idx = 0
+            while idx < len(self._layers):
+                if anim_old is self._anims[idx]:
+                    if anim_new is None:
+                        self._layers.pop(idx)
+                        self._anims.pop(idx)
+                    else:
+                        self._anims[idx] = anim_new
+                        self._layers[idx] = anim_new.layer
+                    found = True
+                    self._stack_changed = True
+                    break
+                idx += 1
+
+        if anim_new is not None and not found:
+            self.add(anim_new, bottom=bottom)
+
     def remove(self, anim):
         idx = 0
         while idx < len(self._layers):
@@ -652,6 +736,10 @@ class KeybowLayerStack:
 
         return update_count
 
+    @property
+    def count(self):
+        return len(self._layers)
+
 
 def add_key_handlers():
     # Attach handler functions to all of the keys
@@ -680,15 +768,8 @@ def add_key_handlers():
                 display_layers.add(key.anim_extra, bottom=True)
             if sound_effect_on and audmap is not None:
                 s_info = audmap[K_TO_P_RF[k_idx]]
-                try:
-                    wav_file = s_info[0]
-                    volume = s_info[1]
-                except TypeError:
-                    wav_file = s_info
-                    volume = DEFAULT_VOLUME
-
-                sample_player.play(wav_file, volume=volume)
-
+                if s_info is not None:
+                    sample_player.play(s_info, volume=MASTER_VOLUME)
 
         # A release handler that turns off the LED
         @keybow.on_release(key)
@@ -719,7 +800,7 @@ def change_layer():
     layer_idx = None
     clear_key_handlers()
 
-    display_layers.add(layer_select_colours)
+    display_layers.add(selector_layer)
     display_layers.render()
     while keybow.none_pressed():
         keybow.update()
@@ -733,7 +814,7 @@ def change_layer():
     while not keybow.none_pressed():
         keybow.update()
 
-    display_layers.remove(layer_select_colours)
+    display_layers.remove(selector_layer)
     display_layers.render()
 
     add_key_handlers()  ### restore the key handlers
@@ -741,7 +822,12 @@ def change_layer():
 
 
 display_layers = KeybowLayerStack(keybow)
-layer_select_colours = LSCAnim(len(layers), config.LAYER_COLOURS)
+selector_layer = LSCAnim(len(layers), config.LAYER_COLOURS)
+
+keymap = layers[0]
+audmap = audio_layers[0]
+key_press_colour = config.LAYER_COLOURS[0]
+background = None if background_layers[0] is None else ImageAnim(background_layers[0])
 
 add_key_handlers()
 if STARTUP_MESSAGE:
@@ -772,6 +858,9 @@ while True:
             if km_idx is not None:
                 keymap = layers[km_idx]
                 audmap = audio_layers[km_idx]
+                new_background = None if background_layers[km_idx] is None else ImageAnim(background_layers[km_idx])
+                display_layers.removeandadd(background, new_background, bottom=True)
+                background = new_background
                 key_press_colour = config.LAYER_COLOURS[km_idx % len(config.LAYER_COLOURS)]
         else:
             old_effect_idx = effect_idx
@@ -781,3 +870,7 @@ while True:
         while pressed > 0.4:
             display_layers.render()
             pressed = keybow_button_r() * 0.25 + pressed * 0.75
+
+    ### This will add the background after any startup message has finished
+    if background is not None and display_layers.count == 0:
+        display_layers.add(ImageAnim(background))
