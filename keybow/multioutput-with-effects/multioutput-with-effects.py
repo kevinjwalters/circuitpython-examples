@@ -1,5 +1,5 @@
-### hid-keys-visual-and-sound-effects v1.2
-### Pimoroni Keybow 2040 HID/MIDI/CCC keyboard with visual effects and PWM audio effects
+### multioutput-with-effects v1.3
+### Pimoroni Keybow 2040 HID/MIDI/CCC keyboard with visual effects and PWM/I2S audio effects
 
 ### Tested on Keybow 2040 with 10.1.4
 
@@ -29,6 +29,9 @@
 
 ### SPDX-FileCopyrightText: 2026 Kevin J. Walters
 
+### See https://www.instructables.com/Pimoroni-Keybow-2040-Macropad-Speaker-Addition
+### and later article on adding an I2S audio board
+
 ### TODO - test with hibernated laptop
 ### TODO - 64_000 samples might be crackling a bit - do I need adaptive buffer size somewhere?
 ###        Mixer buffer_size defaults to 1024 and sounds okay at 32_000
@@ -45,7 +48,8 @@ import usb_hid
 import usb_midi
 from audiocore import WaveFile
 from audiomixer import Mixer
-from audiopwmio import PWMAudioOut as AudioOut
+from audiopwmio import PWMAudioOut
+from audiobusio import I2SOut
 
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
@@ -66,6 +70,20 @@ from config_types import CCC, MIDI
 import keybow_config as config
 from keybow_font import FONT
 
+try:
+    AUDIO_OUTPUT = config.AUDIO_OUTPUT.upper()
+except AttributeError:
+    AUDIO_OUTPUT = "PWM:TX"
+
+split_fields = AUDIO_OUTPUT.split(":")
+if len(split_fields) >= 2:
+    AUDIO_OUTPUT = split_fields[0]
+    AUDIO_PIN_NAMES = tuple(split_fields[1].split(","))
+elif AUDIO_OUTPUT == "PWM":
+    AUDIO_PIN_NAMES = ("TX",)
+elif AUDIO_OUTPUT == "I2S":
+    AUDIO_PIN_NAMES = ("TX", "RX", "INT")
+AUDIO_CHANNEL_COUNT = 2 if AUDIO_OUTPUT == "I2S" else len(AUDIO_PIN_NAMES)
 
 ### Going from 125MHz to 200MHz
 microcontroller.cpu.frequency = 200_000_000
@@ -233,22 +251,33 @@ class SamplePlayer:
 
     def _init_AOutMix(self, *,
                       sample_rate, bits_per_sample, channel_count):
-        ### Important to deinit audio_out first otherwise
-        ### there will be a scary noise between the two deinint()s
-        if self._audio_out is not None:
-            self._audio_out.deinit()
-        if self._mixer is not None:
-            self._mixer.deinit()
+
+        recreate = self._bits_per_sample != bits_per_sample
+        if recreate:
+            ### For any audio output it is IMPORTANT to deinit first otherwise
+            ### there will be a scary continuous noise between the two deinint()
+            if self._audio_out is not None:
+                self._audio_out.deinit()
+            if self._mixer is not None:
+                self._mixer.deinit()
 
         self._sample_rate = sample_rate
         self._bits_per_sample = bits_per_sample
         self._samples_signed = (bits_per_sample != 8)
-        self._mixer = Mixer(sample_rate=self._sample_rate,
-                            bits_per_sample=self._bits_per_sample,
-                            samples_signed=self._samples_signed,
-                            buffer_size=self.BUFFER_SIZE,
-                            channel_count=channel_count)
-        self._audio_out = self._output_class(*self._output_args, **self._output_kwargs)
+        if recreate or self._mixer is None:
+            self._mixer = Mixer(sample_rate=self._sample_rate,
+                                bits_per_sample=self._bits_per_sample,
+                                samples_signed=self._samples_signed,
+                                buffer_size=self.BUFFER_SIZE,
+                                channel_count=channel_count)
+        else:
+            if self._mixer.sample_rate != self._sample_rate:
+                self._mixer.sample_rate = self._sample_rate
+        if recreate or self._audio_out is None:
+            self._audio_out = self._output_class(*self._output_args, **self._output_kwargs)
+
+        ### If the sample rate has been changed on an existing mixer
+        ### it won't apply until the play() has been called
         self._audio_out.play(self._mixer)  ### this will click with PWMAudioOut
 
 
@@ -256,40 +285,52 @@ class SamplePlayer:
         """Plays a WaveFile and adjusts the mixer as required."""
 
         playback_volume = 1
+        sample_rate_override = None
         if isinstance(sample, WaveFile):
             wavefile = sample
         else:
             try:
                 wavefile = sample[0]
                 playback_volume = sample[1]
-                wavefile.sample_rate = sample[2]
+                sample_rate_override = sample[2]
             except IndexError:
                 pass
+        if wavefile is None:
+            return   ### sample is probably missing from file system
 
         if volume is not None:
             self._mixer.voice[0].level = volume * playback_volume
         else:
             self._mixer.voice[0].level = playback_volume
 
-        ### Match sample_rate if required
-        ### but the bits_per_sample cannot be checked
-        if (wavefile.sample_rate  != self._mixer.sample_rate or
+        recorded_sample_rate = wavefile.sample_rate
+        if sample_rate_override is not None:
+            wavefile.sample_rate = sample_rate_override
+
+        ### Match sample_rate with audio output if required
+        ### (the bits_per_sample cannot be checked)
+        if (wavefile.sample_rate  != self._sample_rate or
             wavefile.bits_per_sample != self._bits_per_sample):
             self._init_AOutMix(sample_rate=wavefile.sample_rate ,
                                bits_per_sample=wavefile.bits_per_sample,
                                channel_count=self._channel_count)
 
         self._mixer.voice[0].play(wavefile, loop=loop)
+        ### Not documented if changing this during an asynchronous play() is
+        ### legal but...
+        if wavefile.sample_rate != recorded_sample_rate:
+            wavefile.sample_rate = recorded_sample_rate
         if block:
             while self._mixer.voice[0].playing:
                 pass
 
 
-### STEMMA Speaker audio mixer setup
-sample_player = SamplePlayer(AudioOut, (board.TX,))
-
-
-
+### This can play back audio samples from wav files
+### using PWM audio for Adafruit STEMMA Speaker
+### or I2S for AD MAX98357A based boards
+sample_player = SamplePlayer(I2SOut if AUDIO_OUTPUT == "I2S" else PWMAudioOut,
+                             [getattr(board, pn) for pn in AUDIO_PIN_NAMES],
+                             channel_count=AUDIO_CHANNEL_COUNT)
 
 effect_idx = 3
 ### (sound, visual)
@@ -299,7 +340,7 @@ EFFECTS = ((False, False),
            (True, True))  ### value at start-up
 
 def next_effect_mode(e_idx=None):
-    global effect_idx
+    global effect_idx  ### pylint: disable=global-statement
     if e_idx is None:
         effect_idx = (effect_idx + 1) % len(EFFECTS)
     else:
