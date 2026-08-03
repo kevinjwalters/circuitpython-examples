@@ -1,4 +1,4 @@
-### adctest-sg v1.0
+### mcp4728-ads1115-test v1.0
 ### Test MCP4728 DAC against an ADS1115
 
 ### Tested on Cytron Maker Nano 2040 with Adafruit MCP4728 boards via ISO1540 isolator board
@@ -32,6 +32,9 @@
 
 ### The DAC needs to be powered with a very stable power source for
 ### good accuracy
+
+### See https://www.instructables.com/MCP4728-DAC-Accuracy-DNL-INL-Using-ADS1115-ADC
+### for more information
 
 
 import gc
@@ -174,14 +177,15 @@ def test_adc(dac,
              runs=1,
              remote=True,
              reset_value=0):
+    adc_sample_rate = ADS1115_RATE
     if adc_mode == "C":
         sample_mode = ads1x15.Mode.CONTINUOUS
-        ads1115_wait = 2 / sample_rate
+        ads1115_wait = 2 / adc_sample_rate
     else:
         sample_mode = ads1x15.Mode.SINGLE
         ads1115_wait = 0
     ### 2/3 gain required for up to 6.144V measurements
-    ads1115 = ADS1115(i2c, data_rate=ADS1115_RATE, mode=sample_mode, gain=2/3)
+    ads1115 = ADS1115(i2c, data_rate=adc_sample_rate, mode=sample_mode, gain=2/3)
     ads1115_chan = ADSAnalogIn(ads1115, adc_pin)
 
     dac_chan = getattr(dac, "channel_" + dac_pin.lower())
