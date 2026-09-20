@@ -87,6 +87,7 @@ DAC_IMPEDANCE = 1   ### only at low currents!
 ### Board Under Test
 BUT_ADC_OVER_V = 0.1   ### the voltage to go beyond ADC detected maximum
 
+NOISE_TEST_RUNS = 5
 ADC_NOISE_SAMPLES = 200
 NOISE_VOLTAGES = (0.0, 0.050, 0.1, 0.2, 0.3, 0.4, 0.5, 0.60, 0.65, 0.70,
                   1.0, 1.225, 1.650,
@@ -884,7 +885,6 @@ if verylow_test:
 
 
 ### Noise test
-NOISE_TEST_RUNS = 5
 noise_test = True
 if noise_test:
     test_idx = 6
