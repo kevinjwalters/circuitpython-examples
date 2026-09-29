@@ -5,8 +5,9 @@ import analogio
 import board
 import busio
 import digitalio
+BLOCKING = True
 SOFTWARE_NAME = "ana-dig-reader"
-SOFTWARE_VERSION = "1.4"
+SOFTWARE_VERSION = "1.5"
 LED_ON = True
 LED_OFF = False
 sysname = os.uname().sysname
@@ -54,6 +55,7 @@ if LED_BUILTIN_PIN is not None:
 else:
     led_builtin = None
 SERIAL_BAUDRATE = 38400
+TX_BYTE_NS = 1_000_000_000 * (1 + 8 + 1) // SERIAL_BAUDRATE
 CMD_READ_TIMEOUT_S = 1.0
 serial = busio.UART(tx=SERIAL_TX_PIN, rx=SERIAL_RX_PIN,
                     baudrate=SERIAL_BAUDRATE,
@@ -83,6 +85,14 @@ def flash(f_count):
             time.sleep(0.3)
             led_builtin.value = LED_OFF
             time.sleep(0.3)
+def serial_write(buf, block=BLOCKING):
+    if block:
+        
+        serial.write(buf)
+        delay_ns = TX_BYTE_NS * len(buf)
+        time.sleep(delay_ns / 1e9)
+    else:
+        serial.write(buf)
 flash(2)
 one_byte_buf = bytearray(1)
 while True:
@@ -108,8 +118,8 @@ while True:
                 
                 if count > 0:
                     for _ in range(count - 1):
-                        serial.write(str_to_bytes(f"{get_sample_analogue(gpio, iqrmean=False) >> SHIFT_BITS} "))
-                    serial.write(str_to_bytes(f"{get_sample_analogue(gpio, iqrmean=False) >> SHIFT_BITS}\n"))
+                        serial_write(str_to_bytes(f"{get_sample_analogue(gpio, iqrmean=False) >> SHIFT_BITS:05d} "))
+                    serial_write(str_to_bytes(f"{get_sample_analogue(gpio, iqrmean=False) >> SHIFT_BITS:05d}\n"))
                 else:
                     value = ""
         elif cmd == INFO_CMD:
@@ -124,4 +134,4 @@ while True:
         elif len(cmd) > 0:
             value = ""
         if value is not None:
-            serial.write(str_to_bytes(f"{value}\n"))
+            serial_write(str_to_bytes(f"{value}\n"))

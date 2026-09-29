@@ -1,4 +1,4 @@
-### ana-dig-reader v1.4
+### ana-dig-reader v1.5
 ### Respond to simple serial commands with digital or analogue gpio
 
 ### Tested on Pi Pico running CircuitPython 10.2.1
@@ -64,11 +64,14 @@ import busio
 import digitalio
 
 
+BLOCKING = True
+
 SOFTWARE_NAME = "ana-dig-reader"
-SOFTWARE_VERSION = "1.4"
+SOFTWARE_VERSION = "1.5"
 
 LED_ON = True
 LED_OFF = False
+
 
 ### TX pin must be even-numbered on RPxxxx
 sysname = os.uname().sysname
@@ -161,6 +164,7 @@ else:
 
 
 SERIAL_BAUDRATE = 38400
+TX_BYTE_NS = 1_000_000_000 * (1 + 8 + 1) // SERIAL_BAUDRATE
 CMD_READ_TIMEOUT_S = 1.0
 
 
@@ -234,6 +238,25 @@ def flash(f_count):
             led_builtin.value = LED_OFF
             time.sleep(0.3)
 
+
+def serial_write(buf, block=BLOCKING):
+    if block:
+        ### https://github.com/adafruit/circuitpython/issues/1770
+#S# BEGIN
+        tx_start_ns = time.monotonic_ns()
+#S# END
+        serial.write(buf)
+        delay_ns = TX_BYTE_NS * len(buf)
+#S# BEGIN
+        tx_end_ns = tx_start_ns + delay_ns
+        while time.monotonic_ns() < tx_end_ns:
+            pass
+#I#        time.sleep(delay_ns / 1e9)
+#S# END
+    else:
+        serial.write(buf)
+
+
 flash(2)
 one_byte_buf = bytearray(1)
 #S# BEGIN
@@ -268,8 +291,8 @@ while True:
                 ### causes MemoryError on SAMD21
                 if count > 0:
                     for _ in range(count - 1):
-                        serial.write(str_to_bytes(f"{get_sample_analogue(gpio, iqrmean=False) >> SHIFT_BITS} "))
-                    serial.write(str_to_bytes(f"{get_sample_analogue(gpio, iqrmean=False) >> SHIFT_BITS}\n"))
+                        serial_write(str_to_bytes(f"{get_sample_analogue(gpio, iqrmean=False) >> SHIFT_BITS:05d} "))
+                    serial_write(str_to_bytes(f"{get_sample_analogue(gpio, iqrmean=False) >> SHIFT_BITS:05d}\n"))
                 else:
                     value = ""
 #S# BEGIN
@@ -290,8 +313,8 @@ while True:
                 count = one_byte_buf[0] - COUNT_OFFSET
                 if count > 0:
                     for _ in range(count - 1):
-                        serial.write(str_to_bytes(f"{get_digital(gpio)} "))
-                    serial.write(str_to_bytes(f"{get_digital(gpio)}\n"))
+                        serial_write(str_to_bytes(f"{get_digital(gpio)} "))
+                    serial_write(str_to_bytes(f"{get_digital(gpio)}\n"))
                 else:
                     value = ""
 #S# END
@@ -308,4 +331,4 @@ while True:
             value = ""
 
         if value is not None:
-            serial.write(str_to_bytes(f"{value}\n"))
+            serial_write(str_to_bytes(f"{value}\n"))
